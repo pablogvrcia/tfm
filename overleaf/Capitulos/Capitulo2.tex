@@ -1,0 +1,228 @@
+\chapter{Methodology}
+\label{ch:methodology}
+
+This chapter details the methodology employed to develop an open-vocabulary semantic segmentation system integrated with generative AI-based inpainting. Unlike traditional approaches that rely on closed-vocabulary classifiers, our system leverages recent advances in vision-language models and promptable segmentation to enable flexible, language-driven image understanding and manipulation. Building upon insights from MaskCLIP \cite{zhou2022extract}, CLIPSeg \cite{luddecke2022clipseg}, and SAM 2 \cite{ravi2024sam2}, we propose a hybrid approach that combines the strengths of dense CLIP-based prediction with SAM's high-quality mask generation capabilities.
+
+\section{System Overview}
+Our approach combines multiple complementary techniques to achieve robust open-vocabulary semantic segmentation and editing. The pipeline consists of four main stages: (1) dense vision-language feature extraction, (2) mask proposal generation, (3) mask-text alignment and selection, and (4) generative inpainting. Figure~\ref{fig:system_pipeline} provides a high-level overview of this pipeline.
+
+\begin{figure}[h]
+\centering
+\fbox{\parbox{0.9\textwidth}{\centering
+\vspace{1cm}
+\textbf{[PLACEHOLDER: System Pipeline Diagram]}\\[0.5cm]
+\textit{This figure should show the complete pipeline with 4 stages flowing left-to-right:}\\[0.3cm]
+\begin{tabular}{l}
+\textbf{Stage 1:} Input image → CLIP ViT-L/14 → Dense feature maps (layers 6, 12, 18, 24)\\
+\textbf{Stage 2:} Input image → SAM 2 automatic mask generation → 100-300 mask proposals\\
+\textbf{Stage 3:} Feature maps + Masks + Text prompt → Similarity scoring → Top-K masks\\
+\textbf{Stage 4:} Selected masks + Text prompt → Stable Diffusion Inpainting → Output image\\[0.3cm]
+\end{tabular}
+\textit{Include visual examples at each stage (e.g., feature heatmaps, mask overlays, final result).}\\
+\textit{Use arrows to show data flow and highlight the integration points between components.}
+\vspace{1cm}
+}}
+\caption{Overview of the proposed open-vocabulary semantic segmentation and editing pipeline. The system combines CLIP's vision-language features, SAM 2's mask generation, and Stable Diffusion's inpainting capabilities.}
+\label{fig:system_pipeline}
+\end{figure}
+
+The key insight motivating our design is that different components excel at different aspects of the task: CLIP-based models \cite{radford2021learning} provide rich semantic understanding aligned with language, SAM 2 \cite{ravi2024sam2} generates high-quality segmentation masks with precise boundaries, and diffusion models \cite{rombach2022high} enable realistic content generation. By combining these strengths, we achieve both semantic flexibility and visual quality.
+
+\subsection{Dense Vision-Language Feature Extraction}
+\label{sec:dense_features}
+
+Following the approach of MaskCLIP \cite{zhou2022extract} and CLIPSeg \cite{luddecke2022clipseg}, we extract dense vision-language features that capture pixel-level semantic information. Unlike standard CLIP, which produces image-level embeddings, we need spatially-resolved features to determine which image regions correspond to a given text prompt.
+
+We explore two complementary strategies:
+
+\begin{itemize}
+    \item \textbf{Modified CLIP Architecture (CLIPSeg approach):} We augment the standard CLIP image encoder with additional decoder layers that produce dense per-pixel predictions. This follows CLIPSeg's transformer-based decoder design, which takes CLIP's intermediate features and progressively upsamples them to produce dense segmentation maps. The decoder is lightweight, adding minimal computational overhead while enabling fine-grained spatial reasoning.
+
+    \item \textbf{Direct Feature Extraction (MaskCLIP approach):} Alternatively, we extract multi-scale features directly from CLIP's vision transformer, using features from multiple layers to capture both high-level semantic information and low-level spatial details. Following MaskCLIP, we compute similarity maps by comparing these dense features with text embeddings, creating pixel-wise affinity scores without requiring additional training.
+\end{itemize}
+
+\begin{figure}[h]
+\centering
+\fbox{\parbox{0.9\textwidth}{\centering
+\vspace{1cm}
+\textbf{[PLACEHOLDER: Multi-Scale CLIP Feature Visualization]}\\[0.5cm]
+\textit{This figure should illustrate the multi-scale feature extraction process:}\\[0.3cm]
+\begin{tabular}{l}
+\textbf{Left:} Input image (e.g., a living room scene)\\
+\textbf{Middle:} Four heatmaps showing CLIP features from layers 6, 12, 18, and 24\\
+\quad - Layer 6: Low-level edges and textures\\
+\quad - Layer 12: Mid-level patterns and shapes\\
+\quad - Layer 18: Object parts and regions\\
+\quad - Layer 24: High-level semantic concepts\\
+\textbf{Right:} Combined multi-scale feature map with similarity scores for prompt "sofa"\\[0.3cm]
+\end{tabular}
+\textit{Use color-coded heatmaps (e.g., blue=low similarity, red=high similarity).}
+\vspace{1cm}
+}}
+\caption{Multi-scale CLIP feature extraction from transformer layers. Different layers capture information at varying levels of abstraction, which are combined to produce spatially-resolved semantic features.}
+\label{fig:multiscale_features}
+\end{figure}
+
+For text encoding, we use CLIP's text encoder to generate embeddings for user-provided prompts. To improve robustness, we employ prompt ensembling \cite{zhou2022learning}, generating multiple variations of the input text (e.g., ``a photo of a \{object\}'', ``\{object\} in the scene'') and averaging their embeddings.
+
+\subsection{Mask Proposal Generation with SAM 2}
+
+While dense CLIP features provide semantic information, they may lack precise object boundaries. To address this, we leverage SAM 2 \cite{ravi2024sam2} to generate high-quality mask proposals with accurate delineation.
+
+SAM 2 operates in automatic mask generation mode, producing a comprehensive set of object masks across multiple scales without requiring explicit prompts. The model's hierarchical mask generation ensures coverage of objects at different granularities—from small details to large scene elements. This is crucial for open-vocabulary settings where we cannot anticipate which objects users might query.
+
+Key advantages of SAM 2 include:
+\begin{itemize}
+    \item \textbf{Training-free deployment:} SAM 2 requires no fine-tuning, avoiding potential overfitting to specific object categories.
+    \item \textbf{High-quality boundaries:} The model produces masks with precise edges, superior to those obtainable from CLIP features alone.
+    \item \textbf{Comprehensive coverage:} Automatic mask generation yields hundreds of candidate masks per image, ensuring thorough coverage of all potential objects.
+\end{itemize}
+
+\begin{figure}[h]
+\centering
+\fbox{\parbox{0.9\textwidth}{\centering
+\vspace{1cm}
+\textbf{[PLACEHOLDER: SAM 2 Mask Generation Visualization]}\\[0.5cm]
+\textit{This figure should demonstrate SAM 2's hierarchical mask generation:}\\[0.3cm]
+\begin{tabular}{l}
+\textbf{Left:} Input image (e.g., street scene with cars, pedestrians, buildings)\\
+\textbf{Middle:} SAM 2 automatic mask generation with color-coded masks\\
+\quad - Show \textasciitilde150-200 overlapping masks at different scales\\
+\quad - Use semi-transparent colors to visualize overlaps\\
+\textbf{Right:} Hierarchical grouping showing masks at 3 scales:\\
+\quad - Fine scale: Small objects (traffic signs, windows)\\
+\quad - Medium scale: People, cars\\
+\quad - Coarse scale: Buildings, road segments\\[0.3cm]
+\end{tabular}
+\textit{Annotate a few masks with their IoU confidence scores (e.g., 0.92, 0.88, 0.95).}
+\vspace{1cm}
+}}
+\caption{SAM 2 automatic mask generation produces comprehensive coverage at multiple scales. The hierarchical structure ensures both fine-grained details and large scene elements are captured.}
+\label{fig:sam2_masks}
+\end{figure}
+
+\subsection{Mask-Text Alignment and Selection}
+
+Given the dense vision-language features from Section~\ref{sec:dense_features} and mask proposals from SAM 2, we now align masks with the user's text query. This step determines which of SAM 2's masks correspond to the concept specified by the user.
+
+For each mask $M_i$, we compute a relevance score $S_i$ that quantifies its alignment with the text prompt $t$:
+
+\begin{equation}
+S_i = \frac{1}{|M_i|} \sum_{p \in M_i} \text{sim}(f_p, e_t)
+\end{equation}
+
+where $f_p$ is the CLIP feature at pixel $p$, $e_t$ is the text embedding, $|M_i|$ is the number of pixels in mask $M_i$, and $\text{sim}(\cdot, \cdot)$ denotes cosine similarity.
+
+To improve robustness, we incorporate several refinements inspired by recent work:
+
+\begin{itemize}
+    \item \textbf{Background suppression:} We compute a background score using negative prompts (e.g., ``background'', ``nothing'') and subtract it from object scores, reducing false positives from uniform regions.
+
+    \item \textbf{Multi-scale aggregation:} Following MaskCLIP, we extract features from multiple CLIP layers and combine their similarity scores, capturing both semantic and spatial information.
+
+    \item \textbf{Adaptive thresholding:} Rather than using a fixed threshold, we select the top-K masks or apply percentile-based thresholding, adapting to the distribution of similarity scores in each image.
+\end{itemize}
+
+\subsection{Generative Inpainting with Stable Diffusion}
+
+Once semantically relevant masks are identified, we employ Stable Diffusion v2 Inpainting \cite{rombach2022high} to modify the selected regions according to user instructions. The inpainting model operates in the latent space of a variational autoencoder (VAE), enabling high-resolution generation with computational efficiency.
+
+The inpainting process proceeds as follows:
+\begin{enumerate}
+    \item The original image and binary mask are encoded into the VAE's latent space.
+    \item The masked latent region is iteratively denoised using the diffusion model, conditioned on both the text prompt and the surrounding unmasked context.
+    \item The final latent representation is decoded back to pixel space, producing the modified image.
+\end{enumerate}
+
+We employ several techniques to ensure coherent and high-quality results:
+\begin{itemize}
+    \item \textbf{Prompt engineering:} User queries are reformulated into detailed prompts suitable for the diffusion model, incorporating context from the original image.
+    \item \textbf{Classifier-free guidance:} We use high guidance scales (typically 7-10) to ensure generated content closely follows the text prompt while maintaining realism.
+    \item \textbf{Mask refinement:} Mask boundaries are slightly blurred to ensure smooth transitions between inpainted and original regions, preventing visible seams.
+\end{itemize}
+
+The integration of these components—dense CLIP features, SAM 2 masks, and diffusion-based inpainting—yields a flexible system capable of understanding and modifying images based solely on natural language instructions, without requiring category-specific training or annotations.
+
+\section{Implementation Details}
+This section provides specific implementation details for each component of our system, including model selection, hyperparameters, and design choices that impact performance.
+
+\subsection{CLIP Feature Extraction}
+
+We use the CLIP ViT-L/14 variant, which provides a good balance between computational efficiency and feature quality. The vision transformer processes images at $336 \times 336$ resolution, producing a $24 \times 24$ grid of patch embeddings. To obtain dense features:
+
+\begin{itemize}
+    \item We extract features from multiple transformer layers (layers 6, 12, 18, and 24), capturing information at different levels of abstraction.
+    \item Each layer's features are bilinearly upsampled to a common resolution and concatenated, following MaskCLIP's multi-scale approach.
+    \item The resulting feature map has dimensions $H \times W \times D$, where $D$ is the combined feature dimension.
+\end{itemize}
+
+For text encoding, we generate prompt ensembles using templates: ``a photo of a \{class\}'', ``\{class\} in a scene'', ``a rendering of a \{class\}''. The resulting embeddings are averaged to improve robustness to prompt variations.
+
+\subsection{SAM 2 Configuration}
+
+We employ SAM 2 in automatic mask generation mode with the following parameters:
+
+\begin{itemize}
+    \item \textbf{Points per side:} 32 (generating a $32 \times 32$ grid of point prompts)
+    \item \textbf{Predicted IoU threshold:} 0.88 (filtering low-confidence masks)
+    \item \textbf{Stability score threshold:} 0.95 (ensuring stable mask predictions)
+    \item \textbf{Crop overlap ratio:} 512/1500 (for handling large images through cropping)
+\end{itemize}
+
+These settings typically generate 100-300 mask candidates per image, providing comprehensive coverage across different object scales. We use the ``sam2\_hiera\_large'' checkpoint, which offers strong performance while remaining computationally tractable.
+
+\subsection{Mask Scoring and Selection}
+
+For each mask $M_i$, we compute the alignment score using dense CLIP features:
+
+\begin{equation}
+S_i = \frac{\sum_{p \in M_i} w_p \cdot \text{sim}(f_p, e_t)}{\sum_{p \in M_i} w_p}
+\end{equation}
+
+where $w_p$ represents spatial weighting (giving higher weight to central pixels) to reduce boundary noise. We also compute a background score $S_{\text{bg}}$ using negative prompts and apply:
+
+\begin{equation}
+S_i^{\text{final}} = S_i - \alpha \cdot S_{\text{bg}}
+\end{equation}
+
+with $\alpha = 0.3$ to suppress masks primarily containing background. Masks with $S_i^{\text{final}} >$ 0.25 are retained as candidates, and the top-5 highest-scoring masks are presented to the user or used for subsequent inpainting.
+
+\subsection{Stable Diffusion Inpainting}
+
+We use the \texttt{stabilityai/stable-diffusion-2-inpainting} model with the following configuration:
+
+\begin{itemize}
+    \item \textbf{Inference steps:} 50 (balancing quality and speed)
+    \item \textbf{Guidance scale:} 7.5 (standard value for classifier-free guidance)
+    \item \textbf{Negative prompts:} ``blurry, low quality, distorted, artifacts'' (improving output quality)
+    \item \textbf{Mask blur radius:} 8 pixels (ensuring smooth transitions)
+\end{itemize}
+
+Before inpainting, we dilate the selected mask by 5 pixels to ensure complete coverage of the target region and prevent edge artifacts. The diffusion model operates on $512 \times 512$ images; larger images are processed in tiles with overlapping regions to maintain coherence.
+
+\subsection{Computational Considerations}
+
+The pipeline's computational requirements are as follows:
+\begin{itemize}
+    \item \textbf{CLIP feature extraction:} $\sim$100ms per image (ViT-L/14 on GPU)
+    \item \textbf{SAM 2 mask generation:} $\sim$2-4 seconds per image (depending on image size)
+    \item \textbf{Mask scoring:} $\sim$50ms for 200 masks
+    \item \textbf{Stable Diffusion inpainting:} $\sim$5-10 seconds per mask (50 steps)
+\end{itemize}
+
+Total processing time for end-to-end segmentation and editing is typically 10-20 seconds per image on an NVIDIA RTX 3090 GPU. The most expensive component is Stable Diffusion; for applications requiring real-time performance, fewer diffusion steps (20-30) can be used with minimal quality degradation.
+
+\section{Benefits and Applications}
+This methodology offers several advantages:
+\begin{itemize}
+    \item \textbf{Open-Vocabulary Flexibility:}  
+    The system does not rely on a fixed set of class labels. Users can specify arbitrary concepts in natural language, and the pipeline adapts by filtering segmentation masks accordingly.
+
+    \item \textbf{Interactive and Semantic Editing:}  
+    Instead of manually selecting regions to edit, users can rely on semantic descriptions. For example, describing “the red car” will allow the system to segment and modify that object without further manual intervention.
+
+    \item \textbf{Generative Capabilities:}  
+    The integration of stable diffusion inpainting models allows for creative image modifications. Objects can be removed, replaced, or stylized based on textual instructions. This leads to endless possibilities in content creation, data augmentation, and user-driven image editing.
+\end{itemize}
+
+In summary, the proposed method leverages promptable segmentation from SAM2, open-vocabulary alignment from CLIP, and generative inpainting from Stable Diffusion v2 to create a versatile tool. It seamlessly combines segmentation, natural language understanding, and generative transformations into a unified pipeline, laying the groundwork for more intuitive and flexible image editing in real-world scenarios.

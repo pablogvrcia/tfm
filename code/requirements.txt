@@ -1,0 +1,30 @@
+# Core dependencies
+torch>=2.0.0
+torchvision>=0.15.0
+numpy>=1.24.0
+opencv-python>=4.8.0
+Pillow>=10.0.0
+
+# CLIP
+open-clip-torch>=2.20.0
+
+# SAM 2
+# Install from: https://github.com/facebookresearch/segment-anything-2
+# pip install git+https://github.com/facebookresearch/segment-anything-2.git
+segment-anything-2
+
+# Stable Diffusion
+diffusers>=0.21.0
+transformers>=4.30.0
+accelerate>=0.20.0
+xformers>=0.0.20  # Optional, for faster inference
+
+# Utilities
+scikit-image>=0.21.0
+matplotlib>=3.7.0
+tqdm>=4.65.0
+
+# Development
+pytest>=7.4.0
+black>=23.7.0
+flake8>=6.1.0

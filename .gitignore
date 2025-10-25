@@ -1,0 +1,54 @@
+# LaTeX build artifacts
+*.aux
+*.log
+*.out
+*.toc
+*.bbl
+*.blg
+*.fdb_latexmk
+*.fls
+*.synctex.gz
+*.bcf
+*.run.xml
+*.lof
+*.lot
+*.idx
+*.ilg
+*.ind
+
+# Build directory
+overleaf/build/
+
+# Generated PDFs (keep the final one)
+Master_Thesis.pdf
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+*.egg-info/
+
+# OS files
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+
+# IDEs
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# Docker
+.docker/
+
+# Temporary files
+*.tmp
+*.temp
+*.bak

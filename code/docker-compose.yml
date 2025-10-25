@@ -1,0 +1,86 @@
+version: '3.8'
+
+services:
+  # Main application service
+  segmentation:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: openvocab-segmentation:latest
+    container_name: openvocab-pipeline
+
+    # GPU support (requires nvidia-docker)
+    runtime: nvidia
+
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+      - CUDA_VISIBLE_DEVICES=0
+
+    # Volume mounts
+    volumes:
+      # Input images
+      - ./input:/app/input:ro
+
+      # Output directory
+      - ./output:/app/output:rw
+
+      # Model cache (persistent across runs)
+      - model-cache:/app/models_cache:rw
+
+      # Optional: mount code for development
+      # - ./models:/app/models:ro
+      # - ./pipeline.py:/app/pipeline.py:ro
+      # - ./config.py:/app/config.py:ro
+
+    # Memory limits (adjust based on your GPU)
+    deploy:
+      resources:
+        limits:
+          memory: 16G
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+    # Keep container running
+    stdin_open: true
+    tty: true
+
+    # Default command
+    command: /bin/bash
+
+  # CPU-only version (for testing without GPU)
+  segmentation-cpu:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: openvocab-segmentation:cpu
+    container_name: openvocab-pipeline-cpu
+
+    environment:
+      - CUDA_VISIBLE_DEVICES=""
+
+    volumes:
+      - ./input:/app/input:ro
+      - ./output:/app/output:rw
+      - model-cache:/app/models_cache:rw
+
+    deploy:
+      resources:
+        limits:
+          memory: 16G
+          cpus: '8'
+
+    stdin_open: true
+    tty: true
+    command: /bin/bash
+
+    profiles:
+      - cpu
+
+# Named volumes
+volumes:
+  model-cache:
+    driver: local

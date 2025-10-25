@@ -1,0 +1,91 @@
+\chapter{Introduction}
+\pagenumbering{arabic}
+
+\section{Motivation}
+
+The field of computer vision has witnessed remarkable progress in semantic segmentation, enabling machines to understand and interpret visual scenes by assigning semantic labels to individual pixels. However, traditional semantic segmentation models are often constrained by a closed vocabulary, meaning they can only recognize objects or concepts explicitly present in their training data. This limitation hinders their applicability in real-world scenarios where novel objects and concepts are frequently encountered. Imagine a self-driving car trained to recognize "car," "pedestrian," and "traffic light." It might fail to identify a "scooter" or a "delivery robot," potentially leading to hazardous situations.
+
+This inherent limitation of closed-vocabulary models has fueled the exploration of open-vocabulary semantic segmentation. Open-vocabulary approaches aim to bridge the gap between visual perception and human language by leveraging the power of natural language processing and generative AI. By integrating language models like CLIP \cite{radford2021learning}, which learn to represent both text and images in a shared embedding space, these systems can interpret natural language descriptions and segment objects or concepts not seen during training. For instance, the system could understand the description "a person walking a dog" and accurately segment both the person and the dog, even if it has never encountered this specific combination before.
+
+Furthermore, the integration of generative AI models, such as Stable Diffusion \cite{rombach2022high}, allows for realistic modification of images based on the segmented objects. This capability opens up exciting possibilities in various applications. In image editing, users could describe desired changes ("make the sky blue" or "add a hat to the person"), and the system would automatically modify the image accordingly. In content creation, artists and designers could generate novel scenes by combining segmented objects from different images or by generating new objects based on textual descriptions. The potential applications are vast and span across diverse domains, including human-computer interaction, augmented reality, and robotics.
+
+\begin{figure}[h]
+\centering
+\fbox{\parbox{0.9\textwidth}{\centering
+\vspace{1cm}
+\textbf{[PLACEHOLDER: System Overview Concept]}\\[0.5cm]
+\textit{This figure should illustrate the complete capability of the proposed system:}\\[0.3cm]
+\begin{tabular}{l}
+\textbf{Show 3 example scenarios in a vertical layout:}\\[0.2cm]
+\textbf{Scenario 1 - Zero-Shot Segmentation:}\\
+\quad Input image (living room) + Text: "vintage lamp on side table"\\
+\quad → System segments lamp (never seen during training)\\
+\quad → Highlighted mask overlay showing successful segmentation\\[0.2cm]
+\textbf{Scenario 2 - Object Removal:}\\
+\quad Same input + Text: "remove the lamp"\\
+\quad → System segments lamp → Inpaints background naturally\\
+\quad → Output: Lamp removed, table surface filled realistically\\[0.2cm]
+\textbf{Scenario 3 - Object Replacement:}\\
+\quad Same input + Text: "replace lamp with modern floor lamp"\\
+\quad → System segments old lamp → Generates new lamp via Stable Diffusion\\
+\quad → Output: Modern lamp in place, matching lighting and style\\[0.3cm]
+\end{tabular}
+\textit{Use arrows between steps and annotations highlighting key capabilities:}\\
+\textit{- "Open-Vocabulary" - "Zero-Shot" - "Natural Language" - "Realistic Generation"}\\
+\textit{Include small icons representing SAM 2, CLIP, and Stable Diffusion at relevant stages.}
+\vspace{1cm}
+}}
+\caption{Overview of the proposed open-vocabulary semantic segmentation and generative editing system. The system combines vision-language understanding (CLIP), precise segmentation (SAM 2), and realistic generation (Stable Diffusion) to enable flexible, language-driven image manipulation.}
+\label{fig:system_overview}
+\end{figure}
+
+\section{Problem Statement}
+
+This thesis tackles the challenge of developing an open-vocabulary semantic segmentation system that seamlessly integrates with a generative AI model. The system aims to overcome the limitations of traditional closed-vocabulary methods by achieving the following objectives:
+
+\begin{itemize}
+\item \textbf{Segmenting unseen objects and concepts:} The system should accurately segment objects and concepts that were not explicitly present in the training data, enabling it to generalize to novel scenarios and handle a wider range of visual inputs. This objective is crucial for real-world applications where encountering unseen objects is inevitable. For instance, a robot navigating a cluttered environment should be able to segment and identify various objects, even if it has not been explicitly trained on them.
+\item \textbf{Interpreting natural language descriptions:} The system should be able to understand and interpret natural language descriptions, allowing users to specify the objects or concepts they want to segment using human-readable language. This objective enhances the user-friendliness and flexibility of the system. Instead of relying on predefined categories or labels, users can express their segmentation intentions in natural language, making the system more intuitive and accessible.
+\item \textbf{Realistically modifying images:} The system should seamlessly integrate with a generative AI model to modify images based on the segmented objects. This capability enables realistic inpainting \cite{yu2018generative}, object manipulation, and other creative applications. By combining the segmentation output with the generative power of AI models, the system can realistically fill in missing parts of an image, replace objects with different ones, or even generate entirely new objects based on textual descriptions.
+\end{itemize}
+
+
+\section{Contribution}
+
+This thesis makes the following key contributions:
+
+\begin{itemize}
+\item \textbf{Development of an open-vocabulary semantic segmentation system:} A novel system is developed that combines the strengths of language models, segmentation models, and generative AI models to achieve open-vocabulary semantic segmentation. This system represents a significant advancement in the field, pushing the boundaries of semantic segmentation beyond the limitations of closed vocabulary approaches, drawing inspiration from works like \cite{ghiasi2022open}.
+\item \textbf{Integration with a generative AI model:} The segmentation system is seamlessly integrated with a generative AI model, enabling realistic image modification based on natural language descriptions. This integration allows for creative applications such as inpainting, object manipulation, and style transfer. By combining the precise segmentation capabilities of the system with the generative power of AI models, users can realistically modify images in ways that were previously impossible.
+\item \textbf{Evaluation on benchmark datasets:} The system's performance is rigorously evaluated on benchmark datasets, demonstrating its effectiveness in handling open vocabulary and complex natural language descriptions. The evaluation includes quantitative and qualitative analysis, comparing the system's performance to existing methods and highlighting its strengths and limitations. This thorough evaluation provides valuable insights into the system's capabilities and its potential for real-world applications.
+\item \textbf{Insights into challenges and opportunities:} The thesis provides valuable insights into the challenges and opportunities associated with integrating open-vocabulary semantic segmentation with generative AI models. This includes discussions on the limitations of current methods, potential areas for improvement, and future research directions. By analyzing the challenges and opportunities in this emerging field, the thesis contributes to the advancement of open-vocabulary semantic segmentation and its integration with generative AI.
+\end{itemize}
+
+\section{Thesis Structure}
+
+The remainder of this thesis is structured as follows:
+
+\begin{itemize}
+\item \textbf{Chapter 2 (Background and Related Work):} Provides a comprehensive review of the relevant background literature, laying the foundation for the research presented in this thesis. This chapter covers the following key areas:
+\begin{itemize}
+\item \textbf{Semantic Segmentation:} Explores the fundamentals of semantic segmentation, including different architectures (e.g., encoder-decoder, fully convolutional networks), commonly used datasets (e.g., COCO, PASCAL VOC), and traditional closed-vocabulary approaches. It also discusses the limitations of existing methods in handling open vocabulary and natural language input.
+\item \textbf{Language Models for Vision:} Provides an in-depth analysis of CLIP \cite{radford2021learning} and its ability to connect text and images in a shared embedding space. It explores alternative language models, such as ALIGN, and compares their strengths and weaknesses in the context of open-vocabulary semantic segmentation.
+\item \textbf{Mask Generation Models:} Discusses SAM \cite{kirillov2023segment} and SAM 2 \cite{ravi2024sam2} and their zero-shot segmentation capabilities. It analyzes other relevant mask generation models, such as Mask2Former \cite{cheng2022mask2former}, comparing their architectures and performance characteristics.
+\item \textbf{Generative AI Models for Inpainting:} Reviews inpainting techniques and discusses suitable generative models, such as Stable Diffusion \cite{rombach2022high} and LaMa. It explains how these models can be integrated with a segmentation system to achieve realistic image modification.
+\end{itemize}
+
+\item \textbf{Chapter 3 (Methodology):} Details the methodology employed in this thesis, providing a comprehensive description of the proposed open-vocabulary semantic segmentation system. This chapter covers the following aspects:
+\begin{itemize}
+\item \textbf{System Architecture:} Presents a detailed overview of the system's architecture, including the integration of CLIP for language processing, SAM2 for mask generation, and a generative AI model for inpainting. It explains how these components interact to achieve open-vocabulary segmentation and image modification.
+\item \textbf{Implementation Details:} Provides specific implementation details, such as the choice of CLIP and SAM2 variants, hyperparameter settings for each component, and the software libraries and hardware used for development and evaluation.
+\end{itemize}
+
+\item \textbf{Chapter 4 (Experiments and Evaluation):} Presents the experimental setup and results, demonstrating the effectiveness of the proposed system. This chapter includes:
+\begin{itemize}
+\item \textbf{Dataset Selection:} Describes the datasets used for evaluating the system, justifying their selection based on their suitability for open-vocabulary and zero-shot learning. It considers including specialized datasets and potentially creating a custom dataset for specific scenarios.
+\item \textbf{Evaluation Metrics:} Defines the metrics used to evaluate both the segmentation and generation aspects of the system. It explains how these metrics measure accuracy, quality, and efficiency, ensuring a comprehensive evaluation of the system's performance.
+\item \textbf{Results and Analysis:} Presents the experimental results, including quantitative and qualitative analysis. It compares the system's performance to existing methods, discussing its strengths and limitations in detail.
+\end{itemize}
+
+\item \textbf{Chapter 5 (Conclusions and Future Work):} Concludes the thesis by summarizing the key contributions, discussing the limitations of the current system, and outlining potential future research directions. This chapter provides a concluding perspective on the research presented in the thesis and suggests avenues for further exploration and development in the field of open-vocabulary semantic segmentation.
+\end{itemize}

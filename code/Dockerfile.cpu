@@ -1,0 +1,64 @@
+# CPU-only Dockerfile for Open-Vocabulary Segmentation Pipeline
+# Lighter, faster build, works without GPU
+
+FROM ubuntu:22.04
+
+# Set environment variables
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    python3.10 \
+    python3-pip \
+    python3-dev \
+    git \
+    wget \
+    libgl1-mesa-glx \
+    libglib2.0-0 \
+    libsm6 \
+    libxext6 \
+    libxrender-dev \
+    libgomp1 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create working directory
+WORKDIR /app
+
+# Copy requirements
+COPY requirements-cpu.txt .
+
+# Install PyTorch CPU-only (much smaller)
+RUN pip3 install --upgrade pip setuptools wheel && \
+    pip3 install torch torchvision --index-url https://download.pytorch.org/whl/cpu && \
+    pip3 install -r requirements-cpu.txt
+
+# Copy application code
+COPY models/ ./models/
+COPY examples/ ./examples/
+COPY pipeline.py .
+COPY config.py .
+COPY utils.py .
+COPY main.py .
+COPY test_cpu.py .
+COPY README.md .
+
+# Create directories
+RUN mkdir -p /app/models_cache /app/output /app/input
+
+# Set cache directory
+ENV HF_HOME=/app/models_cache \
+    TRANSFORMERS_CACHE=/app/models_cache \
+    TORCH_HOME=/app/models_cache
+
+# Default device is CPU
+ENV CUDA_VISIBLE_DEVICES=""
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD python3 -c "import torch; print('PyTorch OK')" || exit 1
+
+# Default command
+CMD ["/bin/bash"]
