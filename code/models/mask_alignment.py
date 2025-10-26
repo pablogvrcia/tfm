@@ -135,6 +135,12 @@ class MaskTextAligner:
                     mask_embedding.unsqueeze(0),
                     bg_embedding.unsqueeze(0)
                 ).item())
+
+                # FIX: Add negative/confuser scoring for common mismatches
+                # This helps distinguish tires from grilles, license plates, etc.
+                confuser_score = self._compute_confuser_score(
+                    mask_embedding, text_prompt
+                )
             else:
                 # Fallback to old method if mask extraction fails
                 sim_score = self._compute_mask_score(
@@ -147,9 +153,11 @@ class MaskTextAligner:
                     background_map,
                     use_spatial_weighting=False
                 )
+                confuser_score = 0.0  # No confuser score for fallback method
 
-            # Final score with background suppression (Equation 3.2)
-            final_score = sim_score - self.background_weight * bg_score
+            # Final score with background suppression and confuser penalty
+            # Equation 3.2 (extended): S_final = S_sim - α*S_bg - β*S_confuser
+            final_score = sim_score - self.background_weight * bg_score - 0.3 * confuser_score
 
             # Add size penalty: penalize masks that are too large (>20% of image)
             mask_area = mask_candidate.mask.sum()
@@ -231,12 +239,14 @@ class MaskTextAligner:
         """
         Extract the masked region from the image for CLIP encoding.
 
+        IMPROVED: Better handling for small objects like tires.
+
         Args:
             image: RGB image (H, W, 3)
             mask: Binary mask (H, W)
 
         Returns:
-            Masked image region with background set to mean color, or None if invalid
+            Masked image region optimized for CLIP, or None if invalid
         """
         if mask.sum() == 0:
             return None
@@ -253,10 +263,18 @@ class MaskTextAligner:
         cropped_img = image[y_min:y_max+1, x_min:x_max+1].copy()
         cropped_mask = mask[y_min:y_max+1, x_min:x_max+1]
 
-        # Set background to mean color (less distracting than black/white)
-        mean_color = cropped_img[cropped_mask > 0].mean(axis=0)
-        for c in range(3):
-            cropped_img[:, :, c][cropped_mask == 0] = mean_color[c]
+        # FIX 1: Set background to black (makes CLIP focus on foreground object)
+        # Mean color can confuse CLIP by including context
+        cropped_img[cropped_mask == 0] = [0, 0, 0]
+
+        # FIX 2: Ensure minimum size for CLIP (needs ~224px to work well)
+        # Small objects get poor features at tiny resolutions
+        h, w = cropped_img.shape[:2]
+        min_size = 224
+        if h < min_size or w < min_size:
+            scale = max(min_size / h, min_size / w) * 1.2  # 20% padding
+            new_h, new_w = int(h * scale), int(w * scale)
+            cropped_img = cv2.resize(cropped_img, (new_w, new_h), interpolation=cv2.INTER_CUBIC)
 
         return cropped_img
 
@@ -415,3 +433,57 @@ class MaskTextAligner:
         grid = np.vstack([row1, row2])
 
         return grid
+
+    def _compute_confuser_score(
+        self,
+        mask_embedding: torch.Tensor,
+        text_prompt: str
+    ) -> float:
+        """
+        Compute similarity to common confuser categories.
+
+        This helps distinguish the target object from visually similar but
+        semantically different objects (e.g., tire vs grille).
+
+        Args:
+            mask_embedding: CLIP embedding of masked region
+            text_prompt: Original query text
+
+        Returns:
+            Maximum similarity to confuser categories (penalty score)
+        """
+        # Define confusers for common queries
+        confuser_map = {
+            "tire": ["grille", "license plate", "headlight", "road", "lane marking", "wheel rim"],
+            "wheel": ["grille", "license plate", "headlight", "rim", "hubcap"],
+            "window": ["door", "mirror", "windshield", "panel"],
+            "door": ["window", "panel", "fender"],
+            "person": ["mannequin", "statue", "reflection"],
+            "car": ["truck", "van", "bus"],
+        }
+
+        # Find relevant confusers
+        confusers = []
+        prompt_lower = text_prompt.lower()
+        for key, values in confuser_map.items():
+            if key in prompt_lower:
+                confusers = values
+                break
+
+        if not confusers:
+            return 0.0  # No known confusers
+
+        # Compute similarity to confusers
+        confuser_embeddings = self.clip_extractor.extract_text_features(
+            confusers,
+            use_prompt_ensemble=False
+        )
+
+        # Max similarity to any confuser
+        similarities = F.cosine_similarity(
+            mask_embedding.unsqueeze(0),
+            confuser_embeddings,
+            dim=1
+        )
+
+        return float(similarities.max().item())

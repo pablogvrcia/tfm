@@ -88,6 +88,11 @@ def main():
         default=5,
         help="Number of top masks to return"
     )
+    parser.add_argument(
+        "--adaptive",
+        action="store_true",
+        help="Use adaptive mask selection (automatically determines how many masks)"
+    )
 
     # Visualization
     parser.add_argument(
@@ -185,7 +190,8 @@ def run_segmentation(
         args.image,
         args.prompt,
         top_k=args.top_k,
-        return_visualization=True
+        return_visualization=True,
+        use_adaptive_selection=args.adaptive
     )
 
     # Save outputs

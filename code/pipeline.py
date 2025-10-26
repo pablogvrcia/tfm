@@ -23,6 +23,7 @@ from models.sam2_segmentation import SAM2MaskGenerator, MaskCandidate
 from models.clip_features import CLIPFeatureExtractor
 from models.mask_alignment import MaskTextAligner, ScoredMask
 from models.inpainting import StableDiffusionInpainter
+from models.adaptive_selection import AdaptiveMaskSelector
 
 
 @dataclass
@@ -88,10 +89,14 @@ class OpenVocabSegmentationPipeline:
         )
 
         if verbose:
-            print("  [3/3] Initializing mask aligner...")
+            print("  [3/4] Initializing mask aligner...")
         self.mask_aligner = MaskTextAligner(
             clip_extractor=self.clip_extractor
         )
+
+        if verbose:
+            print("  [4/4] Initializing adaptive selector...")
+        self.adaptive_selector = AdaptiveMaskSelector()
 
         # Lazy-load inpainter (only when needed for editing)
         self._inpainter = None
@@ -119,7 +124,8 @@ class OpenVocabSegmentationPipeline:
         text_prompt: str,
         top_k: int = 5,
         min_mask_area: int = 1024,
-        return_visualization: bool = True
+        return_visualization: bool = True,
+        use_adaptive_selection: bool = False
     ) -> PipelineResult:
         """
         Segment objects based on text prompt.
@@ -127,9 +133,10 @@ class OpenVocabSegmentationPipeline:
         Args:
             image: Input image (array, PIL, or path)
             text_prompt: Text description of target object
-            top_k: Number of top matches to return
+            top_k: Number of top matches to return (ignored if use_adaptive_selection=True)
             min_mask_area: Minimum mask size (32x32 = 1024 pixels)
             return_visualization: Include visualization data
+            use_adaptive_selection: Use adaptive mask selection based on query semantics
 
         Returns:
             PipelineResult with segmentation masks and timing
@@ -165,19 +172,48 @@ class OpenVocabSegmentationPipeline:
             print("  Stage 2-3: Aligning masks with text prompt...")
 
         t0 = time.time()
-        scored_masks, vis_data = self.mask_aligner.align_masks_with_text(
+        # Get all scored masks (we'll select adaptively if requested)
+        all_scored_masks, vis_data = self.mask_aligner.align_masks_with_text(
             filtered_masks,
             text_prompt,
             image_array,
-            top_k=top_k,
+            top_k=50,  # Get more candidates for adaptive selection
             return_similarity_maps=return_visualization
         )
         timing['clip_alignment'] = time.time() - t0
 
         if self.verbose:
-            print(f"    Found {len(scored_masks)} matches ({timing['clip_alignment']:.2f}s)")
-            for i, sm in enumerate(scored_masks[:3], 1):
-                print(f"      #{i}: score={sm.final_score:.3f}, area={sm.mask_candidate.area}")
+            print(f"    Found {len(all_scored_masks)} matches ({timing['clip_alignment']:.2f}s)")
+
+        # Stage 3.5: Adaptive mask selection (optional)
+        if use_adaptive_selection and all_scored_masks:
+            if self.verbose:
+                print("  Stage 3.5: Adaptive mask selection...")
+
+            t0 = time.time()
+            scored_masks, adaptive_info = self.adaptive_selector.select_masks_adaptive(
+                all_scored_masks,
+                text_prompt,
+                image_shape=(image_array.shape[0], image_array.shape[1]),
+                max_masks=None  # Let it decide
+            )
+            timing['adaptive_selection'] = time.time() - t0
+
+            if self.verbose:
+                print(f"    Method: {adaptive_info['method']}")
+                print(f"    Selected {adaptive_info['selected_count']} masks ({timing['adaptive_selection']:.2f}s)")
+                for i, sm in enumerate(scored_masks[:5], 1):
+                    print(f"      #{i}: score={sm.final_score:.3f}, area={sm.mask_candidate.area}")
+
+            # Store adaptive info in visualization data
+            if vis_data is not None:
+                vis_data['adaptive_info'] = adaptive_info
+        else:
+            # Traditional top-K selection
+            scored_masks = all_scored_masks[:top_k]
+            if self.verbose:
+                for i, sm in enumerate(scored_masks[:3], 1):
+                    print(f"      #{i}: score={sm.final_score:.3f}, area={sm.mask_candidate.area}")
 
         # Prepare result
         result = PipelineResult(
