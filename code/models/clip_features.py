@@ -30,7 +30,7 @@ class CLIPFeatureExtractor:
         model_name: str = "ViT-L-14",
         pretrained: str = "openai",
         device: str = "cuda" if torch.cuda.is_available() else "cpu",
-        extract_layers: List[int] = [6, 12, 18, 24],
+        extract_layers: List[int] = [6, 12, 18, 24],  # Use only final layer for better semantics
         image_size: int = 336,
     ):
         """
@@ -153,14 +153,6 @@ class CLIPFeatureExtractor:
             actual_grid_size = int(np.sqrt(actual_num_patches))
             actual_embed_dim = spatial_feat.shape[2]
 
-            # Project intermediate features to final embedding dimension if needed
-            if actual_embed_dim != self.embed_dim:
-                # Intermediate transformer layers may have different dimensions
-                # Apply the model's projection to match final embedding space
-                # For simplicity, we'll skip these layers in similarity computation
-                # and only use the final layer features
-                pass  # Don't add this layer
-
             # Reshape to 2D grid: (1, H, W, D)
             spatial_feat = spatial_feat.reshape(
                 1, actual_grid_size, actual_grid_size, actual_embed_dim
@@ -169,12 +161,24 @@ class CLIPFeatureExtractor:
             # Permute to (1, D, H, W) for interpolation
             spatial_feat = spatial_feat.permute(0, 3, 1, 2)
 
+            # Project intermediate features to final embedding dimension if needed
+            if actual_embed_dim != self.embed_dim:
+                # Apply the model's projection to match final embedding space
+                if hasattr(self.model.visual, 'proj') and self.model.visual.proj is not None:
+                    # spatial_feat: (1, actual_embed_dim, H, W)
+                    # proj: (actual_embed_dim, self.embed_dim)
+                    # Need to reshape, project, then reshape back
+                    batch, D, H, W = spatial_feat.shape
+                    spatial_feat = spatial_feat.permute(0, 2, 3, 1)  # (1, H, W, D)
+                    spatial_feat = spatial_feat.reshape(-1, actual_embed_dim)  # (H*W, D)
+                    spatial_feat = spatial_feat @ self.model.visual.proj  # (H*W, embed_dim)
+                    spatial_feat = spatial_feat.reshape(batch, H, W, self.embed_dim)  # (1, H, W, embed_dim)
+                    spatial_feat = spatial_feat.permute(0, 3, 1, 2)  # (1, embed_dim, H, W)
+
             if normalize:
                 spatial_feat = F.normalize(spatial_feat, dim=1)
 
-            # Only add if dimensions match
-            if actual_embed_dim == self.embed_dim:
-                dense_features.append(spatial_feat.squeeze(0))  # (D, H, W)
+            dense_features.append(spatial_feat.squeeze(0))  # (D, H, W)
 
         # If no compatible layers found, create a pseudo-dense feature from global embedding
         if len(dense_features) == 0:
@@ -280,17 +284,17 @@ class CLIPFeatureExtractor:
                 # In full implementation, use learned projection layers
                 continue
 
-            # Reshape to (D, H*W)
-            feat_flat = feat.reshape(D, -1)  # (D, H*W)
+            # Reshape to (H*W, D) for per-location normalization
+            feat_flat = feat.reshape(D, -1).T  # (H*W, D)
 
-            # Normalize features along feature dimension
-            feat_norm = F.normalize(feat_flat, dim=0)  # (D, H*W) each position normalized
+            # Normalize each spatial location's feature vector
+            feat_norm = F.normalize(feat_flat, dim=1)  # (H*W, D) each location normalized
 
             # Normalize text embedding
-            text_norm = F.normalize(text_embedding.unsqueeze(1), dim=0)  # (D, 1)
+            text_norm = F.normalize(text_embedding.unsqueeze(0), dim=1)  # (1, D)
 
             # Compute cosine similarity at each spatial location
-            sim = torch.matmul(text_norm.T, feat_norm)  # (1, H*W)
+            sim = torch.matmul(text_norm, feat_norm.T)  # (1, H*W)
             sim = sim.reshape(1, 1, H, W)  # (1, 1, H, W)
 
             # Upsample to target size

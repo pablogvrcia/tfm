@@ -49,12 +49,11 @@ FROM dependencies AS application
 # Copy application code
 COPY models/ ./models/
 COPY examples/ ./examples/
+# COPY checkpoints/ ./checkpoints/
 COPY pipeline.py .
 COPY config.py .
 COPY utils.py .
 COPY main.py .
-COPY README.md .
-COPY QUICK_START.md .
 
 # Create directories for models and outputs
 RUN mkdir -p /app/models_cache /app/output /app/input

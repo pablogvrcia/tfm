@@ -48,7 +48,7 @@ class OpenVocabSegmentationPipeline:
 
     def __init__(
         self,
-        sam_model: str = "sam2_hiera_large",
+        sam_model: str = "sam2_hiera_tiny",
         clip_model: str = "ViT-L-14",
         sd_model: str = "stabilityai/stable-diffusion-2-inpainting",
         device: str = "cuda" if torch.cuda.is_available() else "cpu",
@@ -66,41 +66,52 @@ class OpenVocabSegmentationPipeline:
         """
         self.device = device
         self.verbose = verbose
+        self.sd_model = sd_model  # Store for lazy loading
 
         if verbose:
             print("Initializing Open-Vocabulary Segmentation Pipeline...")
             print(f"Device: {device}")
 
-        # Initialize components
+        # Initialize core components (always needed)
         if verbose:
-            print("  [1/4] Loading SAM 2...")
+            print("  [1/3] Loading SAM 2...")
         self.sam_generator = SAM2MaskGenerator(
             model_type=sam_model,
             device=device
         )
 
         if verbose:
-            print("  [2/4] Loading CLIP...")
+            print("  [2/3] Loading CLIP...")
         self.clip_extractor = CLIPFeatureExtractor(
             model_name=clip_model,
             device=device
         )
 
         if verbose:
-            print("  [3/4] Initializing mask aligner...")
+            print("  [3/3] Initializing mask aligner...")
         self.mask_aligner = MaskTextAligner(
             clip_extractor=self.clip_extractor
         )
 
-        if verbose:
-            print("  [4/4] Loading Stable Diffusion...")
-        self.inpainter = StableDiffusionInpainter(
-            model_id=sd_model,
-            device=device
-        )
+        # Lazy-load inpainter (only when needed for editing)
+        self._inpainter = None
 
         if verbose:
             print("Pipeline ready!\n")
+
+    @property
+    def inpainter(self):
+        """Lazy-load the inpainter only when needed."""
+        if self._inpainter is None:
+            if self.verbose:
+                print("  [Lazy-loading] Loading Stable Diffusion for editing...")
+            self._inpainter = StableDiffusionInpainter(
+                model_id=self.sd_model,
+                device=self.device
+            )
+            if self.verbose:
+                print("  Stable Diffusion ready!\n")
+        return self._inpainter
 
     def segment(
         self,

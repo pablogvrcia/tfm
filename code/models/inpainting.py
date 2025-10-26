@@ -109,6 +109,9 @@ class StableDiffusionInpainter:
         if isinstance(image, np.ndarray):
             image = Image.fromarray(image)
 
+        # Store original size to restore aspect ratio later
+        original_size = image.size  # (width, height)
+
         # Prepare mask
         mask_pil = self._prepare_mask(mask, image.size)
 
@@ -139,7 +142,12 @@ class StableDiffusionInpainter:
                 generator=generator,
             )
 
-            results.append(output.images[0])
+            # Resize result back to original size to preserve aspect ratio
+            result_img = output.images[0]
+            if result_img.size != original_size:
+                result_img = result_img.resize(original_size, Image.Resampling.LANCZOS)
+
+            results.append(result_img)
 
         # Select best result (in practice, could use CLIP score)
         best_result = results[0]
@@ -191,7 +199,7 @@ class StableDiffusionInpainter:
 
         # Convert to PIL and resize
         mask_pil = Image.fromarray(mask).convert("L")
-        mask_pil = mask_pil.resize(target_size, Image.LANCZOS)
+        mask_pil = mask_pil.resize(target_size, Image.Resampling.LANCZOS)
 
         return mask_pil
 
@@ -372,15 +380,23 @@ class StableDiffusionInpainter:
         Create side-by-side comparison visualization.
 
         Args:
-            original: Original image
-            inpainted: Inpainted result
-            mask: Mask used
+            original: Original image (H, W, 3)
+            inpainted: Inpainted result (may be resized to 512x512)
+            mask: Mask used (H, W)
 
         Returns:
             Comparison grid
         """
         # Convert to arrays
         inpainted_array = np.array(inpainted)
+
+        # Resize inpainted result back to original size if needed
+        if inpainted_array.shape[:2] != original.shape[:2]:
+            inpainted_resized = Image.fromarray(inpainted_array).resize(
+                (original.shape[1], original.shape[0]),
+                Image.Resampling.LANCZOS
+            )
+            inpainted_array = np.array(inpainted_resized)
 
         # Create mask visualization
         mask_vis = np.stack([mask * 255] * 3, axis=-1).astype(np.uint8)

@@ -12,6 +12,7 @@ import torch
 from typing import List, Dict, Tuple, Optional
 from dataclasses import dataclass
 import cv2
+import os
 
 
 @dataclass
@@ -37,11 +38,11 @@ class SAM2MaskGenerator:
 
     def __init__(
         self,
-        model_type: str = "sam2_hiera_large",
+        model_type: str = "sam2_hiera_tiny",
         device: str = "cuda" if torch.cuda.is_available() else "cpu",
         points_per_side: int = 32,
-        pred_iou_thresh: float = 0.88,
-        stability_score_thresh: float = 0.95,
+        pred_iou_thresh: float = 0.7,  # Lowered from 0.88 to get more masks
+        stability_score_thresh: float = 0.85,  # Lowered from 0.95 to get more masks
         crop_n_layers: int = 0,
         crop_overlap_ratio: float = 512/1500,
     ):
@@ -58,35 +59,73 @@ class SAM2MaskGenerator:
             crop_overlap_ratio: Overlap ratio between crops
         """
         self.device = device
+        self.model_type = model_type
+
+        # Store parameters for automatic mask generation
         self.points_per_side = points_per_side
         self.pred_iou_thresh = pred_iou_thresh
         self.stability_score_thresh = stability_score_thresh
+        self.crop_n_layers = crop_n_layers
+        self.crop_overlap_ratio = crop_overlap_ratio
 
-        # Import SAM 2 - users need to install: pip install segment-anything-2
+        # Try to load SAM 2
+        self.mask_generator = None
+        self._load_sam2()
+
+    def _load_sam2(self):
+        """Load SAM 2 model and create automatic mask generator."""
         try:
             from sam2.build_sam import build_sam2
             from sam2.automatic_mask_generator import SAM2AutomaticMaskGenerator
 
-            # Build model
-            self.sam2_model = build_sam2(model_type, device=device)
+            # Map model type to config file
+            model_cfg_map = {
+                "sam2_hiera_tiny": "sam2_hiera_t.yaml",
+                "sam2_hiera_small": "sam2_hiera_s.yaml",
+                "sam2_hiera_base_plus": "sam2_hiera_b+.yaml",
+                "sam2_hiera_large": "sam2_hiera_l.yaml"
+            }
+
+            config_name = model_cfg_map.get(self.model_type, "sam2_hiera_l.yaml")
+            checkpoint_path = f"checkpoints/{self.model_type}.pt"
+
+            # Check if checkpoint exists
+            if not os.path.exists(checkpoint_path):
+                print(f"WARNING: SAM 2 checkpoint not found at {checkpoint_path}")
+                print(f"Please download checkpoints using:")
+                print(f"  python scripts/download_sam2_checkpoints.py --model {self.model_type}")
+                print("Using mock implementation with superpixels for now.\n")
+                return
+
+            # Build SAM 2 model
+            # SAM 2 uses Hydra config system - just pass the config name
+            # It will look in sam2/configs/sam2/ directory automatically
+            self.sam2_model = build_sam2(
+                config_file=config_name,
+                ckpt_path=checkpoint_path,
+                device=self.device
+            )
 
             # Create automatic mask generator
             self.mask_generator = SAM2AutomaticMaskGenerator(
                 model=self.sam2_model,
-                points_per_side=points_per_side,
-                pred_iou_thresh=pred_iou_thresh,
-                stability_score_thresh=stability_score_thresh,
-                crop_n_layers=crop_n_layers,
-                crop_overlap_ratio=crop_overlap_ratio,
+                points_per_side=self.points_per_side,
+                pred_iou_thresh=self.pred_iou_thresh,
+                stability_score_thresh=self.stability_score_thresh,
+                crop_n_layers=self.crop_n_layers,
+                crop_overlap_ratio=self.crop_overlap_ratio,
             )
 
-        except (ImportError, Exception) as e:
-            # Fall back to mock if SAM 2 not installed or model/config missing
-            if isinstance(e, ImportError):
-                print("Warning: SAM 2 not installed. Using mock implementation.")
-            else:
-                print(f"Warning: SAM 2 initialization failed ({type(e).__name__}). Using mock implementation.")
-            self.mask_generator = None
+            print(f"✓ SAM 2 loaded successfully: {self.model_type}")
+
+        except ImportError as e:
+            print(f"WARNING: SAM 2 not installed. Please install with:")
+            print(f"  pip install git+https://github.com/facebookresearch/segment-anything-2.git")
+            print("Using mock implementation with superpixels for now.\n")
+
+        except Exception as e:
+            print(f"WARNING: SAM 2 initialization failed: {type(e).__name__}: {str(e)}")
+            print("Using mock implementation with superpixels for now.\n")
 
     def generate_masks(
         self,

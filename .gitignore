@@ -52,3 +52,12 @@ Thumbs.db
 *.tmp
 *.temp
 *.bak
+
+sam2
+
+output
+output_*
+input
+figures
+
+checkpoints

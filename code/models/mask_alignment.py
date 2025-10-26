@@ -15,9 +15,11 @@ With refinements:
 
 import numpy as np
 import torch
+import torch.nn.functional as F
 from typing import List, Tuple, Optional
 from dataclasses import dataclass
 import cv2
+from PIL import Image
 
 from .sam2_segmentation import MaskCandidate
 from .clip_features import CLIPFeatureExtractor
@@ -49,7 +51,7 @@ class MaskTextAligner:
         clip_extractor: CLIPFeatureExtractor,
         background_weight: float = 0.3,
         use_spatial_weighting: bool = True,
-        similarity_threshold: float = 0.25,
+        similarity_threshold: float = 0.02,  # Lowered to match actual CLIP similarity scores
     ):
         """
         Initialize mask-text aligner.
@@ -113,21 +115,49 @@ class MaskTextAligner:
         # Score each mask
         scored_masks = []
         for mask_candidate in masks:
-            # Compute scores
-            sim_score = self._compute_mask_score(
-                mask_candidate.mask,
-                similarity_map,
-                use_spatial_weighting=self.use_spatial_weighting
-            )
+            # Method 1: Direct CLIP embedding of masked region (better!)
+            # Extract mask region and get its CLIP embedding
+            mask_img = self._extract_masked_region(image, mask_candidate.mask)
+            if mask_img is not None:
+                mask_embedding, _ = self.clip_extractor.extract_image_features(mask_img)
+                # Cosine similarity with text
+                sim_score = float(F.cosine_similarity(
+                    mask_embedding.unsqueeze(0),
+                    text_embedding.unsqueeze(0)
+                ).item())
 
-            bg_score = self._compute_mask_score(
-                mask_candidate.mask,
-                background_map,
-                use_spatial_weighting=False
-            )
+                # Background score (similarity to background concepts)
+                bg_embedding = self.clip_extractor.extract_text_features(
+                    ["background", "nothing", "empty space"],
+                    use_prompt_ensemble=False
+                ).mean(dim=0)
+                bg_score = float(F.cosine_similarity(
+                    mask_embedding.unsqueeze(0),
+                    bg_embedding.unsqueeze(0)
+                ).item())
+            else:
+                # Fallback to old method if mask extraction fails
+                sim_score = self._compute_mask_score(
+                    mask_candidate.mask,
+                    similarity_map,
+                    use_spatial_weighting=self.use_spatial_weighting
+                )
+                bg_score = self._compute_mask_score(
+                    mask_candidate.mask,
+                    background_map,
+                    use_spatial_weighting=False
+                )
 
             # Final score with background suppression (Equation 3.2)
             final_score = sim_score - self.background_weight * bg_score
+
+            # Add size penalty: penalize masks that are too large (>20% of image)
+            mask_area = mask_candidate.mask.sum()
+            image_area = mask_candidate.mask.size
+            area_ratio = mask_area / image_area
+            if area_ratio > 0.2:  # More than 20% of image
+                size_penalty = (area_ratio - 0.2) * 0.5  # Penalty scales with size
+                final_score -= size_penalty
 
             scored_mask = ScoredMask(
                 mask_candidate=mask_candidate,
@@ -196,6 +226,39 @@ class MaskTextAligner:
             score = score_map[mask > 0].mean()
 
         return float(score)
+
+    def _extract_masked_region(self, image: np.ndarray, mask: np.ndarray) -> Optional[np.ndarray]:
+        """
+        Extract the masked region from the image for CLIP encoding.
+
+        Args:
+            image: RGB image (H, W, 3)
+            mask: Binary mask (H, W)
+
+        Returns:
+            Masked image region with background set to mean color, or None if invalid
+        """
+        if mask.sum() == 0:
+            return None
+
+        # Get bounding box
+        y_indices, x_indices = np.where(mask > 0)
+        if len(y_indices) == 0:
+            return None
+
+        y_min, y_max = y_indices.min(), y_indices.max()
+        x_min, x_max = x_indices.min(), x_indices.max()
+
+        # Crop to bounding box
+        cropped_img = image[y_min:y_max+1, x_min:x_max+1].copy()
+        cropped_mask = mask[y_min:y_max+1, x_min:x_max+1]
+
+        # Set background to mean color (less distracting than black/white)
+        mean_color = cropped_img[cropped_mask > 0].mean(axis=0)
+        for c in range(3):
+            cropped_img[:, :, c][cropped_mask == 0] = mean_color[c]
+
+        return cropped_img
 
     def _compute_spatial_weights(self, mask: np.ndarray) -> np.ndarray:
         """
