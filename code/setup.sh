@@ -105,30 +105,6 @@ else:
     sys.exit(1)
 EOF
 
-echo ""
-echo "======================================================================="
-echo "Checking for SAM 2 checkpoints..."
-echo "======================================================================="
-echo ""
-
-if [ ! -d "checkpoints" ] || [ -z "$(ls -A checkpoints/*.pt 2>/dev/null)" ]; then
-    echo "No SAM 2 checkpoints found."
-    echo ""
-    read -p "Download SAM 2 checkpoint? (Y/n): " -n 1 -r
-    echo ""
-
-    if [[ $REPLY =~ ^[Yy]$ ]] || [[ -z $REPLY ]]; then
-        echo "Downloading sam2_hiera_large (~224MB)..."
-        python scripts/download_sam2_checkpoints.py --model sam2_hiera_large
-    else
-        echo "Skipping checkpoint download."
-        echo "You can download later with:"
-        echo "  python scripts/download_sam2_checkpoints.py --model sam2_hiera_large"
-    fi
-else
-    echo "✓ SAM 2 checkpoints found:"
-    ls -lh checkpoints/*.pt
-fi
 
 echo ""
 echo "======================================================================="
