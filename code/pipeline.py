@@ -49,7 +49,7 @@ class OpenVocabSegmentationPipeline:
 
     def __init__(
         self,
-        sam_model: str = "sam2_hiera_tiny",
+        sam_model: str = "sam2_hiera_base_plus",
         clip_model: str = "ViT-L-14",
         sd_model: str = "stabilityai/stable-diffusion-2-inpainting",
         device: str = "cuda" if torch.cuda.is_available() else "cpu",

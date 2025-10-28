@@ -12,7 +12,7 @@ from typing import List
 @dataclass
 class SAM2Config:
     """SAM 2 configuration (Chapter 3.3.2)"""
-    model_type: str = 'sam2_hiera_tiny' # "sam2_hiera_large"
+    model_type: str = 'sam2_hiera_base_plus' # "sam2_hiera_large"
     points_per_side: int = 32  # 32x32 grid = 1024 point prompts
     pred_iou_thresh: float = 0.88  # Minimum IoU confidence
     stability_score_thresh: float = 0.95  # Minimum stability score

@@ -86,9 +86,13 @@ def run_benchmark(
 
         # Run segmentation for each class in ground truth
         pred_mask = np.zeros_like(gt_mask)
+        confidence_map = np.zeros(gt_mask.shape, dtype=np.float32)
 
         unique_classes = np.unique(gt_mask)
         unique_classes = unique_classes[unique_classes != 255]  # Remove ignore index
+
+        # Skip background (class 0) - we'll assign it at the end
+        unique_classes = unique_classes[unique_classes != 0]
 
         for cls_id in unique_classes:
             if cls_id >= len(class_names):
@@ -97,22 +101,59 @@ def run_benchmark(
             class_name = class_names[cls_id]
 
             try:
-                # Segment
+                # Get all high-confidence masks without adaptive selection
+                # For benchmarks, we want ALL instances of the class
                 result = pipeline.segment(
                     image,
                     text_prompt=class_name,
-                    top_k=1,
+                    top_k=20,  # Get many candidates
+                    use_adaptive_selection=False,  # Don't use adaptive - get all masks
                     return_visualization=False
                 )
 
                 if result.segmentation_masks:
-                    # Use top mask
-                    mask = result.segmentation_masks[0].mask_candidate.mask
-                    pred_mask[mask > 0] = cls_id
+                    # Sort masks by size (largest first) to prioritize complete objects
+                    sorted_masks = sorted(result.segmentation_masks,
+                                        key=lambda x: x.mask_candidate.mask.sum(),
+                                        reverse=True)
+
+                    # Strategy: Take largest mask with high score, then add non-overlapping instances
+                    for seg_result in sorted_masks:
+                        mask = seg_result.mask_candidate.mask
+                        score = seg_result.final_score
+                        mask_size = mask.sum()
+
+                        # Skip tiny masks (noise) - must be at least 0.1% of image
+                        min_size = (gt_mask.shape[0] * gt_mask.shape[1]) * 0.001
+                        if mask_size < min_size:
+                            continue
+
+                        # Score threshold: adaptive based on mask size
+                        # Larger masks can have slightly lower scores
+                        score_threshold = 0.15 if mask_size > min_size * 50 else 0.20
+
+                        if score < score_threshold:
+                            continue
+
+                        # Calculate overlap with already-assigned regions of THIS class
+                        already_assigned_this_class = (pred_mask == cls_id)
+                        overlap_with_class = (mask & already_assigned_this_class).sum() / max(mask_size, 1)
+
+                        # Skip if mostly overlaps with existing mask of same class (>70%)
+                        if overlap_with_class > 0.7:
+                            continue
+
+                        # Assign pixels where confidence is higher
+                        update_mask = (mask > 0) & (score > confidence_map)
+                        pred_mask[update_mask] = cls_id
+                        confidence_map[update_mask] = score
 
             except Exception as e:
                 print(f"  Error on class '{class_name}': {e}")
                 continue
+
+        # Assign background to unassigned pixels (confidence = 0)
+        pred_mask[confidence_map == 0] = 0
 
         # Compute metrics
         metrics = compute_all_metrics(
@@ -133,6 +174,15 @@ def run_benchmark(
 
     # Aggregate metrics
     results = aggregate_metrics(all_metrics, dataset_name)
+
+    # Compute per-class metrics across all samples
+    if hasattr(dataset, 'class_names'):
+        per_class_metrics = compute_per_class_metrics(
+            pred_masks_list,
+            gt_masks_list,
+            dataset.class_names
+        )
+        results['per_class_iou'] = per_class_metrics
 
     # For COCO-Open, compute novel class metrics
     if dataset_name == "coco-open" and hasattr(dataset, 'novel_classes'):
@@ -161,6 +211,14 @@ def run_benchmark(
         print(f"\nCOCO-Open Split:")
         print(f"  Novel mIoU: {results['novel_miou']:.2f}%")
         print(f"  Base mIoU: {results['base_miou']:.2f}%")
+
+    if 'per_class_iou' in results and results['per_class_iou']:
+        print(f"\nPer-Class IoU:")
+        per_class = results['per_class_iou']
+        # Sort by IoU descending
+        sorted_classes = sorted(per_class.items(), key=lambda x: x[1], reverse=True)
+        for class_name, iou in sorted_classes:
+            print(f"  {class_name:15s}: {iou:5.2f}%")
 
     print(f"\nResults saved to: {results_file}")
 
@@ -267,6 +325,36 @@ class MockDataset:
         }
 
 
+def compute_per_class_metrics(pred_masks_list, gt_masks_list, class_names):
+    """Compute per-class IoU across all samples."""
+    num_classes = len(class_names)
+    class_intersections = np.zeros(num_classes, dtype=np.float64)
+    class_unions = np.zeros(num_classes, dtype=np.float64)
+    class_present = np.zeros(num_classes, dtype=np.bool_)
+
+    for pred_mask, gt_mask in zip(pred_masks_list, gt_masks_list):
+        for cls_id in range(num_classes):
+            pred_cls = (pred_mask == cls_id)
+            gt_cls = (gt_mask == cls_id)
+
+            if gt_cls.sum() > 0:  # Class present in ground truth
+                class_present[cls_id] = True
+                intersection = np.logical_and(pred_cls, gt_cls).sum()
+                union = np.logical_or(pred_cls, gt_cls).sum()
+
+                class_intersections[cls_id] += intersection
+                class_unions[cls_id] += union
+
+    # Compute per-class IoU
+    per_class_iou = {}
+    for cls_id in range(num_classes):
+        if class_present[cls_id] and class_unions[cls_id] > 0:
+            iou = (class_intersections[cls_id] / class_unions[cls_id]) * 100
+            per_class_iou[class_names[cls_id]] = float(iou)
+
+    return per_class_iou
+
+
 def aggregate_metrics(metrics_list, dataset_name):
     """Aggregate metrics across all samples."""
     agg = {
@@ -307,10 +395,36 @@ def create_comparison_vis(image, pred_mask, gt_mask):
 def colorize_mask(mask, palette=None):
     """Apply color palette to segmentation mask."""
     if palette is None:
-        # Generate random palette
-        np.random.seed(42)
-        palette = np.random.randint(0, 255, (256, 3), dtype=np.uint8)
-        palette[0] = [0, 0, 0]  # Background black
+        # PASCAL VOC standard color palette
+        palette = np.array([
+            [0, 0, 0],       # 0: background
+            [128, 0, 0],     # 1: aeroplane
+            [0, 128, 0],     # 2: bicycle
+            [128, 128, 0],   # 3: bird
+            [0, 0, 128],     # 4: boat
+            [128, 0, 128],   # 5: bottle
+            [0, 128, 128],   # 6: bus
+            [128, 128, 128], # 7: car
+            [64, 0, 0],      # 8: cat
+            [192, 0, 0],     # 9: chair
+            [64, 128, 0],    # 10: cow
+            [192, 128, 0],   # 11: diningtable
+            [64, 0, 128],    # 12: dog
+            [192, 0, 128],   # 13: horse
+            [64, 128, 128],  # 14: motorbike
+            [192, 128, 128], # 15: person
+            [0, 64, 0],      # 16: pottedplant
+            [128, 64, 0],    # 17: sheep
+            [0, 192, 0],     # 18: sofa
+            [128, 192, 0],   # 19: train
+            [0, 64, 128],    # 20: tvmonitor
+        ], dtype=np.uint8)
+
+        # Extend palette for higher indices
+        if mask.max() >= len(palette):
+            np.random.seed(42)
+            extra = np.random.randint(0, 255, (256 - len(palette), 3), dtype=np.uint8)
+            palette = np.vstack([palette, extra])
 
     colored = palette[mask]
     return colored

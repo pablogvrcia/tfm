@@ -32,7 +32,7 @@ def main():
 
     # Load models
     print("Loading models...")
-    sam = SAM2MaskGenerator(model_type='sam2_hiera_tiny', device='cuda')
+    sam = SAM2MaskGenerator(model_type='sam2_hiera_base_plus', device='cuda')
     clip = CLIPFeatureExtractor(device='cuda')
     aligner = MaskTextAligner(clip)
     print()

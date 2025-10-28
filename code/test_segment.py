@@ -20,7 +20,7 @@ def main():
     # Load models
     print("Loading SAM 2 (tiny model for 6GB VRAM)...")
     t0 = time.time()
-    sam = SAM2MaskGenerator(model_type='sam2_hiera_tiny', device='cuda')
+    sam = SAM2MaskGenerator(model_type='sam2_hiera_base_plus', device='cuda')
     print(f"  ✓ SAM 2 loaded ({time.time()-t0:.1f}s)")
 
     print("Loading CLIP...")

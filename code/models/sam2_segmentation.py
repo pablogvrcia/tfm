@@ -170,6 +170,80 @@ class SAM2MaskGenerator:
 
         return candidates
 
+    def segment_with_points(
+        self,
+        image: np.ndarray,
+        points: List[Tuple[int, int]],
+        point_labels: List[int]
+    ) -> List[MaskCandidate]:
+        """
+        Segment image using point prompts.
+
+        This enables CLIP-guided prompting where CLIP identifies likely
+        object locations and we prompt SAM 2 at those locations.
+
+        Args:
+            image: RGB image array (H, W, 3)
+            points: List of (x, y) point coordinates
+            point_labels: List of labels (1=foreground, 0=background)
+
+        Returns:
+            List of MaskCandidate objects, one per point prompt
+        """
+        if not hasattr(self, 'sam2_model') or self.sam2_model is None:
+            # Fallback to automatic mode if predictor not available
+            return self.generate_masks(image)
+
+        try:
+            from sam2.sam2_image_predictor import SAM2ImagePredictor
+
+            # Create predictor if not exists
+            if not hasattr(self, 'predictor'):
+                self.predictor = SAM2ImagePredictor(self.sam2_model)
+
+            # Set the image
+            self.predictor.set_image(image)
+
+            all_masks = []
+
+            # Segment each point individually
+            for point, label in zip(points, point_labels):
+                point_coords = np.array([[point[0], point[1]]])  # Shape: (1, 2)
+                point_labels_arr = np.array([label])  # Shape: (1,)
+
+                # Predict masks
+                masks, scores, _ = self.predictor.predict(
+                    point_coords=point_coords,
+                    point_labels=point_labels_arr,
+                    multimask_output=True  # Get 3 masks per point
+                )
+
+                # Convert to MaskCandidate objects
+                for mask, score in zip(masks, scores):
+                    candidate = MaskCandidate(
+                        mask=mask.astype(np.uint8),
+                        bbox=self._mask_to_bbox(mask),
+                        area=int(mask.sum()),
+                        predicted_iou=float(score),
+                        stability_score=float(score),  # Use IoU as stability
+                        point_coords=point_coords
+                    )
+                    all_masks.append(candidate)
+
+            # Sort by predicted IoU (best first)
+            all_masks.sort(key=lambda x: x.predicted_iou, reverse=True)
+
+            return all_masks
+
+        except Exception as e:
+            print(f"WARNING: Point prompting failed: {e}")
+            # Fallback to automatic mode
+            return self.generate_masks(image)
+
+    def segment_automatic(self, image: np.ndarray) -> List[MaskCandidate]:
+        """Alias for generate_masks for consistent API."""
+        return self.generate_masks(image)
+
     def _mask_to_bbox(self, mask: np.ndarray) -> Tuple[int, int, int, int]:
         """Convert binary mask to bounding box (x, y, w, h)."""
         rows, cols = np.where(mask)

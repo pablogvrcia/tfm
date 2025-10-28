@@ -44,7 +44,7 @@ class ThesisVisualizer:
         self.output_dir.mkdir(exist_ok=True)
 
         print("Loading models...")
-        self.sam = SAM2MaskGenerator(model_type='sam2_hiera_tiny', device='cuda')
+        self.sam = SAM2MaskGenerator(model_type='sam2_hiera_base_plus', device='cuda')
         self.clip = CLIPFeatureExtractor(device='cuda')
         self.aligner = MaskTextAligner(self.clip)
         print("✓ Models loaded\n")
