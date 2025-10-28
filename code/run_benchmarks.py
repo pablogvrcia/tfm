@@ -168,7 +168,7 @@ def run_benchmark(
         gt_masks_list.append(gt_mask)
 
         # Save visualization
-        if save_visualizations and idx < 20:  # Save first 20
+        if save_visualizations:  # Save first 20
             vis = create_comparison_vis(image, pred_mask, gt_mask)
             save_image(vis, vis_dir / f"sample_{idx:04d}.png")
 

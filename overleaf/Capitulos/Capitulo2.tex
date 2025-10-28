@@ -173,19 +173,56 @@ These settings typically generate 100-300 mask candidates per image, providing c
 
 \subsection{Mask Scoring and Selection}
 
-For each mask $M_i$, we compute the alignment score using dense CLIP features:
+For each mask $M_i$, we employ a multi-scale CLIP voting strategy to compute robust alignment scores. Instead of evaluating masks at a single resolution, we extract CLIP features at three scales to capture different levels of detail:
+
+\subsubsection{Multi-Scale CLIP Voting}
+
+To address CLIP's sensitivity to object scale, we resize each masked region to three target resolutions:
+\begin{itemize}
+    \item \textbf{224px:} Captures fine-grained details, beneficial for small objects
+    \item \textbf{336px:} Standard CLIP resolution, provides balanced semantic features
+    \item \textbf{512px:} Captures broader context, helps with large objects
+\end{itemize}
+
+For each scale $s \in \{224, 336, 512\}$, we compute the cosine similarity between the resized mask region's CLIP embedding and the text embedding:
 
 \begin{equation}
-S_i = \frac{\sum_{p \in M_i} w_p \cdot \text{sim}(f_p, e_t)}{\sum_{p \in M_i} w_p}
+S_i^{(s)} = \text{sim}(f_{M_i}^{(s)}, e_t)
 \end{equation}
 
-where $w_p$ represents spatial weighting (giving higher weight to central pixels) to reduce boundary noise. We also compute a background score $S_{\text{bg}}$ using negative prompts and apply:
+where $f_{M_i}^{(s)}$ is the CLIP image embedding of mask region $M_i$ at scale $s$. The final similarity score is computed as a weighted average:
 
 \begin{equation}
-S_i^{\text{final}} = S_i - \alpha \cdot S_{\text{bg}}
+S_i = 0.2 \cdot S_i^{(224)} + 0.5 \cdot S_i^{(336)} + 0.3 \cdot S_i^{(512)}
 \end{equation}
 
-with $\alpha = 0.3$ to suppress masks primarily containing background. Masks with $S_i^{\text{final}} >$ 0.25 are retained as candidates, and the top-5 highest-scoring masks are presented to the user or used for subsequent inpainting.
+The weights reflect that the standard 336px resolution typically provides the most reliable features, while 224px and 512px contribute complementary information for scale robustness.
+
+\subsubsection{Background Suppression and Confuser Penalization}
+
+We also compute a background score $S_{\text{bg}}$ using negative prompts (``background'', ``nothing'', ``empty space'') and a confuser score $S_{\text{conf}}$ that penalizes common mismatches (e.g., distinguishing ``tire'' from ``grille''). The final score incorporates all three components:
+
+\begin{equation}
+S_i^{\text{final}} = S_i - \alpha \cdot S_{\text{bg}} - \beta \cdot S_{\text{conf}}
+\end{equation}
+
+with $\alpha = 0.3$ and $\beta = 0.3$ to balance object similarity against background and confuser suppression. Masks are filtered using adaptive thresholds based on mask size (0.15-0.20), and multiple non-overlapping instances are retained to handle queries that may refer to multiple objects (e.g., ``person'' in a group photo).
+
+\subsubsection{Multi-Instance Selection Strategy}
+
+A key challenge in open-vocabulary segmentation is determining how many masks to select for a given query. A query like ``car'' typically refers to a single complete object, while ``tire'' might refer to four parts, and ``person'' in a group photo should capture all individuals. We employ a multi-instance selection strategy that addresses this challenge:
+
+\begin{enumerate}
+    \item \textbf{Size-based filtering:} Masks smaller than 0.1\% of the image area are discarded as noise.
+
+    \item \textbf{Score-based selection:} Masks must exceed an adaptive threshold (0.15 for large masks, 0.20 for small masks) based on their multi-scale similarity score.
+
+    \item \textbf{Non-maximum suppression:} For each class, masks are sorted by size (largest first) and selected iteratively. A new mask is added only if it has less than 70\% overlap with already-selected masks of the same class, ensuring diverse coverage of distinct object instances.
+
+    \item \textbf{Confidence-based assignment:} When multiple classes' masks overlap, pixels are assigned to the class with the highest confidence score, enabling proper handling of class boundaries and occlusions.
+\end{enumerate}
+
+This strategy ensures that the system adaptively selects the appropriate number of masks based on the query semantics and image content, capturing single objects, multiple instances, or object parts as needed.
 
 \subsection{Stable Diffusion Inpainting}
 

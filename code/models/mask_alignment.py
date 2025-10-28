@@ -19,7 +19,7 @@ import torch.nn.functional as F
 from typing import List, Tuple, Optional
 from dataclasses import dataclass
 import cv2
-from PIL import Image
+from PIL import Image as PILImage
 
 from .sam2_segmentation import MaskCandidate
 from .clip_features import CLIPFeatureExtractor
@@ -52,6 +52,8 @@ class MaskTextAligner:
         background_weight: float = 0.3,
         use_spatial_weighting: bool = True,
         similarity_threshold: float = 0.02,  # Lowered to match actual CLIP similarity scores
+        use_multiscale: bool = True,  # Multi-scale CLIP voting
+        multiscale_weights: Tuple[float, float, float] = (0.2, 0.5, 0.3),  # Weights for [224, 336, 512]
     ):
         """
         Initialize mask-text aligner.
@@ -61,11 +63,16 @@ class MaskTextAligner:
             background_weight: Weight for background suppression (α in Eq 3.2)
             use_spatial_weighting: Whether to weight center pixels more
             similarity_threshold: Minimum score threshold
+            use_multiscale: Whether to use multi-scale CLIP voting
+            multiscale_weights: Weights for [224px, 336px, 512px] scales
         """
         self.clip_extractor = clip_extractor
         self.background_weight = background_weight
         self.use_spatial_weighting = use_spatial_weighting
         self.similarity_threshold = similarity_threshold
+        self.use_multiscale = use_multiscale
+        self.multiscale_weights = multiscale_weights
+        self.multiscale_sizes = [224, 336, 512]
 
     def align_masks_with_text(
         self,
@@ -119,28 +126,48 @@ class MaskTextAligner:
             # Extract mask region and get its CLIP embedding
             mask_img = self._extract_masked_region(image, mask_candidate.mask)
             if mask_img is not None:
-                mask_embedding, _ = self.clip_extractor.extract_image_features(mask_img)
-                # Cosine similarity with text
-                sim_score = float(F.cosine_similarity(
-                    mask_embedding.unsqueeze(0),
-                    text_embedding.unsqueeze(0)
-                ).item())
+                if self.use_multiscale:
+                    # Multi-scale CLIP voting: extract at multiple resolutions
+                    sim_score = self._compute_multiscale_similarity(
+                        mask_img, text_embedding
+                    )
+                    bg_embedding = self.clip_extractor.extract_text_features(
+                        ["background", "nothing", "empty space"],
+                        use_prompt_ensemble=False
+                    ).mean(dim=0)
+                    bg_score = self._compute_multiscale_similarity_to_embedding(
+                        mask_img, bg_embedding
+                    )
 
-                # Background score (similarity to background concepts)
-                bg_embedding = self.clip_extractor.extract_text_features(
-                    ["background", "nothing", "empty space"],
-                    use_prompt_ensemble=False
-                ).mean(dim=0)
-                bg_score = float(F.cosine_similarity(
-                    mask_embedding.unsqueeze(0),
-                    bg_embedding.unsqueeze(0)
-                ).item())
+                    # For confuser score, use single scale at 336px (current default)
+                    mask_embedding, _ = self.clip_extractor.extract_image_features(mask_img)
+                    confuser_score = self._compute_confuser_score(
+                        mask_embedding, text_prompt
+                    )
+                else:
+                    # Single-scale (original method)
+                    mask_embedding, _ = self.clip_extractor.extract_image_features(mask_img)
+                    # Cosine similarity with text
+                    sim_score = float(F.cosine_similarity(
+                        mask_embedding.unsqueeze(0),
+                        text_embedding.unsqueeze(0)
+                    ).item())
 
-                # FIX: Add negative/confuser scoring for common mismatches
-                # This helps distinguish tires from grilles, license plates, etc.
-                confuser_score = self._compute_confuser_score(
-                    mask_embedding, text_prompt
-                )
+                    # Background score (similarity to background concepts)
+                    bg_embedding = self.clip_extractor.extract_text_features(
+                        ["background", "nothing", "empty space"],
+                        use_prompt_ensemble=False
+                    ).mean(dim=0)
+                    bg_score = float(F.cosine_similarity(
+                        mask_embedding.unsqueeze(0),
+                        bg_embedding.unsqueeze(0)
+                    ).item())
+
+                    # FIX: Add negative/confuser scoring for common mismatches
+                    # This helps distinguish tires from grilles, license plates, etc.
+                    confuser_score = self._compute_confuser_score(
+                        mask_embedding, text_prompt
+                    )
             else:
                 # Fallback to old method if mask extraction fails
                 sim_score = self._compute_mask_score(
@@ -487,3 +514,84 @@ class MaskTextAligner:
         )
 
         return float(similarities.max().item())
+
+    def _compute_multiscale_similarity(
+        self,
+        mask_img: np.ndarray,
+        text_embedding: torch.Tensor
+    ) -> float:
+        """
+        Compute CLIP similarity at multiple scales and combine with weighted voting.
+
+        Args:
+            mask_img: Masked region image
+            text_embedding: Text query embedding
+
+        Returns:
+            Weighted average similarity score
+        """
+        similarities = []
+        pil_img = PILImage.fromarray(mask_img)
+
+        for size in self.multiscale_sizes:
+            # Resize to target size (maintaining aspect ratio with padding if needed)
+            resized = pil_img.resize((size, size), PILImage.Resampling.BILINEAR)
+            resized_np = np.array(resized)
+
+            # Extract CLIP features at this scale
+            embedding, _ = self.clip_extractor.extract_image_features(resized_np)
+
+            # Compute similarity
+            sim = float(F.cosine_similarity(
+                embedding.unsqueeze(0),
+                text_embedding.unsqueeze(0)
+            ).item())
+
+            similarities.append(sim)
+
+        # Weighted average
+        final_score = sum(w * s for w, s in zip(self.multiscale_weights, similarities))
+
+        return final_score
+
+    def _compute_multiscale_similarity_to_embedding(
+        self,
+        mask_img: np.ndarray,
+        target_embedding: torch.Tensor
+    ) -> float:
+        """
+        Compute CLIP similarity to a target embedding at multiple scales.
+
+        Similar to _compute_multiscale_similarity but compares to an arbitrary embedding
+        instead of text (used for background scoring).
+
+        Args:
+            mask_img: Masked region image
+            target_embedding: Target embedding to compare against
+
+        Returns:
+            Weighted average similarity score
+        """
+        similarities = []
+        pil_img = PILImage.fromarray(mask_img)
+
+        for size in self.multiscale_sizes:
+            # Resize to target size
+            resized = pil_img.resize((size, size), PILImage.Resampling.BILINEAR)
+            resized_np = np.array(resized)
+
+            # Extract CLIP features at this scale
+            embedding, _ = self.clip_extractor.extract_image_features(resized_np)
+
+            # Compute similarity
+            sim = float(F.cosine_similarity(
+                embedding.unsqueeze(0),
+                target_embedding.unsqueeze(0)
+            ).item())
+
+            similarities.append(sim)
+
+        # Weighted average
+        final_score = sum(w * s for w, s in zip(self.multiscale_weights, similarities))
+
+        return final_score

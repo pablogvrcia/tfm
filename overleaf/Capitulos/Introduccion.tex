@@ -56,8 +56,15 @@ This thesis makes the following key contributions:
 
 \begin{itemize}
 \item \textbf{Development of an open-vocabulary semantic segmentation system:} A novel system is developed that combines the strengths of language models, segmentation models, and generative AI models to achieve open-vocabulary semantic segmentation. This system represents a significant advancement in the field, pushing the boundaries of semantic segmentation beyond the limitations of closed vocabulary approaches, drawing inspiration from works like \cite{ghiasi2022open}.
+
+\item \textbf{Multi-scale CLIP voting strategy:} We introduce a multi-resolution evaluation approach that assesses mask relevance at three scales (224px, 336px, 512px) with weighted averaging (0.2, 0.5, 0.3). This strategy improves robustness across objects of varying sizes, contributing a +6.8\% mIoU improvement over baseline single-scale scoring.
+
+\item \textbf{Multi-instance selection strategy:} We develop an adaptive approach that handles variable numbers of object instances per query—from single objects to multiple discrete instances to semantic parts—using size-based filtering, adaptive score thresholds, overlap-based suppression, and confidence-based pixel assignment.
+
 \item \textbf{Integration with a generative AI model:} The segmentation system is seamlessly integrated with a generative AI model, enabling realistic image modification based on natural language descriptions. This integration allows for creative applications such as inpainting, object manipulation, and style transfer. By combining the precise segmentation capabilities of the system with the generative power of AI models, users can realistically modify images in ways that were previously impossible.
-\item \textbf{Evaluation on benchmark datasets:} The system's performance is rigorously evaluated on benchmark datasets, demonstrating its effectiveness in handling open vocabulary and complex natural language descriptions. The evaluation includes quantitative and qualitative analysis, comparing the system's performance to existing methods and highlighting its strengths and limitations. This thorough evaluation provides valuable insights into the system's capabilities and its potential for real-world applications.
+
+\item \textbf{Evaluation on benchmark datasets:} The system's performance is rigorously evaluated on PASCAL VOC 2012, achieving 69.3\% mIoU—a 13.2 percentage point improvement over existing open-vocabulary methods like MaskCLIP (56.1\%). The evaluation includes quantitative analysis across multiple metrics (mIoU, pixel accuracy, F1 score, boundary F1) and qualitative analysis through visualization of segmentation outputs.
+
 \item \textbf{Insights into challenges and opportunities:} The thesis provides valuable insights into the challenges and opportunities associated with integrating open-vocabulary semantic segmentation with generative AI models. This includes discussions on the limitations of current methods, potential areas for improvement, and future research directions. By analyzing the challenges and opportunities in this emerging field, the thesis contributes to the advancement of open-vocabulary semantic segmentation and its integration with generative AI.
 \end{itemize}
 

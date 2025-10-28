@@ -20,18 +20,32 @@ This integration demonstrates that combining complementary foundation models can
 
 \subsection{Multi-Scale Vision-Language Feature Extraction}
 
-Building upon recent advances in dense vision-language understanding, we developed an effective strategy for extracting and utilizing multi-scale CLIP features. Our ablation studies (Section 4.4.1) confirmed that combining features from multiple transformer layers (layers 6, 12, 18, 24) significantly improves segmentation performance (+4.2\% mIoU over single-layer features), as it captures both fine-grained spatial details and high-level semantic information.
+Building upon recent advances in dense vision-language understanding, we developed an effective multi-scale CLIP voting strategy that evaluates masks at multiple resolutions (224px, 336px, 512px) with weighted averaging. Our experiments demonstrated that this approach significantly improves segmentation robustness across objects of varying sizes, contributing a +6.8\% mIoU improvement over single-scale CLIP scoring.
 
-This finding validates the importance of hierarchical feature representations in open-vocabulary tasks and provides practical guidance for future work on dense vision-language models.
+The weighted combination (0.2 for 224px, 0.5 for 336px, 0.3 for 512px) balances fine-grained detail capture with semantic understanding. This finding validates the importance of multi-scale feature representations in open-vocabulary tasks and provides practical guidance for future work on dense vision-language models.
+
+\subsection{Multi-Instance Selection Strategy}
+
+We developed an adaptive selection strategy that handles variable numbers of object instances per query—from single objects (e.g., one car) to multiple discrete instances (e.g., four tires) to semantic parts (e.g., all helmet components). This strategy employs:
+
+\begin{itemize}
+    \item Size-based filtering to remove artifacts (masks < 0.1\% of image area)
+    \item Adaptive score thresholds (0.15 for large masks, 0.20 for small masks)
+    \item Non-maximum suppression with 70\% overlap threshold for same-class masks
+    \item Confidence-based pixel assignment for overlapping different-class masks
+\end{itemize}
+
+This multi-instance approach enables the system to naturally handle diverse segmentation scenarios without requiring explicit specification of the expected number of instances.
 
 \subsection{Comprehensive Evaluation Framework}
 
-We established a thorough evaluation protocol spanning multiple datasets (COCO-Stuff, PASCAL VOC, ADE20K, COCO-Open split) and measuring both segmentation quality (mIoU, precision, recall) and generation quality (FID, CLIP Score, user ratings). Our experiments demonstrate:
+We established a thorough evaluation protocol on PASCAL VOC 2012, measuring segmentation quality through multiple metrics (mIoU, pixel accuracy, F1 score, precision, recall, boundary F1). Our experiments demonstrate:
 
 \begin{itemize}
-    \item Competitive performance on standard benchmarks, outperforming existing open-vocabulary methods (LSeg, GroupViT, CLIPSeg, MaskCLIP) by 2-4\% mIoU
-    \item Strong zero-shot generalization to novel object categories (32.4\% mIoU on COCO-Open novel classes)
-    \item High-quality generative editing with good prompt adherence (CLIP Score > 0.76) and visual realism (FID < 26)
+    \item Strong performance on PASCAL VOC, achieving 69.3\% mIoU with multi-scale CLIP voting and multi-instance selection
+    \item Significant improvement (+13.2 percentage points) over existing open-vocabulary methods like MaskCLIP (56.1\% mIoU)
+    \item The multi-scale CLIP voting contributes +6.8\% mIoU over baseline single-scale scoring
+    \item Robust handling of multiple instances, object parts, and varying object sizes through adaptive selection
 \end{itemize}
 
 \subsection{Practical System Design}
@@ -42,9 +56,9 @@ We designed the system with real-world applicability in mind, achieving end-to-e
 
 \subsection{Open-Vocabulary Paradigm Shift}
 
-Our results support the growing evidence that open-vocabulary approaches represent a fundamental shift in computer vision. Traditional closed-vocabulary methods achieve higher accuracy on their target classes (e.g., Mask2Former: 89.5\% on PASCAL VOC vs. our 58.4\%), but they completely fail on unseen objects. In contrast, our system gracefully handles arbitrary text prompts, making it far more versatile for real-world scenarios where the set of relevant objects cannot be predetermined.
+Our results support the growing evidence that open-vocabulary approaches represent a fundamental shift in computer vision. Traditional closed-vocabulary methods achieve higher accuracy on their target classes (e.g., Mask2Former: 89.5\% on PASCAL VOC vs. our 69.3\%), but they completely fail on unseen objects. In contrast, our system gracefully handles arbitrary text prompts, making it far more versatile for real-world scenarios where the set of relevant objects cannot be predetermined.
 
-The gap between open-vocabulary and closed-vocabulary performance (approximately 30 percentage points on PASCAL VOC) highlights an important research challenge: developing methods that achieve both flexibility and accuracy. As foundation models continue to improve and training datasets grow, this gap is likely to narrow.
+The gap between open-vocabulary and closed-vocabulary performance (approximately 20 percentage points on PASCAL VOC) highlights an important research challenge: developing methods that achieve both flexibility and accuracy. However, our multi-scale voting and multi-instance selection strategies demonstrate that this gap is narrowing—improving from a baseline 62.5\% to 69.3\% mIoU represents significant progress toward closing this performance divide.
 
 \subsection{Foundation Models as Building Blocks}
 
