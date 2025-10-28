@@ -226,6 +226,125 @@ class OpenVocabSegmentationPipeline:
 
         return result
 
+    def segment_batch(
+        self,
+        image: Union[np.ndarray, Image.Image, str],
+        text_prompts: List[str],
+        min_mask_area: int = 1024,
+        use_background_suppression: bool = True,
+        score_threshold: float = 0.12,
+        top_k_per_class: Optional[int] = None,
+        return_visualization: bool = False
+    ) -> Dict[str, List[ScoredMask]]:
+        """
+        BATCH MODE: Segment image with multiple text prompts simultaneously.
+
+        This is optimized for open-vocabulary segmentation with many classes:
+        - Generates SAM masks once (not once per class)
+        - Scores all masks against all text prompts in parallel
+        - Returns masks grouped by class
+
+        Args:
+            image: Input image (array, PIL, or path)
+            text_prompts: List of text descriptions (e.g., all COCO-Stuff classes)
+            min_mask_area: Minimum mask size (32x32 = 1024 pixels)
+            use_background_suppression: Whether to suppress background matches
+            score_threshold: Minimum similarity score to keep a mask
+            top_k_per_class: If specified, limit to top K masks per class
+            return_visualization: Include visualization data (not implemented yet)
+
+        Returns:
+            Dictionary mapping class names to lists of scored masks:
+            {
+                "car": [ScoredMask(score=0.85, ...), ScoredMask(score=0.72, ...)],
+                "road": [ScoredMask(score=0.78, ...)],
+                "sky": [ScoredMask(score=0.91, ...)],
+                ...
+            }
+
+        Example:
+            >>> pipeline = OpenVocabSegmentationPipeline()
+            >>> classes = ["car", "road", "tree", "sky", "building"]
+            >>> results = pipeline.segment_batch(image, classes)
+            >>> # Get top car mask
+            >>> if results["car"]:
+            >>>     best_car_mask = results["car"][0]
+            >>>     print(f"Car confidence: {best_car_mask.final_score}")
+        """
+        timing = {}
+
+        # Load image
+        image_array = self._load_image(image)
+
+        if self.verbose:
+            print(f"Batch segmentation with {len(text_prompts)} classes...")
+            print("  Stage 1: Generating masks with SAM 2...")
+
+        # Stage 1: Generate masks with SAM 2 (ONCE for all classes)
+        t0 = time.time()
+        all_masks = self.sam_generator.generate_masks(image_array)
+        timing['sam2_generation'] = time.time() - t0
+
+        if self.verbose:
+            print(f"    Generated {len(all_masks)} mask candidates ({timing['sam2_generation']:.2f}s)")
+
+        # Filter by size
+        filtered_masks = self.sam_generator.filter_by_size(
+            all_masks,
+            min_area=min_mask_area
+        )
+
+        if self.verbose:
+            print(f"    Filtered to {len(filtered_masks)} masks (min area: {min_mask_area})")
+
+        if len(filtered_masks) == 0:
+            if self.verbose:
+                print("    No masks generated!")
+            return {prompt: [] for prompt in text_prompts}
+
+        # Stage 2: Batch CLIP alignment (score all masks against all classes)
+        if self.verbose:
+            print(f"  Stage 2: Scoring {len(filtered_masks)} masks against {len(text_prompts)} classes...")
+
+        t0 = time.time()
+        class_to_masks = self.mask_aligner.align_masks_with_multiple_texts(
+            filtered_masks,
+            text_prompts,
+            image_array,
+            use_background_suppression=use_background_suppression,
+            score_threshold=score_threshold,
+            return_per_class=True
+        )
+        timing['clip_alignment'] = time.time() - t0
+
+        if self.verbose:
+            # Count how many classes have at least one mask
+            classes_with_masks = sum(1 for masks in class_to_masks.values() if len(masks) > 0)
+            total_masks = sum(len(masks) for masks in class_to_masks.values())
+            print(f"    Found {total_masks} mask-class pairs across {classes_with_masks} classes ({timing['clip_alignment']:.2f}s)")
+
+        # Optionally limit to top K per class
+        if top_k_per_class is not None:
+            for class_name in class_to_masks:
+                class_to_masks[class_name] = class_to_masks[class_name][:top_k_per_class]
+
+        if self.verbose:
+            print("Batch segmentation complete!\n")
+            # Show top 10 classes by number of masks
+            sorted_classes = sorted(
+                class_to_masks.items(),
+                key=lambda x: len(x[1]),
+                reverse=True
+            )
+            if sorted_classes:
+                print("  Top detected classes:")
+                for class_name, masks_list in sorted_classes[:10]:
+                    if len(masks_list) > 0:
+                        best_score = masks_list[0].final_score
+                        print(f"    {class_name:20s}: {len(masks_list):2d} masks (best: {best_score:.3f})")
+
+        return class_to_masks
+
     def segment_and_edit(
         self,
         image: Union[np.ndarray, Image.Image, str],

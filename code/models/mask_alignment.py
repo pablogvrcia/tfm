@@ -229,6 +229,177 @@ class MaskTextAligner:
 
         return top_masks, vis_data
 
+    def align_masks_with_multiple_texts(
+        self,
+        masks: List[MaskCandidate],
+        text_prompts: List[str],
+        image: np.ndarray,
+        use_background_suppression: bool = True,
+        score_threshold: float = 0.12,
+        return_per_class: bool = True
+    ) -> dict:
+        """
+        BATCH MODE: Score masks against multiple text prompts simultaneously.
+
+        This is the core optimization for open-vocabulary segmentation:
+        - Generate SAM masks once
+        - Extract all text embeddings in batch
+        - Score each mask against all classes simultaneously
+        - Return masks grouped by class
+
+        Args:
+            masks: List of SAM 2 mask candidates
+            text_prompts: List of text queries (e.g., all 171 COCO-Stuff classes)
+            image: Original image (H, W, 3)
+            use_background_suppression: Whether to apply background suppression
+            score_threshold: Minimum score to keep a mask-class pair
+            return_per_class: If True, return dict[class_name] = List[ScoredMask]
+                             If False, return flat list of (class_name, ScoredMask) tuples
+
+        Returns:
+            Dictionary mapping class names to lists of scored masks:
+            {
+                "car": [ScoredMask1, ScoredMask2, ...],
+                "road": [ScoredMask1, ...],
+                ...
+            }
+        """
+        if len(text_prompts) == 0:
+            return {}
+
+        # Extract all text embeddings in one batch
+        text_embeddings = self.clip_extractor.extract_text_features(
+            text_prompts,
+            use_prompt_ensemble=True,
+            normalize=True
+        )  # Shape: (num_prompts, D)
+
+        # Pre-compute background embedding if needed
+        bg_embedding = None
+        if use_background_suppression:
+            bg_embedding = self.clip_extractor.extract_text_features(
+                ["background", "nothing", "empty space"],
+                use_prompt_ensemble=False
+            ).mean(dim=0)  # Shape: (D,)
+
+        # Store results: class_name -> List[ScoredMask]
+        class_to_masks = {prompt: [] for prompt in text_prompts}
+
+        # For each mask, compute similarity to all classes
+        for mask_candidate in masks:
+            mask = mask_candidate.mask
+            mask_size = mask.sum()
+
+            # Skip tiny masks (< 0.1% of image)
+            min_size = (image.shape[0] * image.shape[1]) * 0.001
+            if mask_size < min_size:
+                continue
+
+            # Extract masked region
+            masked_region = self._extract_masked_region(image, mask)
+            if masked_region is None:
+                continue
+
+            # Multi-scale CLIP scoring (like MaskCLIP paper)
+            if self.use_multiscale:
+                # Compute multi-scale similarities to ALL classes at once
+                scale_similarities_all = []
+                pil_img = PILImage.fromarray(masked_region)
+
+                for size in self.multiscale_sizes:
+                    # Resize to target size
+                    resized = pil_img.resize((size, size), PILImage.Resampling.BILINEAR)
+                    resized_np = np.array(resized)
+
+                    # Extract CLIP features at this scale
+                    mask_embedding, _ = self.clip_extractor.extract_image_features(resized_np, normalize=True)
+
+                    # Compute similarity to ALL classes at once (batched)
+                    similarities = F.cosine_similarity(
+                        mask_embedding.unsqueeze(0),  # (1, D)
+                        text_embeddings,  # (num_prompts, D)
+                        dim=1
+                    )  # Shape: (num_prompts,)
+
+                    scale_similarities_all.append(similarities.cpu().numpy())
+
+                # Weighted average across scales for all classes
+                multi_scale_scores = sum(
+                    w * s for w, s in zip(self.multiscale_weights, scale_similarities_all)
+                )  # Shape: (num_prompts,)
+
+                # Background suppression (if enabled)
+                if use_background_suppression and bg_embedding is not None:
+                    # Use middle scale (336px) for background score
+                    resized_336 = pil_img.resize((336, 336), PILImage.Resampling.BILINEAR)
+                    resized_336_np = np.array(resized_336)
+                    mask_embedding_336, _ = self.clip_extractor.extract_image_features(resized_336_np, normalize=True)
+
+                    bg_score = F.cosine_similarity(
+                        mask_embedding_336.unsqueeze(0),
+                        bg_embedding.unsqueeze(0)
+                    ).item()
+
+                    multi_scale_scores -= self.background_weight * bg_score
+
+                final_scores = multi_scale_scores
+            else:
+                # Single-scale scoring (faster but less accurate)
+                mask_embedding, _ = self.clip_extractor.extract_image_features(masked_region, normalize=True)
+
+                # Compute similarity to ALL classes at once
+                similarities = F.cosine_similarity(
+                    mask_embedding.unsqueeze(0),  # (1, D)
+                    text_embeddings,  # (num_prompts, D)
+                    dim=1
+                )  # Shape: (num_prompts,)
+
+                final_scores = similarities.cpu().numpy()
+
+                # Background suppression (if enabled)
+                if use_background_suppression and bg_embedding is not None:
+                    bg_score = F.cosine_similarity(
+                        mask_embedding.unsqueeze(0),
+                        bg_embedding.unsqueeze(0)
+                    ).item()
+                    final_scores -= self.background_weight * bg_score
+
+            # Assign mask to classes based on scores
+            # Strategy: Each mask can match multiple classes, but we assign to best match
+            # and also keep other good matches (for multi-label scenarios)
+            best_score_idx = np.argmax(final_scores)
+            best_score = final_scores[best_score_idx]
+
+            # Add to best matching class if above threshold
+            if best_score >= score_threshold:
+                best_class = text_prompts[best_score_idx]
+
+                scored_mask = ScoredMask(
+                    mask_candidate=mask_candidate,
+                    similarity_score=best_score,
+                    background_score=bg_score if use_background_suppression else 0.0,
+                    final_score=best_score,
+                    rank=0  # Will be set later when sorting
+                )
+
+                class_to_masks[best_class].append(scored_mask)
+
+        # Sort masks within each class by score (highest first) and assign ranks
+        for class_name in class_to_masks:
+            class_to_masks[class_name].sort(key=lambda x: x.final_score, reverse=True)
+            for rank, scored_mask in enumerate(class_to_masks[class_name], start=1):
+                scored_mask.rank = rank
+
+        if return_per_class:
+            return class_to_masks
+        else:
+            # Flatten to list of tuples
+            flat_list = []
+            for class_name, masks_list in class_to_masks.items():
+                for scored_mask in masks_list:
+                    flat_list.append((class_name, scored_mask))
+            return flat_list
+
     def _compute_mask_score(
         self,
         mask: np.ndarray,
