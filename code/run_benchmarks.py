@@ -21,13 +21,14 @@ from pathlib import Path
 from datetime import datetime
 import numpy as np
 from tqdm import tqdm
+from PIL import Image
 
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent))
 
 from pipeline import OpenVocabSegmentationPipeline
 from benchmarks.metrics import compute_all_metrics, compute_novel_class_miou
-from utils import load_image, save_image
+from utils import save_image
 
 
 def run_benchmark(
@@ -77,7 +78,8 @@ def run_benchmark(
     if save_visualizations:
         vis_dir.mkdir(parents=True, exist_ok=True)
 
-    for idx, sample in enumerate(tqdm(dataset, desc="Evaluating")):
+    for idx in tqdm(range(len(dataset)), desc="Evaluating"):
+        sample = dataset[idx]
         image = sample['image']
         gt_mask = sample['mask']
         class_names = sample.get('class_names', [])
@@ -167,27 +169,102 @@ def run_benchmark(
 
 def load_dataset(name: str, data_dir: Path):
     """Load dataset by name."""
-    # Simple placeholder - you would implement full dataset loaders
-    # For now, return mock dataset structure
+    if name == "pascal-voc":
+        return PASCALVOCDataset(data_dir)
+    else:
+        # For other datasets, use mock for now
+        return MockDataset(name, data_dir)
 
-    class MockDataset:
-        def __init__(self, name, data_dir):
-            self.name = name
-            self.data_dir = data_dir
-            self.num_classes = 21 if name == "pascal-voc" else 171
 
-        def __len__(self):
-            return 10  # Mock
+class PASCALVOCDataset:
+    """PASCAL VOC 2012 Segmentation Dataset Loader."""
 
-        def __getitem__(self, idx):
-            # Mock sample
-            return {
-                'image': np.random.randint(0, 255, (512, 512, 3), dtype=np.uint8),
-                'mask': np.random.randint(0, self.num_classes, (512, 512), dtype=np.uint8),
-                'class_names': [f'class_{i}' for i in range(self.num_classes)]
-            }
+    CLASSES = [
+        'background', 'aeroplane', 'bicycle', 'bird', 'boat', 'bottle',
+        'bus', 'car', 'cat', 'chair', 'cow', 'diningtable', 'dog',
+        'horse', 'motorbike', 'person', 'pottedplant', 'sheep', 'sofa',
+        'train', 'tvmonitor'
+    ]
 
-    return MockDataset(name, data_dir)
+    def __init__(self, data_dir: Path, split='val', max_samples=None):
+        self.data_dir = Path(data_dir) / "pascal_voc" / "VOCdevkit" / "VOC2012"
+        self.split = split
+        self.num_classes = 21
+        self.class_names = self.CLASSES
+
+        # Load image IDs from split file
+        split_file = self.data_dir / "ImageSets" / "Segmentation" / f"{split}.txt"
+        if not split_file.exists():
+            raise FileNotFoundError(f"Split file not found: {split_file}")
+
+        with open(split_file, 'r') as f:
+            self.image_ids = [line.strip() for line in f.readlines()]
+
+        if max_samples is not None:
+            self.image_ids = self.image_ids[:max_samples]
+
+    def __len__(self):
+        return len(self.image_ids)
+
+    def __getitem__(self, idx):
+        if isinstance(idx, slice):
+            # Handle slicing by creating new dataset with subset
+            start, stop, step = idx.indices(len(self))
+            new_dataset = PASCALVOCDataset.__new__(PASCALVOCDataset)
+            new_dataset.data_dir = self.data_dir
+            new_dataset.split = self.split
+            new_dataset.num_classes = self.num_classes
+            new_dataset.class_names = self.class_names
+            new_dataset.image_ids = self.image_ids[idx]
+            return new_dataset
+
+        if idx >= len(self):
+            raise IndexError(f"Index {idx} out of range for dataset of size {len(self)}")
+
+        img_id = self.image_ids[idx]
+
+        # Load image
+        img_path = self.data_dir / "JPEGImages" / f"{img_id}.jpg"
+        image = np.array(Image.open(img_path).convert('RGB'))
+
+        # Load segmentation mask
+        mask_path = self.data_dir / "SegmentationClass" / f"{img_id}.png"
+        mask = np.array(Image.open(mask_path))
+
+        return {
+            'image': image,
+            'mask': mask,
+            'class_names': self.class_names,
+            'image_id': img_id
+        }
+
+
+class MockDataset:
+    """Mock dataset for testing."""
+    def __init__(self, name, data_dir, max_samples=10):
+        self.name = name
+        self.data_dir = data_dir
+        self.num_classes = 21 if name == "pascal-voc" else 171
+        self.max_samples = max_samples
+        self.class_names = [f'class_{i}' for i in range(self.num_classes)]
+
+    def __len__(self):
+        return self.max_samples
+
+    def __getitem__(self, idx):
+        if isinstance(idx, slice):
+            start, stop, step = idx.indices(len(self))
+            num_samples = len(range(start, stop, step))
+            return MockDataset(self.name, self.data_dir, max_samples=num_samples)
+
+        if idx >= self.max_samples:
+            raise IndexError(f"Index {idx} out of range for dataset of size {self.max_samples}")
+
+        return {
+            'image': np.random.randint(0, 255, (512, 512, 3), dtype=np.uint8),
+            'mask': np.random.randint(0, self.num_classes, (512, 512), dtype=np.uint8),
+            'class_names': self.class_names
+        }
 
 
 def aggregate_metrics(metrics_list, dataset_name):
