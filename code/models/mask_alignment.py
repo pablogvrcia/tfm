@@ -397,6 +397,30 @@ class MaskTextAligner:
                 exp_scores = np.exp(final_scores - np.max(final_scores))  # Subtract max for numerical stability
                 final_scores = exp_scores / exp_scores.sum()
 
+            # MASK QUALITY PENALTY:
+            # Penalize oversized masks (likely include too much background)
+            # This addresses the airplane+sky, boat+water issue
+            # Formula: quality_score = similarity_score * (1 - size_penalty)
+            #
+            # Aggressive penalty for masks > 15% of image:
+            # - 15% image size: no penalty (1.0)
+            # - 25% image size: small penalty (0.76)
+            # - 35% image size: medium penalty (0.52)
+            # - 45% image size: large penalty (0.28)
+            # - 50%+ image size: very large penalty (0.15)
+            mask_ratio = mask_size / total_image_pixels
+            if mask_ratio > 0.15:
+                # Apply aggressive penalty for large masks
+                # penalty = (mask_ratio - 0.15) / 0.35  --> 0 at 15%, 1.0 at 50%
+                size_penalty_factor = min((mask_ratio - 0.15) / 0.35, 1.0)
+                # Reduce score by up to 85% for very large masks (more aggressive!)
+                quality_multiplier = 1.0 - (0.85 * size_penalty_factor)
+            else:
+                quality_multiplier = 1.0  # No penalty for compact masks
+
+            # Apply quality multiplier to all class scores
+            final_scores = final_scores * quality_multiplier
+
             # Assign mask to classes based on scores
             # Strategy: Each mask can match multiple classes, but we assign to best match
             # and also keep other good matches (for multi-label scenarios)
@@ -409,9 +433,9 @@ class MaskTextAligner:
 
                 scored_mask = ScoredMask(
                     mask_candidate=mask_candidate,
-                    similarity_score=best_score,
+                    similarity_score=best_score / quality_multiplier,  # Original similarity before penalty
                     background_score=bg_score if use_background_suppression else 0.0,
-                    final_score=best_score,
+                    final_score=best_score,  # After quality penalty
                     rank=0  # Will be set later when sorting
                 )
 

@@ -116,7 +116,7 @@ def run_benchmark(
                 text_prompts,
                 use_background_suppression=True,
                 score_threshold=0.12,
-                top_k_per_class=5
+                top_k_per_class=2  # Reduced from 5 to 2 to avoid oversized masks
             )
 
             # Build prediction mask from batch results
