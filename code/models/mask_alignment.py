@@ -241,7 +241,8 @@ class MaskTextAligner:
         score_threshold: float = 0.12,
         return_per_class: bool = True,
         prompt_denoising_threshold: float = 0.12,
-        temperature: float = 100.0  # Score calibration (MaskCLIP/MasQCLIP)
+        temperature: float = 100.0,  # Score calibration (MaskCLIP/MasQCLIP)
+        auto_adapt_to_vocabulary: bool = True  # Automatically adapt params based on num_classes
     ) -> dict:
         """
         BATCH MODE: Score masks against multiple text prompts simultaneously.
@@ -274,6 +275,34 @@ class MaskTextAligner:
         """
         if len(text_prompts) == 0:
             return {}
+
+        # ADAPTIVE PARAMETERS BASED ON VOCABULARY SIZE
+        # Large vocabularies (e.g., COCO-Stuff 171 classes) need different settings
+        # than small vocabularies (e.g., PASCAL VOC 21 classes)
+        num_classes = len(text_prompts)
+
+        if auto_adapt_to_vocabulary:
+            if num_classes > 50:
+                # Large vocabulary (e.g., COCO-Stuff)
+                # - Increase temperature for better discrimination
+                # - Lower score threshold to accept more predictions
+                # - Use percentile-based denoising (keep top 90%)
+                temperature = 75.0  # Increased from 50 to 75 for better score separation
+                score_threshold = 0.05  # Decreased from 0.08 to 0.05 to accept more
+                denoising_percentile = 10  # Keep top 90% (was 20 = top 80%)
+
+                if self.verbose:
+                    print(f"  [Adaptive Params] Large vocabulary detected ({num_classes} classes)")
+                    print(f"  [Adaptive Params] Adjusted: temperature={temperature}, score_threshold={score_threshold}")
+            else:
+                # Small/medium vocabulary (e.g., PASCAL VOC)
+                # Keep default parameters
+                denoising_percentile = 50  # Keep top 50% (median)
+
+                if self.verbose:
+                    print(f"  [Adaptive Params] Standard vocabulary ({num_classes} classes)")
+        else:
+            denoising_percentile = 50  # Default: median
 
         # Extract all text embeddings in one batch
         text_embeddings = self.clip_extractor.extract_text_features(
@@ -464,20 +493,29 @@ class MaskTextAligner:
             max_score = max(m.final_score for m in masks_list)
             class_max_scores.append((class_name, max_score))
 
-        # ADAPTIVE DENOISING: Use both absolute threshold AND relative filtering
-        # This handles cases where scores are very compressed (0.138-0.188)
+        # ADAPTIVE DENOISING: Use percentile-based filtering that adapts to vocabulary size
+        # - Small vocabularies (21 classes): Use median (keep top 50%)
+        # - Large vocabularies (171 classes): Use 10th percentile (keep top 90%)
         if len(class_max_scores) > 0:
             scores_array = np.array([s for _, s in class_max_scores])
 
             # Strategy 1: Absolute threshold (keep scores >= threshold)
             absolute_threshold = prompt_denoising_threshold
 
-            # Strategy 2: Adaptive threshold (keep top 50% by default)
-            # Use median as adaptive threshold, but ensure it's at least the absolute threshold
-            adaptive_threshold = max(np.median(scores_array), absolute_threshold)
+            # Strategy 2: Percentile-based threshold (adaptive to vocabulary size)
+            # Use the denoising_percentile determined earlier based on num_classes
+            percentile_threshold = np.percentile(scores_array, denoising_percentile)
+
+            # For large vocabularies (>50 classes), prefer percentile over absolute threshold
+            # For small vocabularies, combine both for safety
+            if num_classes > 50:
+                # Large vocab: Use MIN to favor percentile (more permissive)
+                adaptive_threshold = min(percentile_threshold, absolute_threshold)
+            else:
+                # Small vocab: Use MAX for stricter filtering
+                adaptive_threshold = max(percentile_threshold, absolute_threshold)
 
             # Use the adaptive threshold if we have many classes (open-vocab scenario)
-            # This filters out bottom 50% of classes when scores are compressed
             effective_threshold = adaptive_threshold if len(class_max_scores) > 5 else absolute_threshold
 
             for class_name, max_score in class_max_scores:

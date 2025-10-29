@@ -98,34 +98,70 @@ class COCOStuffDataset:
     - 91 stuff classes (backgrounds, materials, etc.)
 
     Paper: https://arxiv.org/abs/1612.03716
+
+    Note: GT masks use COCO's original class IDs (0-181 with gaps).
+    We convert them to contiguous train IDs (0-170) using MaskCLIP's mapping.
     """
 
-    # COCO-Stuff 171 classes (indexed 0-170, with 0 reserved for unlabeled)
+    # Mapping from COCO class IDs to train IDs (0-170)
+    # This is the standard COCO-Stuff 164K mapping used by MaskCLIP
+    COCO_ID_TO_TRAIN_ID = {
+        0: 0, 1: 1, 2: 2, 3: 3, 4: 4, 5: 5, 6: 6, 7: 7, 8: 8, 9: 9, 10: 10,
+        12: 11, 13: 12, 14: 13, 15: 14, 16: 15, 17: 16, 18: 17, 19: 18, 20: 19,
+        21: 20, 22: 21, 23: 22, 24: 23, 26: 24, 27: 25, 30: 26, 31: 27, 32: 28,
+        33: 29, 34: 30, 35: 31, 36: 32, 37: 33, 38: 34, 39: 35, 40: 36, 41: 37,
+        42: 38, 43: 39, 45: 40, 46: 41, 47: 42, 48: 43, 49: 44, 50: 45, 51: 46,
+        52: 47, 53: 48, 54: 49, 55: 50, 56: 51, 57: 52, 58: 53, 59: 54, 60: 55,
+        61: 56, 62: 57, 63: 58, 64: 59, 66: 60, 69: 61, 71: 62, 72: 63, 73: 64,
+        74: 65, 75: 66, 76: 67, 77: 68, 78: 69, 79: 70, 80: 71, 81: 72, 83: 73,
+        84: 74, 85: 75, 86: 76, 87: 77, 88: 78, 89: 79, 91: 80, 92: 81, 93: 82,
+        94: 83, 95: 84, 96: 85, 97: 86, 98: 87, 99: 88, 100: 89, 101: 90, 102: 91,
+        103: 92, 104: 93, 105: 94, 106: 95, 107: 96, 108: 97, 109: 98, 110: 99,
+        111: 100, 112: 101, 113: 102, 114: 103, 115: 104, 116: 105, 117: 106,
+        118: 107, 119: 108, 120: 109, 121: 110, 122: 111, 123: 112, 124: 113,
+        125: 114, 126: 115, 127: 116, 128: 117, 129: 118, 130: 119, 131: 120,
+        132: 121, 133: 122, 134: 123, 135: 124, 136: 125, 137: 126, 138: 127,
+        139: 128, 140: 129, 141: 130, 142: 131, 143: 132, 144: 133, 145: 134,
+        146: 135, 147: 136, 148: 137, 149: 138, 150: 139, 151: 140, 152: 141,
+        153: 142, 154: 143, 155: 144, 156: 145, 157: 146, 158: 147, 159: 148,
+        160: 149, 161: 150, 162: 151, 163: 152, 164: 153, 165: 154, 166: 155,
+        167: 156, 168: 157, 169: 158, 170: 159, 171: 160, 172: 161, 173: 162,
+        174: 163, 175: 164, 176: 165, 177: 166, 178: 167, 179: 168, 180: 169,
+        181: 170, 255: 255  # Ignore label
+    }
+
+    # COCO-Stuff 171 classes (indexed 0-170)
+    # This matches MaskCLIP's standard COCO-Stuff 164k class list exactly
     STUFF_CLASSES = [
-        'unlabeled',  # 0
-        'person', 'bicycle', 'car', 'motorcycle', 'airplane', 'bus', 'train', 'truck', 'boat',  # 1-9 things
-        'traffic light', 'fire hydrant', 'stop sign', 'parking meter', 'bench',  # 10-14
-        'bird', 'cat', 'dog', 'horse', 'sheep', 'cow', 'elephant', 'bear', 'zebra', 'giraffe',  # 15-24
-        'backpack', 'umbrella', 'handbag', 'tie', 'suitcase',  # 25-29
-        'frisbee', 'skis', 'snowboard', 'sports ball', 'kite', 'baseball bat', 'baseball glove',  # 30-36
-        'skateboard', 'surfboard', 'tennis racket',  # 37-39
-        'bottle', 'wine glass', 'cup', 'fork', 'knife', 'spoon', 'bowl',  # 40-46
-        'banana', 'apple', 'sandwich', 'orange', 'broccoli', 'carrot', 'hot dog', 'pizza', 'donut', 'cake',  # 47-56
-        'chair', 'couch', 'potted plant', 'bed', 'dining table', 'toilet',  # 57-62
-        'tv', 'laptop', 'mouse', 'remote', 'keyboard', 'cell phone', 'microwave', 'oven', 'toaster', 'sink', 'refrigerator',  # 63-73
-        'book', 'clock', 'vase', 'scissors', 'teddy bear', 'hair drier', 'toothbrush',  # 74-80 (end of things)
-        # Stuff classes start here (81-170)
-        'banner', 'blanket', 'branch', 'bridge', 'building', 'bush', 'cabinet', 'cage', 'cardboard',
-        'carpet', 'ceiling', 'tile ceiling', 'cloth', 'clothes', 'clouds', 'counter', 'cupboard',
-        'curtain', 'desk', 'dirt', 'door', 'fence', 'floor', 'wood floor', 'tile floor', 'flower',
-        'fog', 'food', 'fruit', 'furniture', 'grass', 'gravel', 'ground', 'hill', 'house',
-        'leaves', 'light', 'mat', 'metal', 'mirror', 'moss', 'mountain', 'mud', 'napkin', 'net',
-        'paper', 'pavement', 'pillow', 'plant', 'plastic', 'platform', 'playingfield', 'railing',
-        'railroad', 'river', 'road', 'rock', 'roof', 'rug', 'salad', 'sand', 'sea', 'shelf',
-        'sky', 'skyscraper', 'snow', 'solid', 'stairs', 'stone', 'straw', 'structural', 'table',
-        'tent', 'textile', 'towel', 'tree', 'vegetable', 'wall', 'brick wall', 'concrete wall',
-        'panel wall', 'stone wall', 'tile wall', 'wood wall', 'water', 'waterdrops', 'window',
-        'wood'
+        'person', 'bicycle', 'car', 'motorcycle', 'airplane', 'bus', 'train',
+        'truck', 'boat', 'traffic light', 'fire hydrant', 'stop sign',
+        'parking meter', 'bench', 'bird', 'cat', 'dog', 'horse', 'sheep',
+        'cow', 'elephant', 'bear', 'zebra', 'giraffe', 'backpack', 'umbrella',
+        'handbag', 'tie', 'suitcase', 'frisbee', 'skis', 'snowboard',
+        'sports ball', 'kite', 'baseball bat', 'baseball glove', 'skateboard',
+        'surfboard', 'tennis racket', 'bottle', 'wine glass', 'cup', 'fork',
+        'knife', 'spoon', 'bowl', 'banana', 'apple', 'sandwich', 'orange',
+        'broccoli', 'carrot', 'hot dog', 'pizza', 'donut', 'cake', 'chair',
+        'couch', 'potted plant', 'bed', 'dining table', 'toilet', 'tv',
+        'laptop', 'mouse', 'remote', 'keyboard', 'cell phone', 'microwave',
+        'oven', 'toaster', 'sink', 'refrigerator', 'book', 'clock', 'vase',
+        'scissors', 'teddy bear', 'hair drier', 'toothbrush', 'banner',
+        'blanket', 'branch', 'bridge', 'building-other', 'bush', 'cabinet',
+        'cage', 'cardboard', 'carpet', 'ceiling-other', 'ceiling-tile',
+        'cloth', 'clothes', 'clouds', 'counter', 'cupboard', 'curtain',
+        'desk-stuff', 'dirt', 'door-stuff', 'fence', 'floor-marble',
+        'floor-other', 'floor-stone', 'floor-tile', 'floor-wood',
+        'flower', 'fog', 'food-other', 'fruit', 'furniture-other', 'grass',
+        'gravel', 'ground-other', 'hill', 'house', 'leaves', 'light', 'mat',
+        'metal', 'mirror-stuff', 'moss', 'mountain', 'mud', 'napkin', 'net',
+        'paper', 'pavement', 'pillow', 'plant-other', 'plastic', 'platform',
+        'playingfield', 'railing', 'railroad', 'river', 'road', 'rock', 'roof',
+        'rug', 'salad', 'sand', 'sea', 'shelf', 'sky-other', 'skyscraper',
+        'snow', 'solid-other', 'stairs', 'stone', 'straw', 'structural-other',
+        'table', 'tent', 'textile-other', 'towel', 'tree', 'vegetable',
+        'wall-brick', 'wall-concrete', 'wall-other', 'wall-panel',
+        'wall-stone', 'wall-tile', 'wall-wood', 'water-other', 'waterdrops',
+        'window-blind', 'window-other', 'wood'
     ]
 
     def __init__(self, data_dir: Path, split='val2027', max_samples: Optional[int] = None):
@@ -195,7 +231,13 @@ class COCOStuffDataset:
             # If mask doesn't exist, create empty mask
             mask = np.zeros(image.shape[:2], dtype=np.uint8)
         else:
-            mask = np.array(Image.open(mask_path))
+            # Load mask with COCO class IDs
+            mask_coco = np.array(Image.open(mask_path))
+
+            # Convert from COCO IDs to train IDs (0-170)
+            mask = np.zeros_like(mask_coco, dtype=np.uint8)
+            for coco_id, train_id in self.COCO_ID_TO_TRAIN_ID.items():
+                mask[mask_coco == coco_id] = train_id
 
         return {
             'image': image,

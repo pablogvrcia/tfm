@@ -85,6 +85,64 @@ class CLIPFeatureExtractor:
         self.features = {}
         self._register_hooks()
 
+        # Class synonym mapping (inspired by MasQCLIP)
+        # Using top 2 synonyms per class to avoid over-averaging
+        self.class_synonyms = {
+            # PASCAL VOC classes
+            'aeroplane': ['aeroplane', 'airplane'],
+            'bicycle': ['bicycle', 'bike'],
+            'bird': ['bird'],
+            'boat': ['boat', 'ship'],
+            'bottle': ['bottle'],
+            'bus': ['bus'],
+            'car': ['car', 'automobile'],
+            'cat': ['cat'],
+            'chair': ['chair'],
+            'cow': ['cow'],
+            'diningtable': ['dining table', 'table'],
+            'dog': ['dog'],
+            'horse': ['horse'],
+            'motorbike': ['motorbike', 'motorcycle'],
+            'person': ['person', 'people'],
+            'pottedplant': ['potted plant', 'plant'],
+            'sheep': ['sheep'],
+            'sofa': ['sofa', 'couch'],
+            'train': ['train', 'locomotive'],
+            'tvmonitor': ['tv', 'television'],
+            # Common stuff classes
+            'background': ['background'],
+            'sky': ['sky'],
+            'grass': ['grass'],
+            'road': ['road'],
+            'water': ['water'],
+            'building': ['building'],
+            'tree': ['tree'],
+        }
+
+    def _get_class_variants(self, class_name: str) -> List[str]:
+        """
+        Get synonyms/variants for a class name.
+
+        Args:
+            class_name: Original class name
+
+        Returns:
+            List of class name variants (includes original if no synonyms found)
+        """
+        # Normalize class name (lowercase, replace underscores)
+        normalized = class_name.lower().replace('_', '').replace('-', '')
+
+        # Check if we have synonyms
+        if normalized in self.class_synonyms:
+            return self.class_synonyms[normalized]
+
+        # Also check original name
+        if class_name in self.class_synonyms:
+            return self.class_synonyms[class_name]
+
+        # Return original if no synonyms found
+        return [class_name]
+
     def _register_hooks(self):
         """Register forward hooks to extract intermediate features."""
 
@@ -215,6 +273,7 @@ class CLIPFeatureExtractor:
 
         if use_prompt_ensemble:
             # Use prompt templates as described in methodology
+            # Keep it simple - 4 templates work best (over-averaging hurts)
             templates = [
                 "a photo of a {}",
                 "{} in a scene",
