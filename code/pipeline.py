@@ -234,7 +234,9 @@ class OpenVocabSegmentationPipeline:
         use_background_suppression: bool = True,
         score_threshold: float = 0.12,
         top_k_per_class: Optional[int] = None,
-        return_visualization: bool = False
+        return_visualization: bool = False,
+        prompt_denoising_threshold: float = 0.12,
+        temperature: float = 100.0  # Score calibration from MaskCLIP/MasQCLIP
     ) -> Dict[str, List[ScoredMask]]:
         """
         BATCH MODE: Segment image with multiple text prompts simultaneously.
@@ -252,6 +254,7 @@ class OpenVocabSegmentationPipeline:
             score_threshold: Minimum similarity score to keep a mask
             top_k_per_class: If specified, limit to top K masks per class
             return_visualization: Include visualization data (not implemented yet)
+            prompt_denoising_threshold: Min max-score to keep a class (default: 0.12, same as score_threshold)
 
         Returns:
             Dictionary mapping class names to lists of scored masks:
@@ -313,7 +316,9 @@ class OpenVocabSegmentationPipeline:
             image_array,
             use_background_suppression=use_background_suppression,
             score_threshold=score_threshold,
-            return_per_class=True
+            return_per_class=True,
+            prompt_denoising_threshold=prompt_denoising_threshold,
+            temperature=temperature
         )
         timing['clip_alignment'] = time.time() - t0
 

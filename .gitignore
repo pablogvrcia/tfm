@@ -69,3 +69,6 @@ pascal_voc
 results
 
 coco_stuff
+MaskCLIP
+clipseg
+MasQCLIP

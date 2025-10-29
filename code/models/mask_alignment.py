@@ -54,6 +54,7 @@ class MaskTextAligner:
         similarity_threshold: float = 0.02,  # Lowered to match actual CLIP similarity scores
         use_multiscale: bool = True,  # Multi-scale CLIP voting
         multiscale_weights: Tuple[float, float, float] = (0.2, 0.5, 0.3),  # Weights for [224, 336, 512]
+        verbose: bool = True,  # Enable logging for debugging
     ):
         """
         Initialize mask-text aligner.
@@ -65,6 +66,7 @@ class MaskTextAligner:
             similarity_threshold: Minimum score threshold
             use_multiscale: Whether to use multi-scale CLIP voting
             multiscale_weights: Weights for [224px, 336px, 512px] scales
+            verbose: Enable logging for debugging
         """
         self.clip_extractor = clip_extractor
         self.background_weight = background_weight
@@ -73,6 +75,7 @@ class MaskTextAligner:
         self.use_multiscale = use_multiscale
         self.multiscale_weights = multiscale_weights
         self.multiscale_sizes = [224, 336, 512]
+        self.verbose = verbose
 
     def align_masks_with_text(
         self,
@@ -236,7 +239,9 @@ class MaskTextAligner:
         image: np.ndarray,
         use_background_suppression: bool = True,
         score_threshold: float = 0.12,
-        return_per_class: bool = True
+        return_per_class: bool = True,
+        prompt_denoising_threshold: float = 0.12,
+        temperature: float = 100.0  # Score calibration (MaskCLIP/MasQCLIP)
     ) -> dict:
         """
         BATCH MODE: Score masks against multiple text prompts simultaneously.
@@ -255,6 +260,9 @@ class MaskTextAligner:
             score_threshold: Minimum score to keep a mask-class pair
             return_per_class: If True, return dict[class_name] = List[ScoredMask]
                              If False, return flat list of (class_name, ScoredMask) tuples
+            prompt_denoising_threshold: Minimum max score to keep a class (default: 0.12, same as score_threshold)
+            temperature: Score calibration factor (default: 100.0 from MaskCLIP/MasQCLIP)
+                        Higher values increase score spread, making correct classes more confident
 
         Returns:
             Dictionary mapping class names to lists of scored masks:
@@ -286,13 +294,24 @@ class MaskTextAligner:
         class_to_masks = {prompt: [] for prompt in text_prompts}
 
         # For each mask, compute similarity to all classes
+        total_image_pixels = image.shape[0] * image.shape[1]
+
         for mask_candidate in masks:
             mask = mask_candidate.mask
             mask_size = mask.sum()
 
             # Skip tiny masks (< 0.1% of image)
-            min_size = (image.shape[0] * image.shape[1]) * 0.001
+            min_size = total_image_pixels * 0.001
             if mask_size < min_size:
+                continue
+
+            # CRITICAL FIX: Skip oversized masks (likely background)
+            # MaskCLIP/MasQCLIP finding: Masks > 50% of image are usually sky/water/background
+            # These score high because they include both object + large background region
+            max_size = total_image_pixels * 0.5  # 50% threshold
+            if mask_size > max_size:
+                if self.verbose:
+                    print(f"  [Mask Filtering] Skipping oversized mask: {mask_size/total_image_pixels*100:.1f}% of image")
                 continue
 
             # Extract masked region
@@ -364,6 +383,20 @@ class MaskTextAligner:
                     ).item()
                     final_scores -= self.background_weight * bg_score
 
+            # SCORE CALIBRATION (MaskCLIP/MasQCLIP paper):
+            # Apply temperature scaling to expand compressed score ranges
+            # This makes correct classes more confident relative to distractors
+            # MaskCLIP uses temperature=100 before softmax (page 8)
+            if temperature != 1.0:
+                # Apply temperature scaling
+                # Higher temperature = more spread in scores
+                final_scores = final_scores * temperature
+
+                # Apply softmax to convert to probabilities (optional but recommended)
+                # This ensures scores sum to 1 and creates clearer distinction
+                exp_scores = np.exp(final_scores - np.max(final_scores))  # Subtract max for numerical stability
+                final_scores = exp_scores / exp_scores.sum()
+
             # Assign mask to classes based on scores
             # Strategy: Each mask can match multiple classes, but we assign to best match
             # and also keep other good matches (for multi-label scenarios)
@@ -389,6 +422,71 @@ class MaskTextAligner:
             class_to_masks[class_name].sort(key=lambda x: x.final_score, reverse=True)
             for rank, scored_mask in enumerate(class_to_masks[class_name], start=1):
                 scored_mask.rank = rank
+
+        # PROMPT DENOISING (MaskCLIP paper p.8):
+        # Remove classes where the max confidence across ALL masks is below threshold.
+        # This filters out "distractor classes" that don't actually appear in the image.
+        # Critical for open-vocabulary with many classes!
+        denoised_classes = {}
+        num_classes_before = len([c for c, m in class_to_masks.items() if len(m) > 0])
+
+        # Collect max scores for all classes (for logging/debugging)
+        class_max_scores = []
+        for class_name, masks_list in class_to_masks.items():
+            if len(masks_list) == 0:
+                continue
+
+            # Get max score for this class across all masks
+            max_score = max(m.final_score for m in masks_list)
+            class_max_scores.append((class_name, max_score))
+
+        # ADAPTIVE DENOISING: Use both absolute threshold AND relative filtering
+        # This handles cases where scores are very compressed (0.138-0.188)
+        if len(class_max_scores) > 0:
+            scores_array = np.array([s for _, s in class_max_scores])
+
+            # Strategy 1: Absolute threshold (keep scores >= threshold)
+            absolute_threshold = prompt_denoising_threshold
+
+            # Strategy 2: Adaptive threshold (keep top 50% by default)
+            # Use median as adaptive threshold, but ensure it's at least the absolute threshold
+            adaptive_threshold = max(np.median(scores_array), absolute_threshold)
+
+            # Use the adaptive threshold if we have many classes (open-vocab scenario)
+            # This filters out bottom 50% of classes when scores are compressed
+            effective_threshold = adaptive_threshold if len(class_max_scores) > 5 else absolute_threshold
+
+            for class_name, max_score in class_max_scores:
+                if max_score >= effective_threshold:
+                    # Find the masks_list for this class
+                    denoised_classes[class_name] = class_to_masks[class_name]
+        else:
+            denoised_classes = class_to_masks
+            effective_threshold = prompt_denoising_threshold
+
+        # Use denoised results instead of raw results
+        num_classes_after = len(denoised_classes)
+        num_filtered = num_classes_before - num_classes_after
+
+        # Log the denoising effect (useful for debugging)
+        if self.verbose:
+            if len(class_max_scores) > 0:
+                scores_array = [s for _, s in class_max_scores]
+                print(f"  [Prompt Denoising] Absolute threshold: {prompt_denoising_threshold:.3f}")
+                print(f"  [Prompt Denoising] Adaptive threshold: {effective_threshold:.3f} (median of {len(class_max_scores)} classes)")
+                print(f"  [Prompt Denoising] Score range: {min(scores_array):.3f} - {max(scores_array):.3f}")
+                print(f"  [Prompt Denoising] Score mean: {np.mean(scores_array):.3f} ± {np.std(scores_array):.3f}")
+                print(f"  [Prompt Denoising] Classes before: {num_classes_before}, after: {num_classes_after} (filtered {num_filtered})")
+
+                # Show top 5 kept classes
+                kept_classes = sorted([(n, s) for n, s in class_max_scores if s >= effective_threshold],
+                                     key=lambda x: x[1], reverse=True)
+                if kept_classes:
+                    print(f"  [Prompt Denoising] Top kept classes:")
+                    for class_name, score in kept_classes[:5]:
+                        print(f"    - {class_name}: {score:.3f}")
+
+        class_to_masks = denoised_classes
 
         if return_per_class:
             return class_to_masks

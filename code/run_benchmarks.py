@@ -29,6 +29,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 from pipeline import OpenVocabSegmentationPipeline
 from benchmarks.metrics import compute_all_metrics, compute_novel_class_miou
 from utils import save_image
+from datasets import load_dataset
 
 
 def run_benchmark(
@@ -37,7 +38,8 @@ def run_benchmark(
     output_dir: Path,
     num_samples: int = None,
     save_visualizations: bool = False,
-    device: str = "cuda"
+    device: str = "cuda",
+    mode: str = "oracle"
 ):
     """
     Run benchmark evaluation on a dataset.
@@ -49,9 +51,13 @@ def run_benchmark(
         num_samples: Number of samples to evaluate (None = all)
         save_visualizations: Whether to save visualization images
         device: Computation device
+        mode: Evaluation mode:
+            - "oracle": Only prompt classes present in GT (faster, upper bound)
+            - "open-vocab": Prompt ALL vocabulary classes (realistic, slower)
     """
     print(f"\n{'='*80}")
     print(f"Running benchmark: {dataset_name.upper()}")
+    print(f"Mode: {mode.upper()}")
     print(f"{'='*80}\n")
 
     # Initialize pipeline
@@ -59,14 +65,16 @@ def run_benchmark(
     pipeline = OpenVocabSegmentationPipeline(device=device, verbose=False)
 
     # Load dataset
-    dataset = load_dataset(dataset_name, data_dir)
-
-    if num_samples is not None:
-        dataset = dataset[:num_samples]
+    dataset = load_dataset(dataset_name, data_dir, max_samples=num_samples)
 
     print(f"Dataset: {dataset_name}")
     print(f"Samples: {len(dataset)}")
     print(f"Classes: {dataset.num_classes if hasattr(dataset, 'num_classes') else 'N/A'}")
+    print(f"Evaluation mode: {mode}")
+    if mode == "oracle":
+        print("  → Only prompting classes present in each image's ground truth")
+    else:
+        print(f"  → Prompting ALL {dataset.num_classes} classes for every image (true open-vocabulary)")
     print()
 
     # Run evaluation
@@ -84,73 +92,122 @@ def run_benchmark(
         gt_mask = sample['mask']
         class_names = sample.get('class_names', [])
 
-        # Run segmentation for each class in ground truth
+        # Initialize prediction mask
         pred_mask = np.zeros_like(gt_mask)
         confidence_map = np.zeros(gt_mask.shape, dtype=np.float32)
 
-        unique_classes = np.unique(gt_mask)
-        unique_classes = unique_classes[unique_classes != 255]  # Remove ignore index
+        # Determine which classes to evaluate
+        if mode == "oracle":
+            # Oracle mode: Only prompt classes present in GT
+            unique_classes = np.unique(gt_mask)
+            unique_classes = unique_classes[unique_classes != 255]  # Remove ignore index
+            unique_classes = unique_classes[unique_classes != 0]  # Skip background
+        else:
+            # Open-vocabulary mode: Prompt ALL classes
+            unique_classes = np.arange(1, len(class_names))  # All classes except background (0)
 
-        # Skip background (class 0) - we'll assign it at the end
-        unique_classes = unique_classes[unique_classes != 0]
+        # Choose evaluation method based on mode
+        if mode == "open-vocab":
+            # Use batch mode for open-vocabulary (much faster for many classes)
+            text_prompts = [class_names[cls_id] for cls_id in unique_classes if cls_id < len(class_names)]
 
-        for cls_id in unique_classes:
-            if cls_id >= len(class_names):
-                continue
+            class_to_masks = pipeline.segment_batch(
+                image,
+                text_prompts,
+                use_background_suppression=True,
+                score_threshold=0.12,
+                top_k_per_class=5
+            )
 
-            class_name = class_names[cls_id]
+            # Build prediction mask from batch results
+            for class_name, masks_list in class_to_masks.items():
+                try:
+                    cls_id = class_names.index(class_name)
+                except ValueError:
+                    continue
 
-            try:
-                # Get all high-confidence masks without adaptive selection
-                # For benchmarks, we want ALL instances of the class
-                result = pipeline.segment(
-                    image,
-                    text_prompt=class_name,
-                    top_k=20,  # Get many candidates
-                    use_adaptive_selection=False,  # Don't use adaptive - get all masks
-                    return_visualization=False
-                )
+                for scored_mask in masks_list:
+                    mask = scored_mask.mask_candidate.mask
+                    score = scored_mask.final_score
+                    mask_size = mask.sum()
 
-                if result.segmentation_masks:
-                    # Sort masks by size (largest first) to prioritize complete objects
-                    sorted_masks = sorted(result.segmentation_masks,
-                                        key=lambda x: x.mask_candidate.mask.sum(),
-                                        reverse=True)
+                    # Skip tiny masks
+                    min_size = (gt_mask.shape[0] * gt_mask.shape[1]) * 0.001
+                    if mask_size < min_size:
+                        continue
 
-                    # Strategy: Take largest mask with high score, then add non-overlapping instances
-                    for seg_result in sorted_masks:
-                        mask = seg_result.mask_candidate.mask
-                        score = seg_result.final_score
-                        mask_size = mask.sum()
+                    # Check overlap with already-assigned regions of THIS class
+                    already_assigned_this_class = (pred_mask == cls_id)
+                    overlap_with_class = (mask & already_assigned_this_class).sum() / max(mask_size, 1)
 
-                        # Skip tiny masks (noise) - must be at least 0.1% of image
-                        min_size = (gt_mask.shape[0] * gt_mask.shape[1]) * 0.001
-                        if mask_size < min_size:
-                            continue
+                    # Skip if mostly overlaps (>70%)
+                    if overlap_with_class > 0.7:
+                        continue
 
-                        # Score threshold: adaptive based on mask size
-                        # Larger masks can have slightly lower scores
-                        score_threshold = 0.15 if mask_size > min_size * 50 else 0.20
+                    # Assign pixels where confidence is higher
+                    update_mask = (mask > 0) & (score > confidence_map)
+                    pred_mask[update_mask] = cls_id
+                    confidence_map[update_mask] = score
 
-                        if score < score_threshold:
-                            continue
+        else:
+            # Oracle mode: Sequential processing (original method)
+            for cls_id in unique_classes:
+                if cls_id >= len(class_names):
+                    continue
 
-                        # Calculate overlap with already-assigned regions of THIS class
-                        already_assigned_this_class = (pred_mask == cls_id)
-                        overlap_with_class = (mask & already_assigned_this_class).sum() / max(mask_size, 1)
+                class_name = class_names[cls_id]
 
-                        # Skip if mostly overlaps with existing mask of same class (>70%)
-                        if overlap_with_class > 0.7:
-                            continue
+                try:
+                    # Get all high-confidence masks without adaptive selection
+                    # For benchmarks, we want ALL instances of the class
+                    result = pipeline.segment(
+                        image,
+                        text_prompt=class_name,
+                        top_k=20,  # Get many candidates
+                        use_adaptive_selection=False,  # Don't use adaptive - get all masks
+                        return_visualization=False
+                    )
 
-                        # Assign pixels where confidence is higher
-                        update_mask = (mask > 0) & (score > confidence_map)
-                        pred_mask[update_mask] = cls_id
-                        confidence_map[update_mask] = score
+                    if result.segmentation_masks:
+                        # Sort masks by size (largest first) to prioritize complete objects
+                        sorted_masks = sorted(result.segmentation_masks,
+                                            key=lambda x: x.mask_candidate.mask.sum(),
+                                            reverse=True)
 
-            except Exception as e:
-                print(f"  Error on class '{class_name}': {e}")
-                continue
+                        # Strategy: Take largest mask with high score, then add non-overlapping instances
+                        for seg_result in sorted_masks:
+                            mask = seg_result.mask_candidate.mask
+                            score = seg_result.final_score
+                            mask_size = mask.sum()
+
+                            # Skip tiny masks (noise) - must be at least 0.1% of image
+                            min_size = (gt_mask.shape[0] * gt_mask.shape[1]) * 0.001
+                            if mask_size < min_size:
+                                continue
+
+                            # Score threshold: adaptive based on mask size
+                            # Larger masks can have slightly lower scores
+                            score_threshold = 0.15 if mask_size > min_size * 50 else 0.20
+
+                            if score < score_threshold:
+                                continue
+
+                            # Calculate overlap with already-assigned regions of THIS class
+                            already_assigned_this_class = (pred_mask == cls_id)
+                            overlap_with_class = (mask & already_assigned_this_class).sum() / max(mask_size, 1)
+
+                            # Skip if mostly overlaps with existing mask of same class (>70%)
+                            if overlap_with_class > 0.7:
+                                continue
+
+                            # Assign pixels where confidence is higher
+                            update_mask = (mask > 0) & (score > confidence_map)
+                            pred_mask[update_mask] = cls_id
+                            confidence_map[update_mask] = score
+
+                except Exception as e:
+                    print(f"  Error on class '{class_name}': {e}")
+                    continue
 
         # Assign background to unassigned pixels (confidence = 0)
         pred_mask[confidence_map == 0] = 0
@@ -223,15 +280,6 @@ def run_benchmark(
     print(f"\nResults saved to: {results_file}")
 
     return results
-
-
-def load_dataset(name: str, data_dir: Path):
-    """Load dataset by name."""
-    if name == "pascal-voc":
-        return PASCALVOCDataset(data_dir)
-    else:
-        # For other datasets, use mock for now
-        return MockDataset(name, data_dir)
 
 
 class PASCALVOCDataset:
@@ -470,6 +518,13 @@ def main():
         choices=["cuda", "cpu"],
         help="Computation device"
     )
+    parser.add_argument(
+        "--mode",
+        type=str,
+        default="oracle",
+        choices=["oracle", "open-vocab"],
+        help="Evaluation mode: 'oracle' (only GT classes) or 'open-vocab' (all classes)"
+    )
 
     args = parser.parse_args()
 
@@ -495,7 +550,8 @@ def main():
                 output_dir=output_dir,
                 num_samples=args.num_samples,
                 save_visualizations=args.save_vis,
-                device=args.device
+                device=args.device,
+                mode=args.mode
             )
             all_results[dataset] = results
 
