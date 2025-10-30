@@ -283,13 +283,13 @@ class MaskTextAligner:
 
         if auto_adapt_to_vocabulary:
             if num_classes > 50:
-                # Large vocabulary (e.g., COCO-Stuff)
-                # - Increase temperature for better discrimination
-                # - Lower score threshold to accept more predictions
-                # - Use percentile-based denoising (keep top 90%)
-                temperature = 75.0  # Increased from 50 to 75 for better score separation
-                score_threshold = 0.05  # Decreased from 0.08 to 0.05 to accept more
-                denoising_percentile = 10  # Keep top 90% (was 20 = top 80%)
+                # Large vocabulary (e.g., COCO-Stuff 171 classes)
+                # - High temperature for better score discrimination
+                # - Very low threshold to accept more predictions (reduce black regions)
+                # - Aggressive percentile-based denoising (keep top 95%)
+                temperature = 100.0  # Increased from 75 to 100 for maximum score separation
+                score_threshold = 0.03  # Decreased from 0.05 to 0.03 to accept much more
+                denoising_percentile = 5  # Keep top 95% (was 10 = top 90%)
 
                 if self.verbose:
                     print(f"  [Adaptive Params] Large vocabulary detected ({num_classes} classes)")
@@ -336,8 +336,15 @@ class MaskTextAligner:
 
             # CRITICAL FIX: Skip oversized masks (likely background)
             # MaskCLIP/MasQCLIP finding: Masks > 50% of image are usually sky/water/background
-            # These score high because they include both object + large background region
-            max_size = total_image_pixels * 0.5  # 50% threshold
+            # BUT: For large vocabularies (COCO-Stuff), many legitimate stuff classes are large
+            # (bear=73%, walls=30%+, etc.), so use adaptive threshold
+            if num_classes > 50:
+                # Large vocab: Allow up to 90% (stuff classes can be very large)
+                max_size = total_image_pixels * 0.9
+            else:
+                # Small vocab: Use 50% (stricter, objects are typically smaller)
+                max_size = total_image_pixels * 0.5
+
             if mask_size > max_size:
                 if self.verbose:
                     print(f"  [Mask Filtering] Skipping oversized mask: {mask_size/total_image_pixels*100:.1f}% of image")

@@ -111,12 +111,21 @@ def run_benchmark(
             # Use batch mode for open-vocabulary (much faster for many classes)
             text_prompts = [class_names[cls_id] for cls_id in unique_classes if cls_id < len(class_names)]
 
+            # For large vocabularies, use lower threshold and let adaptive denoising filter
+            # Also increase top_k to get more mask candidates per class
+            if len(text_prompts) > 50:
+                initial_threshold = 0.03
+                top_k = 5  # More candidates for better coverage
+            else:
+                initial_threshold = 0.12
+                top_k = 2
+
             class_to_masks = pipeline.segment_batch(
                 image,
                 text_prompts,
                 use_background_suppression=True,
-                score_threshold=0.12,
-                top_k_per_class=2  # Reduced from 5 to 2 to avoid oversized masks
+                score_threshold=initial_threshold,
+                top_k_per_class=top_k
             )
 
             # Build prediction mask from batch results
