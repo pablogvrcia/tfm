@@ -226,7 +226,7 @@ def run_benchmark(
 
         # Save visualization
         if save_visualizations:  # Save first 20
-            vis = create_comparison_vis(image, pred_mask, gt_mask)
+            vis = create_comparison_vis(image, pred_mask, gt_mask, dataset.class_names)
             save_image(vis, vis_dir / f"sample_{idx:04d}.png")
 
     # Aggregate metrics
@@ -420,59 +420,128 @@ def aggregate_metrics(metrics_list, dataset_name):
     return agg
 
 
-def create_comparison_vis(image, pred_mask, gt_mask):
-    """Create side-by-side comparison visualization."""
-    # Simple visualization (you can enhance this)
+def get_top_classes(mask, class_names, top_k=8):
+    """Get top K classes by pixel count in mask."""
+    unique_classes, counts = np.unique(mask, return_counts=True)
+
+    # Filter out background/ignore (0 and 255)
+    valid_mask = (unique_classes > 0) & (unique_classes < 255)
+    unique_classes = unique_classes[valid_mask]
+    counts = counts[valid_mask]
+
+    # Sort by count (descending)
+    sorted_indices = np.argsort(counts)[::-1]
+
+    # Get top K
+    top_classes = []
+    total_pixels = mask.size
+    for idx in sorted_indices[:top_k]:
+        cls_id = unique_classes[idx]
+        count = counts[idx]
+        percentage = 100.0 * count / total_pixels
+
+        if cls_id < len(class_names):
+            cls_name = class_names[cls_id]
+            top_classes.append((cls_id, cls_name, percentage))
+
+    return top_classes
+
+
+def create_comparison_vis(image, pred_mask, gt_mask, class_names):
+    """Create side-by-side comparison visualization with class labels."""
     import cv2
 
+    # Get palette for color boxes
+    palette = get_palette()
+
     # Colorize masks
-    pred_colored = colorize_mask(pred_mask)
-    gt_colored = colorize_mask(gt_mask)
+    pred_colored = colorize_mask(pred_mask, palette)
+    gt_colored = colorize_mask(gt_mask, palette)
 
     # Stack horizontally
     vis = np.hstack([image, gt_colored, pred_colored])
 
-    # Add labels
+    # Add titles
     cv2.putText(vis, "Input", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
     cv2.putText(vis, "Ground Truth", (image.shape[1] + 10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
     cv2.putText(vis, "Prediction", (image.shape[1] * 2 + 10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
 
+    # Add class labels for GT (top classes by pixel count)
+    gt_classes = get_top_classes(gt_mask, class_names, top_k=8)
+    y_offset = 60
+    for cls_id, cls_name, percentage in gt_classes:
+        # Draw colored box
+        color = tuple(int(c) for c in palette[cls_id % len(palette)])
+        box_x = image.shape[1] + 10
+        box_y = y_offset - 15
+        cv2.rectangle(vis, (box_x, box_y), (box_x + 20, box_y + 15), color, -1)
+        cv2.rectangle(vis, (box_x, box_y), (box_x + 20, box_y + 15), (255, 255, 255), 1)
+
+        # Draw text
+        text = f"{cls_name}: {percentage:.1f}%"
+        cv2.putText(vis, text, (box_x + 25, y_offset),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+        y_offset += 25
+
+    # Add class labels for Prediction (top classes by pixel count)
+    pred_classes = get_top_classes(pred_mask, class_names, top_k=8)
+    y_offset = 60
+    for cls_id, cls_name, percentage in pred_classes:
+        # Draw colored box
+        color = tuple(int(c) for c in palette[cls_id % len(palette)])
+        box_x = image.shape[1] * 2 + 10
+        box_y = y_offset - 15
+        cv2.rectangle(vis, (box_x, box_y), (box_x + 20, box_y + 15), color, -1)
+        cv2.rectangle(vis, (box_x, box_y), (box_x + 20, box_y + 15), (255, 255, 255), 1)
+
+        # Draw text
+        text = f"{cls_name}: {percentage:.1f}%"
+        cv2.putText(vis, text, (box_x + 25, y_offset),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+        y_offset += 25
+
     return vis
+
+
+def get_palette():
+    """Get color palette for segmentation visualization."""
+    # PASCAL VOC standard color palette extended for 256 classes
+    palette = np.array([
+        [0, 0, 0],       # 0: background
+        [128, 0, 0],     # 1: aeroplane
+        [0, 128, 0],     # 2: bicycle
+        [128, 128, 0],   # 3: bird
+        [0, 0, 128],     # 4: boat
+        [128, 0, 128],   # 5: bottle
+        [0, 128, 128],   # 6: bus
+        [128, 128, 128], # 7: car
+        [64, 0, 0],      # 8: cat
+        [192, 0, 0],     # 9: chair
+        [64, 128, 0],    # 10: cow
+        [192, 128, 0],   # 11: diningtable
+        [64, 0, 128],    # 12: dog
+        [192, 0, 128],   # 13: horse
+        [64, 128, 128],  # 14: motorbike
+        [192, 128, 128], # 15: person
+        [0, 64, 0],      # 16: pottedplant
+        [128, 64, 0],    # 17: sheep
+        [0, 192, 0],     # 18: sofa
+        [128, 192, 0],   # 19: train
+        [0, 64, 128],    # 20: tvmonitor
+    ], dtype=np.uint8)
+
+    # Extend palette for higher indices (up to 256)
+    np.random.seed(42)
+    extra = np.random.randint(0, 255, (256 - len(palette), 3), dtype=np.uint8)
+    palette = np.vstack([palette, extra])
+
+    return palette
 
 
 def colorize_mask(mask, palette=None):
     """Apply color palette to segmentation mask."""
     if palette is None:
-        # PASCAL VOC standard color palette
-        palette = np.array([
-            [0, 0, 0],       # 0: background
-            [128, 0, 0],     # 1: aeroplane
-            [0, 128, 0],     # 2: bicycle
-            [128, 128, 0],   # 3: bird
-            [0, 0, 128],     # 4: boat
-            [128, 0, 128],   # 5: bottle
-            [0, 128, 128],   # 6: bus
-            [128, 128, 128], # 7: car
-            [64, 0, 0],      # 8: cat
-            [192, 0, 0],     # 9: chair
-            [64, 128, 0],    # 10: cow
-            [192, 128, 0],   # 11: diningtable
-            [64, 0, 128],    # 12: dog
-            [192, 0, 128],   # 13: horse
-            [64, 128, 128],  # 14: motorbike
-            [192, 128, 128], # 15: person
-            [0, 64, 0],      # 16: pottedplant
-            [128, 64, 0],    # 17: sheep
-            [0, 192, 0],     # 18: sofa
-            [128, 192, 0],   # 19: train
-            [0, 64, 128],    # 20: tvmonitor
-        ], dtype=np.uint8)
-
-        # Extend palette for higher indices
-        if mask.max() >= len(palette):
-            np.random.seed(42)
-            extra = np.random.randint(0, 255, (256 - len(palette), 3), dtype=np.uint8)
-            palette = np.vstack([palette, extra])
+        palette = get_palette()
 
     colored = palette[mask]
     return colored
