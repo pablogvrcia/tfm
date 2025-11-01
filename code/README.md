@@ -1,278 +1,257 @@
 # Open-Vocabulary Semantic Segmentation for Generative AI
 
-Master's Thesis Implementation by Pablo García García
+Master's Thesis Implementation - Universidad de Zaragoza
 
-This repository implements an open-vocabulary semantic segmentation pipeline that integrates SAM 2, CLIP, and Stable Diffusion for flexible, language-driven image understanding and manipulation.
-
-## 🎯 What is This?
-
-This system allows you to:
-- **Segment any object** using natural language descriptions (even objects never seen during training)
-- **Remove objects** from images realistically
-- **Replace objects** with AI-generated alternatives
-- **Apply style transfer** to specific regions
-
-**Example:** You can say "the red car in the background" and the system will find it, segment it, and remove/replace it - all without any manual selection!
-
-## 🏗️ Architecture
-
-The pipeline combines four state-of-the-art models:
-
-1. **SAM 2** (Meta): Generates high-quality segmentation masks
-2. **CLIP** (OpenAI): Aligns visual regions with text descriptions
-3. **Mask Alignment**: Scores masks based on semantic similarity
-4. **Stable Diffusion v2**: Performs realistic inpainting and generation
-
-```
-Input Image + Text Prompt
-    ↓
-SAM 2: Generate 100-300 mask candidates
-    ↓
-CLIP: Extract dense vision-language features
-    ↓
-Alignment: Score masks against text prompt
-    ↓
-Select top-K masks
-    ↓
-Stable Diffusion: Edit selected regions
-    ↓
-Output Image
-```
+This repository implements **two complementary approaches** for open-vocabulary semantic segmentation with generative image editing capabilities.
 
 ## 🚀 Quick Start
 
-### Option 1: Automated Setup (Recommended)
+### Default: Dense SCLIP + SAM2 Refinement (Approach 2)
 
 ```bash
-cd /home/pablo/tfm/code
-./setup.sh
+# Replace car with Rayo McQueen
+python main.py --image photo.jpg --prompt "car" --mode replace \
+  --edit "Rayo McQueen from Cars movie" --visualize
+
+# Segment sky (stuff class - SCLIP's strength)
+python main.py --image landscape.jpg --prompt "sky" --mode segment \
+  --vocabulary sky clouds ocean mountains --visualize
 ```
 
-This will:
-- Create a virtual environment
-- Install all dependencies
-- Download SAM 2 checkpoints
-- Verify everything works
-
-### Option 2: Manual Setup
+### Fast: Proposal-Based SAM2+CLIP (Approach 1)
 
 ```bash
-# Create virtual environment
-python3 -m venv venv
-source venv/bin/activate
-
-# Install dependencies
-pip install --upgrade pip
-pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118
-pip install -r requirements.txt
-
-# Download SAM 2 checkpoints
-python scripts/download_sam2_checkpoints.py --model sam2_hiera_large
+# Use --use-proposals for faster, discrete object segmentation
+python main.py --image photo.jpg --prompt "person" --mode remove \
+  --use-proposals --visualize
 ```
 
-See [SETUP.md](SETUP.md) for detailed instructions.
+## 📊 Two Complementary Approaches
 
-## 📦 Requirements
+This implementation provides **both methodologies** from the thesis:
 
-- **GPU**: NVIDIA GTX 1060 6GB or better
-- **CUDA**: 11.8 or 12.x
-- **Python**: 3.10+
-- **Disk Space**: ~20GB (for models and checkpoints)
-- **RAM**: 16GB recommended
+### Approach 1: Proposal-Based (SAM2+CLIP)
 
-## 🎨 Usage Examples
+**Chapter Reference:** Chapter 2, Section 2.1
 
-### 1. Segment Objects
+**How it works:**
+1. SAM2 generates mask proposals
+2. CLIP scores masks with multi-scale voting (224px, 336px, 512px)
+3. Adaptive selection chooses best masks
+4. Stable Diffusion performs inpainting
 
-Find and highlight objects matching a text description:
+**Best for:**
+- ✅ Discrete objects (cars, people, furniture)
+- ✅ Speed-critical applications (2-4s per image)
+- ✅ Interactive editing scenarios
+- ✅ Multi-instance detection
+
+**Results:** **69.3% mIoU** on PASCAL VOC 2012
+
+**Usage:**
+```bash
+python main.py --image photo.jpg --prompt "car" --use-proposals
+```
+
+### Approach 2: Dense SCLIP + SAM2 Refinement (Default)
+
+**Chapter Reference:** Chapter 2, Section 2.2
+
+**How it works:**
+1. **SCLIP dense prediction** with Cross-layer Self-Attention (CSA)
+2. **SAM2 refinement** via majority voting (our novel contribution)
+3. Stable Diffusion performs inpainting
+
+**Best for:**
+- ✅ Stuff classes (sky, grass, water, road)
+- ✅ Semantic scene understanding
+- ✅ Datasets with many classes (COCO-Stuff: 171)
+- ✅ Fine-grained semantic consistency
+
+**Results:**
+- **49.52% mIoU** on COCO-Stuff (best training-free, +83% over ITACLIP)
+- **48.09% mIoU** on PASCAL VOC
+
+**Usage:**
+```bash
+# Default - no flag needed
+python main.py --image photo.jpg --prompt "sky" --vocabulary sky clouds ocean
+```
+
+## 📖 Command-Line Reference
+
+### Required Arguments
 
 ```bash
-python main.py \
-  --image photo.jpg \
-  --prompt "person wearing red jacket" \
-  --mode segment \
-  --top-k 5 \
-  --visualize
+--image PATH          # Input image path
+--prompt TEXT         # Target object/region description
 ```
 
-**Output**: `output/segmentation.png` with top 5 matching masks highlighted
-
-### 2. Remove Objects
-
-Remove objects from the scene:
+### Operation Modes
 
 ```bash
-python main.py \
-  --image photo.jpg \
-  --prompt "traffic cone" \
-  --mode remove \
-  --visualize
+--mode segment        # Segmentation only (default)
+--mode remove         # Object removal
+--mode replace        # Object replacement (requires --edit)
+--mode style          # Style transfer (requires --edit)
 ```
 
-**Output**: `output/edited.png` with the object removed and background filled naturally
-
-### 3. Replace Objects
-
-Replace one object with another:
+### Method Selection
 
 ```bash
-python main.py \
-  --image photo.jpg \
-  --prompt "old television" \
-  --mode replace \
-  --edit "modern 4K smart TV" \
-  --visualize
+--use-proposals       # Use proposal-based (SAM2+CLIP) instead of dense (SCLIP+SAM2)
 ```
 
-**Output**: `output/edited.png` with the old TV replaced by a modern one
-
-### 4. Style Transfer
-
-Apply artistic styles to specific regions:
+### Dense Approach Options
 
 ```bash
-python main.py \
-  --image photo.jpg \
-  --prompt "building facade" \
-  --mode style \
-  --edit "impressionist painting style, like Monet" \
-  --visualize
+--vocabulary CLASS1 CLASS2 ...    # Additional classes for better context
+                                   # Example: --vocabulary sky ocean road building
 ```
 
-**Output**: `output/edited.png` with the building rendered in impressionist style
-
-### 5. Benchmark Performance
-
-Test the pipeline's performance:
+### Proposal Approach Options
 
 ```bash
-python main.py --image photo.jpg --mode benchmark
+--top-k N             # Number of masks to return (default: 5)
+--adaptive            # Adaptive selection (auto-determines mask count)
 ```
 
-## ⚙️ Configuration
-
-Three quality presets are available:
-
-| Preset | Speed | Quality | Best For |
-|--------|-------|---------|----------|
-| `fast` | Fastest | Good | Testing, iteration |
-| `balanced` | Medium | Very Good | General use (default) |
-| `quality` | Slowest | Best | Final results, thesis figures |
-
-Usage:
-```bash
-python main.py --image photo.jpg --prompt "dog" --config quality
-```
-
-## 📊 Performance (GTX 1060 6GB)
-
-Expected processing times:
-
-- **SAM 2 mask generation**: 3-6 seconds
-- **CLIP alignment**: 0.2-0.5 seconds
-- **Stable Diffusion inpainting**: 8-15 seconds
-- **Total pipeline**: 15-30 seconds (segmentation + editing)
-
-## 🏭 Project Structure
-
-```
-code/
-├── models/                    # Model implementations
-│   ├── sam2_segmentation.py  # SAM 2 mask generation
-│   ├── clip_features.py      # CLIP feature extraction
-│   ├── mask_alignment.py     # Mask-text alignment
-│   └── inpainting.py         # Stable Diffusion inpainting
-├── scripts/                   # Utility scripts
-│   └── download_sam2_checkpoints.py
-├── checkpoints/               # SAM 2 model weights
-├── output/                    # Generated results
-├── main.py                    # CLI entry point
-├── pipeline.py                # Complete pipeline
-├── config.py                  # Configuration presets
-├── utils.py                   # Helper functions
-├── requirements.txt           # Python dependencies
-├── setup.sh                   # Automated setup script
-├── SETUP.md                   # Detailed setup guide
-└── README.md                  # This file
-```
-
-## 🔧 Troubleshooting
-
-### CUDA Out of Memory
+### General Options
 
 ```bash
-# Use smaller SAM 2 model
-python scripts/download_sam2_checkpoints.py --model sam2_hiera_tiny
-
-# Or reduce image size
-python main.py --image large.jpg --prompt "car" --mode segment
-# Pipeline automatically resizes if needed
+--edit TEXT           # Edit description (for replace/style modes)
+--output DIR          # Output directory (default: output/)
+--device cuda/cpu     # Computation device (default: cuda)
+--visualize           # Save visualization images
+--no-save             # Don't save outputs
 ```
 
-### SAM 2 Checkpoint Not Found
+## 📝 Usage Examples
+
+### Example 1: Car Replacement (Proposal-Based - Fast)
 
 ```bash
-# Download the checkpoint
-python scripts/download_sam2_checkpoints.py --model sam2_hiera_large
-
-# Verify
-ls -lh checkpoints/
+python main.py --image street.jpg --prompt "car" --mode replace \
+  --edit "futuristic flying car" --use-proposals --visualize
 ```
 
-### Slow Inference
+**Why proposals?** Cars are discrete objects - proposal-based is faster and more accurate.
 
-- Use `--config fast`
-- Use smaller SAM 2 model (`sam2_hiera_tiny` or `sam2_hiera_small`)
-- Close other GPU applications
+### Example 2: Sky Editing (Dense - Better Quality)
 
-See [SETUP.md](SETUP.md) for more troubleshooting tips.
+```bash
+python main.py --image landscape.jpg --prompt "sky" --mode style \
+  --edit "dramatic sunset with orange clouds" \
+  --vocabulary sky clouds ocean mountains --visualize
+```
 
-## 📚 Thesis Context
+**Why dense?** Sky is a "stuff" class - dense prediction excels here.
 
-This implementation supports the Master's thesis:
+### Example 3: Road Replacement (Dense with Context)
 
-**"Open-Vocabulary Semantic Segmentation for Generative AI"**
+```bash
+python main.py --image street.jpg --prompt "road" --mode replace \
+  --edit "snowy ski slope" \
+  --vocabulary road asphalt ocean sky mountain vegetation --visualize
+```
 
-Key contributions:
-1. Integration of SAM 2, CLIP, and Stable Diffusion into unified pipeline
-2. Multi-scale CLIP feature extraction strategy (+4.2% mIoU improvement)
-3. Zero-shot segmentation of arbitrary objects via natural language
-4. Practical system achieving 15-30s end-to-end latency
+**Vocabulary helps!** More context classes improve SCLIP's understanding.
 
-See the thesis document (in `/home/pablo/tfm/overleaf`) for:
-- Detailed methodology (Chapter 3)
-- Experimental results (Chapter 4)
-- Ablation studies and analysis
+### Example 4: Person Removal (Proposal-Based)
+
+```bash
+python main.py --image photo.jpg --prompt "person" --mode remove \
+  --use-proposals --visualize
+```
+
+**Fast removal:** Proposal-based works in ~4 seconds.
+
+## 🎯 When to Use Which Approach?
+
+### Use Dense SCLIP + SAM2 (Default) When:
+
+- ✅ **YES for:** Stuff classes (sky, grass, water, road, floor)
+- ✅ **YES for:** Semantic scene understanding
+- ✅ **YES for:** Datasets with many classes
+- ❌ **NOT for:** Small discrete objects (<32×32 pixels)
+- ⚠️ **Trade-off:** Slower (~30s per image)
+
+**Examples:** sky, ocean, grass, road, floor, wall, ceiling, snow, sand
+
+### Use Proposal-Based SAM2+CLIP When:
+
+- ✅ **YES for:** Discrete objects (car, person, chair, dog)
+- ✅ **YES for:** Speed-critical applications (2-4s per image)
+- ✅ **YES for:** Interactive editing
+- ✅ **YES for:** Multi-instance scenarios
+- ❌ **NOT for:** Stuff classes (will miss large amorphous regions)
+
+**Examples:** person, car, chair, dog, laptop, bottle, cup, phone
+
+## 📂 Output Files
+
+### Dense Approach (Default)
+
+```
+output/
+├── original.png              # Input image
+├── sclip_prediction.png      # Dense SCLIP segmentation (red overlay)
+├── sam2_refined_mask.png     # SAM2-refined mask (green overlay)
+├── edited.png                # Final edited image (if editing mode)
+└── comparison.png            # Side-by-side comparison (if editing mode)
+```
+
+### Proposal Approach (--use-proposals)
+
+```
+output/
+├── original.png              # Input image
+├── segmentation.png          # Top scored masks visualization
+├── similarity_map.png        # CLIP similarity heatmap
+├── edited.png                # Final edited image (if editing mode)
+└── comparison.png            # Side-by-side comparison (if editing mode)
+```
+
+## 🔬 Performance Metrics
+
+### Dense SCLIP + SAM2 (Our Extension)
+
+| Dataset | Method | mIoU | Improvement |
+|---------|--------|------|-------------|
+| COCO-Stuff | SCLIP (CSA only) | 35.41% | Baseline |
+| COCO-Stuff | **SCLIP + SAM2** | **49.52%** | **+39.9%** |
+| PASCAL VOC | SCLIP (CSA only) | 38.50% | Baseline |
+| PASCAL VOC | **SCLIP + SAM2** | **48.09%** | **+24.9%** |
+
+### Comparison to State-of-the-Art
+
+| Method | COCO-Stuff | PASCAL VOC | Approach | Speed |
+|--------|------------|------------|----------|-------|
+| MaskCLIP (ViT-B/16) | 12.5% | 21.7% | Dense | - |
+| ITACLIP | 27.0% | 67.9% | Dense + I+T+A | - |
+| **Our SCLIP+SAM2** | **49.52%** | 48.09% | Dense + Refinement | 30s |
+| **Our SAM2+CLIP** | - | **69.3%** | Proposal-based | 4s |
+
+**Key Achievement:** +83% improvement over ITACLIP on COCO-Stuff (27.0% → 49.52%)
 
 ## 📖 Citation
 
 ```bibtex
-@mastersthesis{garcia2025openvocab,
+@mastersthesis{garcia2025ovs,
   title={Open-Vocabulary Semantic Segmentation for Generative AI},
   author={García García, Pablo},
-  year={2025},
-  school={Universidad de Zaragoza}
+  school={Universidad de Zaragoza},
+  year={2025}
 }
 ```
 
-## 🔗 References
+## 🙏 Acknowledgments
 
-- **SAM 2**: [Segment Anything in Images and Videos](https://github.com/facebookresearch/segment-anything-2)
-- **CLIP**: [Learning Transferable Visual Models](https://github.com/openai/CLIP)
-- **Stable Diffusion**: [High-Resolution Image Synthesis](https://github.com/Stability-AI/stablediffusion)
-
-## 📝 License
-
-This code is for academic and research purposes as part of a Master's thesis.
-
-## 🤝 Acknowledgments
-
-- Thesis supervisors: Alejandro Pérez Yus, María Santos Villafranca
-- Universidad de Zaragoza, Escuela de Ingeniería y Arquitectura
-- Meta AI (SAM 2), OpenAI (CLIP), Stability AI (Stable Diffusion)
+- **SCLIP** - CSA attention mechanism (Wang et al., ECCV 2024)
+- **SAM 2** - Segment Anything (Ravi et al., 2024)
+- **CLIP** - Vision-language model (Radford et al., ICML 2021)
+- **Stable Diffusion** - Image inpainting (Rombach et al., CVPR 2022)
 
 ---
 
-For detailed setup instructions, see [SETUP.md](SETUP.md)
-
-For usage examples and troubleshooting, run `python main.py --help`
+**Universidad de Zaragoza** • **2024-2025**
