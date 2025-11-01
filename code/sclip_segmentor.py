@@ -73,6 +73,9 @@ class SCLIPSegmentor:
         self.slide_stride = slide_stride
         self.verbose = verbose
 
+        # Text feature cache to avoid recomputing for same classes
+        self._text_feature_cache = {}
+
         if verbose:
             print("[SCLIP Segmentor] Initializing...")
             print(f"  Mode: {'Hybrid (SAM + SCLIP)' if use_sam else 'Dense (SCLIP only)'}")
@@ -103,6 +106,38 @@ class SCLIPSegmentor:
 
         if verbose:
             print("[SCLIP Segmentor] Ready!\n")
+
+    def _get_text_features(self, class_names: List[str]) -> torch.Tensor:
+        """
+        Get text features with caching to avoid recomputing.
+
+        Args:
+            class_names: List of class names
+
+        Returns:
+            Text features tensor (num_classes, D)
+        """
+        # Create cache key from class names
+        cache_key = tuple(class_names)
+
+        # Return cached features if available
+        if cache_key in self._text_feature_cache:
+            return self._text_feature_cache[cache_key]
+
+        # Compute text features
+        text_features = self.clip_extractor.extract_text_features(
+            class_names,
+            use_prompt_ensemble=True,
+            normalize=True
+        )
+
+        # Cache for future use
+        self._text_feature_cache[cache_key] = text_features
+
+        if self.verbose:
+            print(f"[Cache] Encoded {len(class_names)} text prompts (cached for reuse)")
+
+        return text_features
 
     @torch.no_grad()
     def predict_dense(
@@ -310,12 +345,8 @@ class SCLIPSegmentor:
         image_tensor = self.clip_extractor.preprocess_without_resize(image)  # (3, H, W)
         image_tensor = image_tensor.unsqueeze(0)  # (1, 3, H, W)
 
-        # Get text features once
-        text_features = self.clip_extractor.extract_text_features(
-            class_names,
-            use_prompt_ensemble=True,
-            normalize=True
-        )  # (num_classes, D)
+        # Get text features (cached for efficiency)
+        text_features = self._get_text_features(class_names)  # (num_classes, D)
 
         # Initialize accumulators on CPU to save GPU memory
         logits_sum = torch.zeros((1, num_classes, H, W), dtype=torch.float32)
