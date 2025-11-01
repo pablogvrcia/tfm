@@ -153,26 +153,56 @@ def main():
         # Save visualization if requested
         if args.save_vis:
             import matplotlib.pyplot as plt
+            import matplotlib.patches as mpatches
 
             vis_dir = Path(args.output_dir) / 'visualizations' / args.dataset
             vis_dir.mkdir(parents=True, exist_ok=True)
 
             # Create visualization
-            fig, axes = plt.subplots(1, 3, figsize=(15, 5))
+            fig, axes = plt.subplots(1, 3, figsize=(18, 6))
 
             axes[0].imshow(image)
-            axes[0].set_title(f"Image {idx}")
+            axes[0].set_title(f"Image {idx}", fontsize=14, fontweight='bold')
             axes[0].axis('off')
 
+            # Ground truth with legend
             axes[1].imshow(gt_mask, cmap='tab20', vmin=0, vmax=170)
-            axes[1].set_title("Ground Truth")
+            axes[1].set_title("Ground Truth", fontsize=14, fontweight='bold')
             axes[1].axis('off')
 
+            # Prediction with legend
             axes[2].imshow(pred_mask, cmap='tab20', vmin=0, vmax=170)
-            axes[2].set_title("SCLIP Prediction")
+            axes[2].set_title("SCLIP Prediction", fontsize=14, fontweight='bold')
             axes[2].axis('off')
 
-            plt.tight_layout()
+            # Create legend showing present classes
+            gt_classes = np.unique(gt_mask[gt_mask != 255])
+            pred_classes = np.unique(pred_mask)
+            all_classes = sorted(set(gt_classes.tolist()) | set(pred_classes.tolist()))
+
+            # Limit to top classes for readability
+            if len(all_classes) > 12:
+                # Show classes that appear in GT
+                display_classes = sorted(gt_classes.tolist())[:12]
+            else:
+                display_classes = all_classes
+
+            # Create color patches for legend
+            cmap = plt.cm.get_cmap('tab20', 171)
+            legend_elements = []
+            for cls in display_classes:
+                color = cmap(cls / 170)
+                in_gt = "✓" if cls in gt_classes else ""
+                in_pred = "✓" if cls in pred_classes else ""
+                label = f"{dataset.class_names[cls]} {in_gt}{in_pred}"
+                legend_elements.append(mpatches.Patch(color=color, label=label))
+
+            # Add legend below the images
+            fig.legend(handles=legend_elements, loc='lower center',
+                      ncol=4, fontsize=9, frameon=True,
+                      title="Classes (✓ = present)")
+
+            plt.tight_layout(rect=[0, 0.1, 1, 1])  # Leave space for legend
             plt.savefig(vis_dir / f'sample_{idx:04d}.png', dpi=150, bbox_inches='tight')
             plt.close()
 
