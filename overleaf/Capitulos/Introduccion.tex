@@ -66,6 +66,8 @@ This thesis makes the following key contributions:
 \item \textbf{Evaluation on benchmark datasets:} The system's performance is rigorously evaluated on PASCAL VOC 2012, achieving 69.3\% mIoU—a 13.2 percentage point improvement over existing open-vocabulary methods like MaskCLIP (56.1\%). The evaluation includes quantitative analysis across multiple metrics (mIoU, pixel accuracy, F1 score, boundary F1) and qualitative analysis through visualization of segmentation outputs.
 
 \item \textbf{Insights into challenges and opportunities:} The thesis provides valuable insights into the challenges and opportunities associated with integrating open-vocabulary semantic segmentation with generative AI models. This includes discussions on the limitations of current methods, potential areas for improvement, and future research directions. By analyzing the challenges and opportunities in this emerging field, the thesis contributes to the advancement of open-vocabulary semantic segmentation and its integration with generative AI.
+
+\item \textbf{Extension of SCLIP with novel SAM2 refinement:} We build upon SCLIP's \cite{sclip2024} Cross-layer Self-Attention (CSA) approach for dense prediction, extending it with a novel SAM2-based mask refinement layer that uses majority voting to combine dense semantic predictions with high-quality boundaries. This extended approach achieves 49.52\% mIoU on COCO-Stuff and 48.09\% mIoU on PASCAL VOC in annotation-free settings, providing comparative insights into proposal-based versus dense prediction methodologies. We also implement text feature caching for 41\% inference speedup, demonstrating practical deployment optimizations.
 \end{itemize}
 
 \section{Thesis Structure}

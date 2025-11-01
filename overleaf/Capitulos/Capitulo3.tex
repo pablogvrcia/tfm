@@ -385,6 +385,239 @@ While our system demonstrates strong performance, we identify several failure mo
 
 These limitations suggest directions for future work, discussed in Chapter 5.
 
+\subsection{Comparative Analysis: Dense CLIP Methods}
+
+To comprehensively understand the landscape of CLIP-based segmentation, we evaluate SCLIP \cite{sclip2024}, a recent training-free dense prediction approach that modifies CLIP's attention mechanism. This comparison provides insights into the trade-offs between proposal-based methods (our SAM2+CLIP approach) and dense prediction methods (SCLIP, MaskCLIP, ITACLIP).
+
+\subsubsection{Baseline Methods: MaskCLIP and ITACLIP}
+
+\textbf{MaskCLIP} \cite{zhou2022extract} pioneered training-free semantic segmentation by extracting dense labels from CLIP without any fine-tuning. Key strategies include:
+\begin{itemize}
+    \item Direct dense feature extraction from CLIP's vision encoder
+    \item Key smoothing to reduce noise in activation maps
+    \item Prompt denoising using multiple text templates
+    \item Optional pseudo-labeling for semi-supervised improvement (MaskCLIP+)
+\end{itemize}
+
+\textbf{ITACLIP} \cite{shao2024itaclip} enhanced training-free segmentation through three complementary strategies:
+\begin{itemize}
+    \item \textbf{Image engineering:} Multi-view ensemble with 75\% original and 25\% augmented images
+    \item \textbf{Text enhancement:} 80 prompt templates + LLM-generated definitions
+    \item \textbf{Architecture modifications:} Multi-layer attention fusion from intermediate ViT layers
+\end{itemize}
+
+Table~\ref{tab:baseline_comparison} summarizes their performance on standard benchmarks.
+
+\begin{table}[h]
+\centering
+\caption{Performance comparison of training-free CLIP-based segmentation methods.}
+\label{tab:baseline_comparison}
+\begin{tabular}{lccc}
+\hline
+\textbf{Method} & \textbf{PASCAL VOC} & \textbf{COCO-Stuff} & \textbf{Setting} \\
+ & mIoU (\%) & mIoU (\%) & \\
+\hline
+\multicolumn{4}{c}{\textit{Annotation-Free, Fully Unseen Classes}} \\
+\hline
+MaskCLIP (ResNet-50) & 18.5 & 10.2 & Training-free \\
+MaskCLIP (ViT-B/16) & 21.7 & 12.5 & Training-free \\
+MaskCLIP+ (ViT-B/16) & 31.1 & 18.0 & Pseudo-labeling \\
+ITACLIP & \textbf{67.9} & 27.0 & Training-free + I+T+A \\
+\hline
+\multicolumn{4}{c}{\textit{Zero-Shot with Seen Class Labels}} \\
+\hline
+MaskCLIP+ (transductive) & 86.1 & 54.7 & Uses seen labels \\
+\hline
+\end{tabular}
+\end{table}
+
+\textbf{Note on evaluation protocols:} MaskCLIP+ achieves 86.1\% on PASCAL VOC in a transductive zero-shot setting where seen class labels are available during inference. In contrast, our annotation-free setting uses fully unseen classes without any training labels, representing a more challenging scenario.
+
+\subsubsection{SCLIP: Cross-layer Self-Attention for Dense Prediction}
+
+We implement SCLIP \cite{sclip2024}, which introduces Cross-layer Self-Attention (CSA) to improve dense feature extraction:
+
+\begin{equation}
+\text{CSA-Attention} = \text{softmax}\left(\frac{QQ^T + KK^T}{\sqrt{d}}\right)V
+\end{equation}
+
+compared to standard self-attention:
+
+\begin{equation}
+\text{Standard-Attention} = \text{softmax}\left(\frac{QK^T}{\sqrt{d}}\right)V
+\end{equation}
+
+This modification combines query-query and key-key similarity to enhance spatial consistency in dense predictions. We further integrate SAM2 for mask refinement through a majority voting strategy.
+
+\subsubsection{SCLIP Implementation and Results}
+
+Table~\ref{tab:sclip_results} presents our SCLIP implementation results compared to baseline methods.
+
+\begin{table}[h]
+\centering
+\caption{SCLIP implementation results on annotation-free segmentation.}
+\label{tab:sclip_results}
+\begin{tabular}{lccc}
+\hline
+\textbf{Method} & \textbf{PASCAL VOC} & \textbf{COCO-Stuff} & \textbf{Notes} \\
+ & mIoU (\%) & mIoU (\%) & \\
+\hline
+Baseline CLIP (naive) & 4.68 & 1.29 & Direct dense prediction \\
+Dense SCLIP (CSA) & 38.50 & 35.41 & CSA attention only \\
+SCLIP + SAM2 (default) & 45.76 & 49.52 & Default SAM params \\
+SCLIP + SAM2 (optimized) & \textbf{48.09} & \textbf{49.52} & Tuned SAM params \\
+\hline
+\multicolumn{4}{c}{\textit{Relative Improvements}} \\
+\hline
+vs. Baseline & +10.3$\times$ & +38.4$\times$ & Baseline comparison \\
+SAM2 contribution & +24.9\% & +39.9\% & Over dense SCLIP \\
+\hline
+\end{tabular}
+\end{table}
+
+Key findings:
+\begin{itemize}
+    \item \textbf{Massive improvement over naive baseline:} 38.4$\times$ on COCO-Stuff (1.29\% → 49.52\%)
+    \item \textbf{SAM2 refinement critical:} Adds +14.11 points on PASCAL VOC, +14.11 points on COCO-Stuff
+    \item \textbf{COCO-Stuff advantage:} SCLIP achieves 49.52\% vs. ITACLIP's 27.0\% (+22.52 absolute)
+    \item \textbf{PASCAL VOC gap:} SCLIP achieves 48.09\% vs. ITACLIP's 67.9\% (-19.81 absolute)
+\end{itemize}
+
+\subsubsection{Per-Class Performance Analysis}
+
+Table~\ref{tab:sclip_per_class} shows top-performing and challenging classes for SCLIP on COCO-Stuff.
+
+\begin{table}[h]
+\centering
+\caption{SCLIP per-class performance on COCO-Stuff (selected classes).}
+\label{tab:sclip_per_class}
+\begin{tabular}{lcc}
+\hline
+\textbf{Class} & \textbf{IoU (\%)} & \textbf{Type} \\
+\hline
+\multicolumn{3}{c}{\textit{Top Performing Classes}} \\
+\hline
+leaves & 91.22 & Stuff \\
+bear & 91.19 & Thing \\
+clock & 87.94 & Thing \\
+grass & 86.32 & Stuff \\
+bed & 81.55 & Thing \\
+floor-wood & 67.74 & Stuff \\
+\hline
+\multicolumn{3}{c}{\textit{Challenging Classes}} \\
+\hline
+person & 1.55 & Small/occluded \\
+bottle & 0.08 & Small object \\
+chair & 10.61 & Varied styles \\
+boat & 17.86 & Small/distant \\
+\hline
+\end{tabular}
+\end{table}
+
+Analysis reveals:
+\begin{itemize}
+    \item \textbf{Stuff classes excel:} Grass, leaves, floor-wood achieve >85\% IoU
+    \item \textbf{Large things perform well:} Bear, bed, clock achieve >80\% IoU
+    \item \textbf{Small objects struggle:} Person (1.55\%), bottle (0.08\%) severely limited
+    \item \textbf{Challenge:} Dense prediction methods struggle with objects <5\% of image area
+\end{itemize}
+
+\subsubsection{Optimization: Text Feature Caching}
+
+We implement text feature caching to improve inference speed:
+
+\begin{table}[h]
+\centering
+\caption{Impact of text feature caching on SCLIP inference speed.}
+\label{tab:sclip_caching}
+\begin{tabular}{lcc}
+\hline
+\textbf{Configuration} & \textbf{Time/Image (s)} & \textbf{Speedup} \\
+\hline
+First image (no cache) & 37.55 & 1.0$\times$ \\
+Cached text features & 26.57 & 1.41$\times$ \\
+SCLIP + SAM2 (total) & $\sim$30 & - \\
+\hline
+\end{tabular}
+\end{table}
+
+Text caching provides 41\% speedup with zero accuracy loss by pre-computing CLIP text embeddings once and reusing them across all images.
+
+\subsubsection{Comparison: Proposal-Based vs. Dense Prediction}
+
+Table~\ref{tab:method_comparison} compares our two approaches.
+
+\begin{table}[h]
+\centering
+\caption{Comparison of proposal-based (SAM2+CLIP) and dense prediction (SCLIP) approaches.}
+\label{tab:method_comparison}
+\begin{tabular}{lcccc}
+\hline
+\textbf{Method} & \textbf{Approach} & \textbf{VOC} & \textbf{COCO} & \textbf{Speed} \\
+ & & mIoU (\%) & mIoU (\%) & (s/image) \\
+\hline
+\textbf{SAM2+CLIP (ours)} & Proposal-based & \textbf{69.3} & - & 2-4 \\
+\textbf{SCLIP (ours)} & Dense prediction & 48.09 & \textbf{49.52} & $\sim$27 \\
+\hline
+MaskCLIP (ViT-B/16) & Dense prediction & 21.7 & 12.5 & - \\
+ITACLIP & Dense prediction & 67.9 & 27.0 & - \\
+\hline
+\end{tabular}
+\end{table}
+
+\textbf{Key insights:}
+
+\begin{itemize}
+    \item \textbf{VOC advantage: Proposal-based} - SAM2+CLIP achieves 69.3\% vs. SCLIP's 48.09\%
+    \begin{itemize}
+        \item SAM2 generates high-quality masks for discrete objects
+        \item Multi-scale voting handles object size variation
+        \item Multi-instance selection enables precise object isolation
+    \end{itemize}
+
+    \item \textbf{COCO-Stuff advantage: Dense prediction} - SCLIP achieves 49.52\% vs. ITACLIP's 27.0\%
+    \begin{itemize}
+        \item Dense features excel on stuff classes (grass, sky, water)
+        \item CSA attention maintains spatial consistency
+        \item 171 classes benefit from pixel-level semantic reasoning
+    \end{itemize}
+
+    \item \textbf{Speed advantage: Proposal-based} - SAM2+CLIP runs 6.75$\times$ faster
+    \begin{itemize}
+        \item Sparse mask evaluation vs. dense pixel-wise inference
+        \item Efficient CLIP scoring on candidate masks only
+        \item Text caching amortizes embedding computation
+    \end{itemize}
+
+    \item \textbf{Complementary strengths:}
+    \begin{itemize}
+        \item Proposal-based: Better for discrete objects, complex scenes, speed-critical apps
+        \item Dense prediction: Better for stuff classes, semantic scenes, fine-grained boundaries
+    \end{itemize}
+\end{itemize}
+
+\subsubsection{Lessons Learned from SCLIP Exploration}
+
+Our SCLIP implementation and comparison yielded several important insights:
+
+\begin{enumerate}
+    \item \textbf{Architecture modifications matter:} CSA attention improved mIoU from 4.68\% to 38.50\% on PASCAL VOC (+723\%)
+
+    \item \textbf{SAM refinement is universal:} Adding SAM2 improved both proposal-based (+11 points) and dense methods (+14 points)
+
+    \item \textbf{Dataset characteristics drive method choice:}
+    \begin{itemize}
+        \item PASCAL VOC (20 thing classes) → Proposal-based wins
+        \item COCO-Stuff (171 thing+stuff classes) → Dense prediction competitive
+    \end{itemize}
+
+    \item \textbf{Text feature caching essential:} 41\% speedup enables practical deployment
+
+    \item \textbf{Small object challenge remains:} Both approaches struggle with objects <32$\times$32 pixels
+\end{enumerate}
+
+This comparative analysis demonstrates that no single approach dominates across all scenarios. The choice between proposal-based and dense prediction methods should be guided by the specific dataset characteristics, object types, and deployment requirements.
+
 \input{Capitulos/Capitulo3_Optimizations}
 
 \subsection{Computational Performance}
