@@ -213,9 +213,13 @@ class SCLIPSegmentor:
         class_names: List[str]
     ) -> np.ndarray:
         """
-        Hybrid: SAM masks + SCLIP classification.
+        Hybrid: Dense SCLIP + SAM refinement.
 
-        Uses SAM to propose regions, then SCLIP to classify each region.
+        Strategy:
+        1. Get dense SCLIP predictions first
+        2. Generate SAM masks for boundary refinement
+        3. For each SAM mask, vote using SCLIP predictions within the mask
+        4. This keeps all detections but with cleaner boundaries
 
         Args:
             image: Input image (H, W, 3)
@@ -226,65 +230,32 @@ class SCLIPSegmentor:
         """
         H, W = image.shape[:2]
 
-        # Generate SAM masks
+        # Step 1: Get dense SCLIP predictions
+        dense_pred, _ = self.predict_dense(image, class_names)
+
+        # Step 2: Generate SAM masks for boundary refinement
         sam_masks = self.sam_generator.generate_masks(image)
 
-        # Get SCLIP text features for all classes
-        text_features = self.clip_extractor.extract_text_features(
-            class_names,
-            use_prompt_ensemble=True,
-            normalize=True
-        )  # (num_classes, D)
+        # Step 3: Refine predictions using SAM masks
+        # For each SAM mask, use majority voting from dense predictions
+        output_mask = dense_pred.copy()
 
-        # Initialize output mask
-        output_mask = np.zeros((H, W), dtype=np.int32)
-        mask_scores = np.zeros((H, W), dtype=np.float32)
-
-        # Classify each SAM mask
         for mask_candidate in sam_masks:
             mask = mask_candidate.mask
-
-            # Extract masked region
-            masked_region = self._extract_masked_region(image, mask)
-            if masked_region is None:
-                continue
-
-            # Get SCLIP image features
-            pil_img = Image.fromarray(masked_region)
-            pil_img = pil_img.resize((336, 336), Image.Resampling.BILINEAR)
-            resized_np = np.array(pil_img)
-
-            mask_features, _ = self.clip_extractor.extract_image_features(
-                resized_np,
-                return_dense=False,
-                use_csa=True,
-                normalize=True
-            )
-
-            # Compute similarity to all classes
-            similarities = F.cosine_similarity(
-                mask_features.unsqueeze(0),
-                text_features,
-                dim=1
-            )  # (num_classes,)
-
-            # Get best class
-            best_class_idx = similarities.argmax().item()
-            best_score = similarities[best_class_idx].item()
-
-            # Apply threshold
-            if best_score < self.prob_threshold:
-                continue
-
-            # Update output mask (keep higher-scoring predictions)
             mask_region = mask > 0.5
-            update_region = (best_score > mask_scores[mask_region])
 
-            update_pixels = mask_region.copy()
-            update_pixels[mask_region] = update_region
+            if mask_region.sum() == 0:
+                continue
 
-            output_mask[update_pixels] = best_class_idx
-            mask_scores[update_pixels] = best_score
+            # Get dense predictions within this SAM mask
+            masked_predictions = dense_pred[mask_region]
+
+            # Majority vote: assign the most common class in this region
+            unique_classes, counts = np.unique(masked_predictions, return_counts=True)
+            majority_class = unique_classes[counts.argmax()]
+
+            # Assign majority class to entire SAM mask (refines boundaries)
+            output_mask[mask_region] = majority_class
 
         return output_mask
 
