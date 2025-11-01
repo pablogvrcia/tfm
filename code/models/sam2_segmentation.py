@@ -40,9 +40,9 @@ class SAM2MaskGenerator:
         self,
         model_type: str = "sam2_hiera_tiny",
         device: str = "cuda" if torch.cuda.is_available() else "cpu",
-        points_per_side: int = 32,
-        pred_iou_thresh: float = 0.7,  # Lowered from 0.88 to get more masks
-        stability_score_thresh: float = 0.85,  # Lowered from 0.95 to get more masks
+        points_per_side: int = 48,  # Increased from 32 for better small object detection
+        pred_iou_thresh: float = 0.65,  # Lowered for more mask proposals
+        stability_score_thresh: float = 0.80,  # Lowered for more mask proposals
         crop_n_layers: int = 0,
         crop_overlap_ratio: float = 512/1500,
     ):

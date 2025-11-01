@@ -158,51 +158,78 @@ def main():
             vis_dir = Path(args.output_dir) / 'visualizations' / args.dataset
             vis_dir.mkdir(parents=True, exist_ok=True)
 
-            # Create visualization
-            fig, axes = plt.subplots(1, 3, figsize=(18, 6))
+            # Create visualization with adaptive height for legend
+            fig, axes = plt.subplots(1, 3, figsize=(20, 7))
 
             axes[0].imshow(image)
             axes[0].set_title(f"Image {idx}", fontsize=14, fontweight='bold')
             axes[0].axis('off')
 
+            # Choose colormap based on dataset
+            if dataset.num_classes <= 21:
+                # Pascal VOC - use distinctive colors for few classes
+                from matplotlib.colors import ListedColormap
+                import matplotlib.cm as cm
+                # Use a colormap that works well for small number of classes
+                base_cmap = cm.get_cmap('tab20', 20)
+                colors = [base_cmap(i) for i in range(20)]
+                colors.insert(0, (0, 0, 0, 1))  # Black for background/class 0
+                voc_cmap = ListedColormap(colors)
+                cmap_viz = voc_cmap
+                vmax_viz = dataset.num_classes - 1
+                cmap_legend = cm.get_cmap('tab20', 20)
+            else:
+                # COCO-Stuff - use extended colormap
+                cmap_viz = 'tab20'
+                vmax_viz = 170
+                cmap_legend = plt.cm.get_cmap('tab20', 171)
+
             # Ground truth with legend
-            axes[1].imshow(gt_mask, cmap='tab20', vmin=0, vmax=170)
+            axes[1].imshow(gt_mask, cmap=cmap_viz, vmin=0, vmax=vmax_viz)
             axes[1].set_title("Ground Truth", fontsize=14, fontweight='bold')
             axes[1].axis('off')
 
             # Prediction with legend
-            axes[2].imshow(pred_mask, cmap='tab20', vmin=0, vmax=170)
+            axes[2].imshow(pred_mask, cmap=cmap_viz, vmin=0, vmax=vmax_viz)
             axes[2].set_title("SCLIP Prediction", fontsize=14, fontweight='bold')
             axes[2].axis('off')
 
             # Create legend showing present classes
             gt_classes = np.unique(gt_mask[gt_mask != 255])
             pred_classes = np.unique(pred_mask)
-            all_classes = sorted(set(gt_classes.tolist()) | set(pred_classes.tolist()))
 
-            # Limit to top classes for readability
-            if len(all_classes) > 12:
-                # Show classes that appear in GT
-                display_classes = sorted(gt_classes.tolist())[:12]
-            else:
-                display_classes = all_classes
+            # Show ALL classes that appear in either GT or predictions
+            all_classes = sorted(set(gt_classes.tolist()) | set(pred_classes.tolist()))
+            display_classes = all_classes  # Show all present classes, no limit
 
             # Create color patches for legend
-            cmap = plt.cm.get_cmap('tab20', 171)
             legend_elements = []
             for cls in display_classes:
-                color = cmap(cls / 170)
+                if dataset.num_classes <= 21:
+                    # Pascal VOC coloring
+                    if cls == 0:
+                        color = (0, 0, 0, 1)  # Black for background
+                    else:
+                        color = cmap_legend((cls - 1) / 19)
+                else:
+                    # COCO-Stuff coloring
+                    color = cmap_legend(cls / 170)
+
                 in_gt = "✓" if cls in gt_classes else ""
                 in_pred = "✓" if cls in pred_classes else ""
                 label = f"{dataset.class_names[cls]} {in_gt}{in_pred}"
                 legend_elements.append(mpatches.Patch(color=color, label=label))
 
-            # Add legend below the images
+            # Add legend below the images with adaptive columns
+            num_cols = min(6, len(legend_elements))  # Up to 6 columns
             fig.legend(handles=legend_elements, loc='lower center',
-                      ncol=4, fontsize=9, frameon=True,
-                      title="Classes (✓ = present)")
+                      ncol=num_cols, fontsize=8, frameon=True,
+                      title="Classes (✓✓ = in both GT and pred, ✓ = in one only)")
 
-            plt.tight_layout(rect=[0, 0.1, 1, 1])  # Leave space for legend
+            # Calculate space needed for legend based on number of rows
+            num_rows = (len(legend_elements) + num_cols - 1) // num_cols
+            legend_height = 0.08 + (num_rows - 1) * 0.03  # More space per row
+            plt.tight_layout(rect=[0, legend_height, 1, 1])  # Leave space for legend
             plt.savefig(vis_dir / f'sample_{idx:04d}.png', dpi=150, bbox_inches='tight')
             plt.close()
 
