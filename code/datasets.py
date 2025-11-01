@@ -164,13 +164,13 @@ class COCOStuffDataset:
         'window-blind', 'window-other', 'wood'
     ]
 
-    def __init__(self, data_dir: Path, split='val2027', max_samples: Optional[int] = None):
+    def __init__(self, data_dir: Path, split='val2017', max_samples: Optional[int] = None):
         """
         Initialize COCO-Stuff dataset.
 
         Args:
             data_dir: Root directory containing datasets (e.g., ./data/benchmarks)
-            split: Dataset split ('val2027' for validation set)
+            split: Dataset split ('val2017' for validation set)
             max_samples: Maximum number of samples to load (None = all)
         """
         self.data_dir = Path(data_dir) / "coco_stuff"
@@ -384,7 +384,7 @@ def load_dataset(dataset_name: str, data_dir: Path, max_samples: Optional[int] =
     if dataset_name == 'pascal-voc':
         return dataset_class(data_dir, split='val', max_samples=max_samples)
     elif dataset_name == 'coco-stuff':
-        return dataset_class(data_dir, split='val2027', max_samples=max_samples)
+        return dataset_class(data_dir, split='val2017', max_samples=max_samples)
     elif dataset_name == 'ade20k':
         return dataset_class(data_dir, split='validation', max_samples=max_samples)
     elif dataset_name == 'coco-open':

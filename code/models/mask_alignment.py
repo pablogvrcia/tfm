@@ -23,6 +23,7 @@ from PIL import Image as PILImage
 
 from .sam2_segmentation import MaskCandidate
 from .clip_features import CLIPFeatureExtractor
+from .pamr import PAMR
 
 
 @dataclass
@@ -55,6 +56,11 @@ class MaskTextAligner:
         use_multiscale: bool = True,  # Multi-scale CLIP voting
         multiscale_weights: Tuple[float, float, float] = (0.2, 0.5, 0.3),  # Weights for [224, 336, 512]
         verbose: bool = True,  # Enable logging for debugging
+        use_pamr: bool = True,  # SCLIP: Pixel-Adaptive Memory Refinement
+        pamr_steps: int = 10,  # SCLIP: Number of PAMR iterations
+        pamr_dilations: Tuple[int, int] = (1, 2),  # SCLIP: Dilation rates for PAMR
+        logit_scale: float = 40.0,  # SCLIP: Temperature scaling for logits
+        prob_threshold: float = 0.0,  # SCLIP: Probability threshold for predictions
     ):
         """
         Initialize mask-text aligner.
@@ -76,6 +82,17 @@ class MaskTextAligner:
         self.multiscale_weights = multiscale_weights
         self.multiscale_sizes = [224, 336, 512]
         self.verbose = verbose
+
+        # SCLIP improvements
+        self.use_pamr = use_pamr
+        self.logit_scale = logit_scale
+        self.prob_threshold = prob_threshold
+        if use_pamr and pamr_steps > 0:
+            self.pamr = PAMR(num_iter=pamr_steps, dilations=list(pamr_dilations))
+            if self.verbose:
+                print(f"[MaskAlign] PAMR enabled: {pamr_steps} steps, dilations={pamr_dilations}")
+        else:
+            self.pamr = None
 
     def align_masks_with_text(
         self,

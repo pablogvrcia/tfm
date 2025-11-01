@@ -33,7 +33,7 @@ def test_batch_mode():
     print(f"Loading COCO-Stuff dataset from: {data_dir}")
 
     try:
-        # dataset = COCOStuffDataset(data_dir=data_dir, split='val2027', max_samples=1)
+        # dataset = COCOStuffDataset(data_dir=data_dir, split='val2017', max_samples=1)
         dataset = load_dataset('pascal-voc', data_dir)
     except Exception as e:
         print(f"Error loading COCO-Stuff dataset: {e}")

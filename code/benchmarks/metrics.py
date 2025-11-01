@@ -51,8 +51,8 @@ def compute_miou(
         intersection = np.logical_and(pred_cls, gt_cls).sum()
         union = np.logical_or(pred_cls, gt_cls).sum()
 
-        if union == 0:
-            # Class not present in ground truth
+        if gt_cls.sum() == 0:
+            # Class not present in ground truth - exclude from mIoU calculation
             iou = np.nan
         else:
             iou = intersection / union
