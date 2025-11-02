@@ -25,7 +25,7 @@ from datetime import datetime
 from tqdm import tqdm
 import time
 
-from sclip_segmentor import SCLIPSegmentor
+from models.sclip_segmentor import SCLIPSegmentor
 from datasets import COCOStuffDataset, PASCALVOCDataset
 from benchmarks.metrics import compute_all_metrics
 

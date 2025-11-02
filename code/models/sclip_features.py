@@ -14,9 +14,7 @@ from typing import List, Tuple, Optional
 from PIL import Image
 import sys
 
-# Add SCLIP to path to use their modified CLIP
-sys.path.insert(0, '/home/pablo/aux/tfm/code/SCLIP')
-import clip
+from models.clip import clip
 from prompts.imagenet_template import openai_imagenet_template
 
 
