@@ -290,14 +290,14 @@ python main.py --image landscape.jpg --prompt "sky" --mode style \
 
 \begin{verbatim}
 # PASCAL VOC evaluation (dense SCLIP + SAM2)
-python run_sclip_benchmarks.py --dataset pascal-voc --num-samples 100
+python run_benchmarks.py --dataset pascal-voc --num-samples 100
 
 # COCO-Stuff evaluation (dense SCLIP only, faster)
-python run_sclip_benchmarks.py --dataset coco-stuff --num-samples 50 \
+python run_benchmarks.py --dataset coco-stuff --num-samples 50 \
     --use-sam=False
 
 # Full COCO-Stuff with SAM refinement
-python run_sclip_benchmarks.py --dataset coco-stuff --use-sam
+python run_benchmarks.py --dataset coco-stuff --use-sam
 \end{verbatim}
 
 \section{Reproducibility}

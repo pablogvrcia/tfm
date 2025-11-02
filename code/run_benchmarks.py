@@ -5,16 +5,16 @@ Evaluates SCLIP-based semantic segmentation on standard benchmarks.
 
 Usage:
     # Dense mode (pure SCLIP, fastest, best performance)
-    python run_sclip_benchmarks.py --dataset coco-stuff --num-samples 10
+    python run_benchmarks.py --dataset coco-stuff --num-samples 10
 
     # Hybrid mode (SCLIP + SAM)
-    python run_sclip_benchmarks.py --dataset coco-stuff --num-samples 10 --use-sam
+    python run_benchmarks.py --dataset coco-stuff --num-samples 10 --use-sam
 
     # With PAMR refinement (better boundaries)
-    python run_sclip_benchmarks.py --dataset coco-stuff --num-samples 10 --use-pamr
+    python run_benchmarks.py --dataset coco-stuff --num-samples 10 --use-pamr
 
     # Sliding window inference (slower but better)
-    python run_sclip_benchmarks.py --dataset coco-stuff --num-samples 10 --slide-inference
+    python run_benchmarks.py --dataset coco-stuff --num-samples 10 --slide-inference
 """
 
 import argparse
