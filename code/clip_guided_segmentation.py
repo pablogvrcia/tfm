@@ -256,7 +256,7 @@ def visualize_results(image, results, vocabulary, output_path=None):
     plt.close()
 
 
-def visualize_filtered_results(image, results, target_class, vocabulary, output_path=None):
+def visualize_filtered_results(image, results, target_class, vocabulary, output_path=None, edit_style="segment"):
     """
     Visualize only masks corresponding to a specific target class.
 
@@ -266,6 +266,10 @@ def visualize_filtered_results(image, results, target_class, vocabulary, output_
         target_class: str, the target class name to filter for
         vocabulary: List of class names
         output_path: Optional path to save the visualization
+        edit_style: str, one of "segment", "replace", "remove"
+            - "segment": show segmentation overlays (default)
+            - "replace": show white masks on black background
+            - "remove": show image with target class removed (black)
     """
     # Filter results for target class
     filtered_results = [r for r in results if r['class_name'] == target_class]
@@ -276,53 +280,85 @@ def visualize_filtered_results(image, results, target_class, vocabulary, output_
 
     print(f"\nFiltered {len(filtered_results)} masks for target class '{target_class}'")
 
-    fig, ax = plt.subplots(figsize=(20, 20))
-    ax.imshow(image)
+    # Combine all filtered masks
+    H, W = image.shape[:2]
+    combined_mask = np.zeros((H, W), dtype=bool)
+    for result in filtered_results:
+        combined_mask |= result['mask'].astype(bool)
 
-    # Use a single color for the target class
-    np.random.seed(42)
-    target_class_idx = vocabulary.index(target_class)
-    class_colors = {i: np.random.random(3) for i in range(len(vocabulary))}
-    target_color = class_colors[target_class_idx]
+    if edit_style == "segment":
+        # Show segmentation overlay (original behavior)
+        fig, ax = plt.subplots(figsize=(20, 20))
+        ax.imshow(image)
 
-    # Sort by region size (draw larger regions first)
-    sorted_results = sorted(filtered_results, key=lambda x: x['region_size'], reverse=True)
+        # Use a single color for the target class
+        np.random.seed(42)
+        target_class_idx = vocabulary.index(target_class)
+        class_colors = {i: np.random.random(3) for i in range(len(vocabulary))}
+        target_color = class_colors[target_class_idx]
 
-    # Draw masks
-    for result in sorted_results:
-        mask = result['mask']
-        confidence = result['confidence']
+        # Sort by region size (draw larger regions first)
+        sorted_results = sorted(filtered_results, key=lambda x: x['region_size'], reverse=True)
 
-        img_overlay = np.ones((mask.shape[0], mask.shape[1], 3))
-        for i in range(3):
-            img_overlay[:, :, i] = target_color[i]
-        ax.imshow(np.dstack((img_overlay, mask * 0.5)))
+        # Draw masks
+        for result in sorted_results:
+            mask = result['mask']
+            confidence = result['confidence']
 
-        # Add label at prompt point
-        point = result['prompt_point']
-        ax.plot(point[0], point[1], 'r*', markersize=10)
+            img_overlay = np.ones((mask.shape[0], mask.shape[1], 3))
+            for i in range(3):
+                img_overlay[:, :, i] = target_color[i]
+            ax.imshow(np.dstack((img_overlay, mask * 0.5)))
 
-        if result['region_size'] > 1000:  # Only label larger objects
-            ax.text(
-                point[0], point[1],
-                f"{target_class}\n{confidence:.2f}",
-                fontsize=8,
-                bbox=dict(boxstyle='round', facecolor=target_color, alpha=0.8),
-                ha='center', va='center'
-            )
+            # Add label at prompt point
+            point = result['prompt_point']
+            ax.plot(point[0], point[1], 'r*', markersize=10)
 
-    ax.set_title(f"Filtered Segmentation: {target_class} only ({len(filtered_results)} instances)",
-                 fontsize=16, pad=20)
-    ax.axis('off')
-    plt.tight_layout()
+            if result['region_size'] > 1000:  # Only label larger objects
+                ax.text(
+                    point[0], point[1],
+                    f"{target_class}\n{confidence:.2f}",
+                    fontsize=8,
+                    bbox=dict(boxstyle='round', facecolor=target_color, alpha=0.8),
+                    ha='center', va='center'
+                )
+
+        ax.set_title(f"Filtered Segmentation: {target_class} only ({len(filtered_results)} instances)",
+                     fontsize=16, pad=20)
+        ax.axis('off')
+        plt.tight_layout()
+
+    elif edit_style == "replace":
+        # Show white masks on black background
+        fig, ax = plt.subplots(figsize=(20, 20))
+        mask_image = np.zeros((H, W, 3), dtype=np.uint8)
+        mask_image[combined_mask] = [255, 255, 255]
+        ax.imshow(mask_image)
+        ax.set_title(f"Mask for replacement: {target_class} ({len(filtered_results)} instances)",
+                     fontsize=16, pad=20)
+        ax.axis('off')
+        plt.tight_layout()
+
+    elif edit_style == "remove":
+        # Show image with target class removed (blackened)
+        fig, ax = plt.subplots(figsize=(20, 20))
+        removed_image = image.copy()
+        removed_image[combined_mask] = [0, 0, 0]
+        ax.imshow(removed_image)
+        ax.set_title(f"Image with {target_class} removed ({len(filtered_results)} instances)",
+                     fontsize=16, pad=20)
+        ax.axis('off')
+        plt.tight_layout()
 
     if output_path:
         plt.savefig(output_path, bbox_inches='tight', pad_inches=0, dpi=150)
-        print(f"Saved filtered visualization to {output_path}")
+        print(f"Saved filtered visualization ({edit_style} style) to {output_path}")
     else:
         plt.show()
 
     plt.close()
+
+    return combined_mask
 
 
 def print_statistics(results, vocabulary):
@@ -361,6 +397,9 @@ def main():
                        help="List of class names for CLIP")
     parser.add_argument("--prompt", type=str, default=None,
                        help="Target class name to filter and visualize (must be in vocabulary)")
+    parser.add_argument("--edit", type=str, choices=["segment", "replace", "remove"],
+                       default="segment",
+                       help="Edit style for filtered visualization: segment (overlay), replace (mask), remove (blacken)")
     parser.add_argument("--checkpoint", default="checkpoints/sam2_hiera_large.pt",
                        help="Path to SAM 2 checkpoint")
     parser.add_argument("--model-cfg", default="sam2_hiera_l.yaml",
@@ -446,16 +485,23 @@ def main():
     # If prompt is specified, create filtered visualization
     if args.prompt:
         print("\n" + "="*50)
-        print(f"FILTERED VISUALIZATION: {args.prompt}")
+        print(f"FILTERED VISUALIZATION: {args.prompt} (style: {args.edit})")
         print("="*50)
 
         # Generate filtered output filename
         base_name = args.output.rsplit('.', 1)[0]
         ext = args.output.rsplit('.', 1)[1] if '.' in args.output else 'png'
-        filtered_output = f"{base_name}_filtered_{args.prompt}.{ext}"
+        filtered_output = f"{base_name}_filtered_{args.prompt}_{args.edit}.{ext}"
 
-        visualize_filtered_results(image, results, args.prompt, args.vocabulary,
-                                  output_path=filtered_output)
+        combined_mask = visualize_filtered_results(image, results, args.prompt, args.vocabulary,
+                                                   output_path=filtered_output, edit_style=args.edit)
+
+        # Save binary mask for potential inpainting use
+        if combined_mask is not None and args.edit in ["replace", "remove"]:
+            mask_output = f"{base_name}_mask_{args.prompt}.png"
+            mask_image = (combined_mask.astype(np.uint8) * 255)
+            cv2.imwrite(mask_output, mask_image)
+            print(f"Saved binary mask to {mask_output}")
 
     # Statistics
     print_statistics(results, args.vocabulary)
