@@ -4,7 +4,7 @@
 # Variables
 MAIN = main
 OUTDIR = build
-OVERLEAF_DIR = overleaf
+OVERLEAF_DIR = .
 
 # LaTeX compiler options
 LATEXMK_FLAGS = -pdf -output-directory=$(OUTDIR) -interaction=nonstopmode -file-line-error
@@ -48,7 +48,7 @@ docker-build:
 
 # Compile thesis using Docker
 docker-compile: docker-build
-	docker run --rm -v $(PWD)/overleaf:/thesis thesis-latex \
+	docker run --rm -v $(PWD)/.:/thesis thesis-latex \
 		bash -c "latexmk -pdf -output-directory=build -interaction=nonstopmode -file-line-error main.tex"
 	@if [ -f $(OVERLEAF_DIR)/build/$(MAIN).pdf ]; then \
 		cp $(OVERLEAF_DIR)/build/$(MAIN).pdf ./Master_Thesis.pdf; \
@@ -60,7 +60,7 @@ docker-compile: docker-build
 
 # Open interactive shell in Docker container
 docker-shell:
-	docker run --rm -it -v $(PWD)/overleaf:/thesis thesis-latex bash
+	docker run --rm -it -v $(PWD)/.:/thesis thesis-latex bash
 
 # View PDF (Linux)
 view:

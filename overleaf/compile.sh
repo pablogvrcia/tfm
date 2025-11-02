@@ -31,12 +31,12 @@ case "$MODE" in
 
         # Compile thesis
         echo "→ Compiling thesis..."
-        docker run --rm -v "$(pwd)/overleaf:/thesis" thesis-latex \
+        docker run --rm -v "$(pwd)/.:/thesis" thesis-latex \
             bash -c "latexmk -pdf -output-directory=build -interaction=nonstopmode -file-line-error main.tex"
 
         # Copy output
-        if [ -f "overleaf/build/main.pdf" ]; then
-            cp overleaf/build/main.pdf ./Master_Thesis.pdf
+        if [ -f "./build/main.pdf" ]; then
+            cp ./build/main.pdf ./Master_Thesis.pdf
             echo ""
             echo "========================================="
             echo "✓ SUCCESS! PDF generated successfully"
@@ -69,17 +69,17 @@ case "$MODE" in
         fi
 
         # Create build directory
-        mkdir -p overleaf/build
+        mkdir -p ./build
 
         # Compile thesis
         echo "→ Compiling thesis..."
-        cd overleaf
+        cd .
         latexmk -pdf -output-directory=build -interaction=nonstopmode -file-line-error main.tex
         cd ..
 
         # Copy output
-        if [ -f "overleaf/build/main.pdf" ]; then
-            cp overleaf/build/main.pdf ./Master_Thesis.pdf
+        if [ -f "./build/main.pdf" ]; then
+            cp ./build/main.pdf ./Master_Thesis.pdf
             echo ""
             echo "========================================="
             echo "✓ SUCCESS! PDF generated successfully"

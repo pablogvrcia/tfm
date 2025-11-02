@@ -6,7 +6,7 @@ echo "========================================="
 echo "Master Thesis - Auto-compile on changes"
 echo "========================================="
 echo ""
-echo "Watching for changes in overleaf/..."
+echo "Watching for changes in ./..."
 echo "Press Ctrl+C to stop"
 echo ""
 
@@ -24,7 +24,7 @@ echo "→ Initial compilation..."
 while true; do
     inotifywait -r -e modify,create,delete \
         --exclude '(\.aux|\.log|\.out|\.toc|\.bbl|\.blg|build/)' \
-        overleaf/Capitulos/ overleaf/*.tex overleaf/*.bib 2>/dev/null
+        ./Capitulos/ ./*.tex ./*.bib 2>/dev/null
 
     echo ""
     echo "→ Change detected, recompiling..."
