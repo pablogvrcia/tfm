@@ -43,7 +43,7 @@ except ImportError:
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description='SCLIP Benchmark Evaluation')
+    parser = argparse.ArgumentParser(description='Benchmark Evaluation')
 
     # Dataset
     parser.add_argument('--dataset', type=str, default='coco-stuff',
@@ -191,7 +191,7 @@ def main():
         return
 
     print("=" * 80)
-    print(f"SCLIP Benchmark: {args.dataset.upper()}")
+    print(f"Benchmark: {args.dataset.upper()}")
     print("=" * 80)
     if args.use_clip_guided_sam:
         print(f"Mode: CLIP-Guided SAM (Intelligent prompting + overlap resolution)")
@@ -294,7 +294,7 @@ def main():
 
             # Prediction with legend
             axes[2].imshow(pred_mask, cmap=cmap_viz, vmin=0, vmax=vmax_viz)
-            axes[2].set_title("SCLIP Prediction", fontsize=14, fontweight='bold')
+            axes[2].set_title("Prediction", fontsize=14, fontweight='bold')
             axes[2].axis('off')
 
             # Create legend showing present classes
@@ -393,7 +393,7 @@ def main():
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    results_file = output_dir / f"{args.dataset}_sclip_results.json"
+    results_file = output_dir / f"{args.dataset}_results.json"
     results['timestamp'] = datetime.now().isoformat()
     results['args'] = vars(args)
     results['elapsed_time'] = elapsed_time
