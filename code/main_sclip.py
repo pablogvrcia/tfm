@@ -16,66 +16,14 @@ import sys
 import numpy as np
 from PIL import Image
 import torch
+from typing import List, Tuple
 
 sys.path.insert(0, str(Path(__file__).parent))
 
 from sclip_segmentor import SCLIPSegmentor
-from models.sam2_segmentation import SAM2MaskGenerator
 from models.inpainting import StableDiffusionInpainter
 from utils import save_image
 import cv2
-
-
-def create_combined_mask_from_sclip(
-    sclip_prediction: np.ndarray,
-    target_class_idx: int,
-    sam_generator: SAM2MaskGenerator,
-    image: np.ndarray,
-    min_coverage: float = 0.6
-) -> np.ndarray:
-    """
-    Combine SCLIP dense prediction with SAM2 masks via majority voting.
-
-    This implements our novel SAM2 refinement layer (Chapter 2, Section 2.2.5).
-
-    Args:
-        sclip_prediction: Dense prediction from SCLIP (H, W) with class indices
-        target_class_idx: Index of the target class
-        sam_generator: SAM2 mask generator
-        image: Original image
-        min_coverage: Minimum coverage of target class to keep a mask
-
-    Returns:
-        Combined binary mask (H, W) with SAM2-refined boundaries
-    """
-    # Get dense SCLIP mask for target class
-    sclip_mask = (sclip_prediction == target_class_idx).astype(np.uint8)
-
-    # Generate SAM2 masks
-    sam_masks = sam_generator.generate_masks(image)
-
-    # Majority voting: keep SAM masks where >60% pixels match SCLIP prediction
-    refined_masks = []
-    for sam_mask in sam_masks:
-        mask_array = sam_mask.mask.astype(bool)
-        overlap = np.logical_and(mask_array, sclip_mask).sum()
-        total = mask_array.sum()
-
-        if total > 0:
-            coverage = overlap / total
-            if coverage >= min_coverage:
-                refined_masks.append(sam_mask.mask)
-
-    # Combine all refined masks
-    if not refined_masks:
-        # Fallback to SCLIP prediction if no SAM masks match
-        return sclip_mask
-
-    combined_mask = np.zeros_like(sclip_mask)
-    for mask in refined_masks:
-        combined_mask = np.logical_or(combined_mask, mask)
-
-    return combined_mask.astype(np.uint8)
 
 
 def visualize_sclip_segmentation(
@@ -212,12 +160,12 @@ def main():
     print(f"Vocabulary: {class_names}")
     print(f"Target class: '{args.prompt}'\n")
 
-    # Initialize SCLIP segmentor
+    # Initialize SCLIP segmentor with SAM refinement
     print("Initializing SCLIP segmentor...")
     sclip = SCLIPSegmentor(
         model_name="ViT-B/16",
         device=args.device,
-        use_sam=False,  # We'll use SAM separately for refinement
+        use_sam=args.use_sam_refinement,  # Enable SAM if requested
         use_pamr=False,  # Disabled by default in SCLIP paper
         slide_inference=True,
         verbose=True
@@ -228,11 +176,25 @@ def main():
     print("Stage 1: SCLIP Dense Prediction (CSA features)")
     print(f"{'='*70}\n")
 
-    prediction, logits = sclip.predict_dense(
-        image_np,
-        class_names,
-        return_logits=True
-    )
+    if args.use_sam_refinement:
+        # Use hybrid mode: SCLIP + Prompted SAM2 refinement
+        print(f"\n{'='*70}")
+        print("Stage 2: Prompted SAM2 Mask Refinement (Novel Contribution)")
+        print(f"{'='*70}\n")
+
+        prediction = sclip.predict_with_sam(
+            image_np,
+            class_names,
+            use_prompted_sam=True,  # Use our new prompted SAM approach
+            min_coverage=0.6
+        )
+    else:
+        # Pure SCLIP dense prediction (no SAM refinement)
+        prediction, logits = sclip.predict_dense(
+            image_np,
+            class_names,
+            return_logits=True
+        )
 
     # Save SCLIP visualization
     if args.visualize:
@@ -245,23 +207,11 @@ def main():
         save_image(sclip_vis, output_dir / "sclip_prediction.png")
         print(f"Saved SCLIP visualization: {output_dir / 'sclip_prediction.png'}")
 
-    # Stage 2: SAM2 mask refinement (our novel contribution)
+    # Extract target class mask
+    target_idx = class_names.index(args.prompt)
+    refined_mask = (prediction == target_idx).astype(np.uint8)
+
     if args.use_sam_refinement:
-        print(f"\n{'='*70}")
-        print("Stage 2: SAM2 Mask Refinement (Novel Contribution)")
-        print(f"{'='*70}\n")
-
-        sam_generator = SAM2MaskGenerator(device=args.device)
-
-        target_idx = class_names.index(args.prompt)
-        refined_mask = create_combined_mask_from_sclip(
-            prediction,
-            target_idx,
-            sam_generator,
-            image_np,
-            min_coverage=0.6
-        )
-
         print(f"Refined mask coverage: {refined_mask.sum() / refined_mask.size * 100:.2f}%")
 
         # Save refined mask visualization
@@ -272,10 +222,6 @@ def main():
             mask_vis = cv2.addWeighted(mask_vis, 0.6, overlay, 0.4, 0)
             save_image(mask_vis, output_dir / "sam2_refined_mask.png")
             print(f"Saved SAM2 refined mask: {output_dir / 'sam2_refined_mask.png'}")
-    else:
-        # Use SCLIP prediction directly
-        target_idx = class_names.index(args.prompt)
-        refined_mask = (prediction == target_idx).astype(np.uint8)
 
     # Save original and mask
     save_image(image_np, output_dir / "original.png")

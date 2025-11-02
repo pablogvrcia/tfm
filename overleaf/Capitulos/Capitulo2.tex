@@ -1,58 +1,107 @@
 \chapter{Methodology}
 \label{ch:methodology}
 
-This chapter details the methodology employed to develop open-vocabulary semantic segmentation systems. Unlike traditional approaches that rely on closed-vocabulary classifiers, our work leverages recent advances in vision-language models and promptable segmentation to enable flexible, language-driven image understanding and manipulation.
+This chapter details the methodology employed to develop our open-vocabulary semantic segmentation system. Unlike traditional approaches that rely on closed-vocabulary classifiers, our work leverages recent advances in vision-language models and promptable segmentation to enable flexible, language-driven image understanding and manipulation.
 
-We explore two complementary methodological approaches that represent different paradigms in CLIP-based segmentation:
+Our primary contribution is a dense prediction approach that extends SCLIP's Cross-layer Self-Attention (CSA) mechanism with a novel SAM2-based mask refinement layer. This fully annotation-free method combines the semantic understanding of dense CLIP-based features with SAM2's superior boundary quality through intelligent prompted segmentation.
+
+Additionally, we explore a proposal-based approach (SAM2+CLIP) as an alternative paradigm to understand the complementary strengths of different methodological strategies. This exploration provides valuable insights into when dense versus proposal-based methods are most effective.
+
+Building upon insights from SCLIP \cite{sclip2024}, MaskCLIP \cite{zhou2022extract}, CLIPSeg \cite{luddecke2022clipseg}, and SAM 2 \cite{ravi2024sam2}, this chapter presents our primary dense methodology in detail, followed by a brief description of the proposal-based alternative and comparative analysis of both approaches.
+
+\section{Primary Approach: Dense SCLIP with Novel SAM2 Refinement}
+\label{sec:dense_sclip_approach}
+
+Our main contribution is a dense prediction system that builds upon SCLIP's Cross-layer Self-Attention mechanism and extends it with a novel SAM2-based mask refinement layer. This approach achieves fully annotation-free open-vocabulary segmentation by combining dense semantic understanding with high-quality boundary delineation.
+
+\subsection{Motivation and Design Philosophy}
+
+Dense prediction methods offer several key advantages for open-vocabulary segmentation:
 
 \begin{itemize}
-    \item \textbf{Approach 1: Proposal-based (SAM2+CLIP)} - Uses SAM 2 to generate high-quality mask proposals, then scores them using CLIP's vision-language features. Achieves 69.3\% mIoU on PASCAL VOC and integrates with generative AI for image editing.
+    \item \textbf{Holistic scene understanding:} Dense approaches naturally segment both discrete objects (``things'') and amorphous regions (``stuff'' classes like sky, road, grass), providing comprehensive scene interpretation.
 
-    \item \textbf{Approach 2: Extended SCLIP with SAM2 refinement} - Builds upon SCLIP's Cross-layer Self-Attention (CSA) for dense prediction, extending it with a novel SAM2-based mask refinement layer. Achieves 49.52\% mIoU on COCO-Stuff and 48.09\% mIoU on PASCAL VOC in annotation-free settings.
+    \item \textbf{Annotation-free operation:} Unlike proposal-based methods that require generating and scoring hundreds of candidate masks, dense prediction produces a complete segmentation in a single forward pass, making it computationally efficient and conceptually simpler.
+
+    \item \textbf{Semantic coherence:} Dense predictions maintain spatial consistency across the entire image, avoiding fragmentation artifacts that can occur when combining discrete mask proposals.
 \end{itemize}
 
-Building upon insights from MaskCLIP \cite{zhou2022extract}, CLIPSeg \cite{luddecke2022clipseg}, SCLIP \cite{sclip2024}, and SAM 2 \cite{ravi2024sam2}, this chapter presents both methodologies, discusses their relative strengths, and demonstrates their complementary nature for different types of segmentation tasks.
-
-\section{Approach 1: Proposal-Based Segmentation (SAM2+CLIP)}
-
-Our first approach combines multiple complementary techniques to achieve robust open-vocabulary semantic segmentation and editing. The pipeline consists of four main stages: (1) dense vision-language feature extraction, (2) mask proposal generation, (3) mask-text alignment and selection, and (4) generative inpainting. Figure~\ref{fig:system_pipeline} provides a high-level overview of this pipeline.
+However, dense CLIP-based features alone often produce imprecise boundaries. Our key insight is to leverage SAM2's superior segmentation quality to refine SCLIP's dense predictions, combining the strengths of both models.
 
 \subsection{System Overview}
+
+Our dense SCLIP + SAM2 refinement pipeline consists of three main stages:
+
+\begin{enumerate}
+    \item \textbf{Dense Semantic Prediction:} SCLIP extracts multi-layer CSA features and produces pixel-wise class predictions through similarity matching with text embeddings.
+
+    \item \textbf{Prompted SAM2 Refinement:} Extract representative points from SCLIP's predictions to guide SAM2's mask generation, then apply majority voting to combine semantic understanding with precise boundaries.
+
+    \item \textbf{Generative Editing (Optional):} Integrate with Stable Diffusion v2 for text-driven image modification based on the refined segmentation masks.
+\end{enumerate}
 
 \begin{figure}[h]
 \centering
 \fbox{\parbox{0.9\textwidth}{\centering
 \vspace{1cm}
-\textbf{[PLACEHOLDER: System Pipeline Diagram]}\\[0.5cm]
-\textit{This figure should show the complete pipeline with 4 stages flowing left-to-right:}\\[0.3cm]
+\textbf{[PLACEHOLDER: Dense SCLIP + SAM2 Pipeline Diagram]}\\[0.5cm]
+\textit{This figure should show the dense prediction pipeline:}\\[0.3cm]
 \begin{tabular}{l}
-\textbf{Stage 1:} Input image → CLIP ViT-L/14 → Dense feature maps (layers 6, 12, 18, 24)\\
-\textbf{Stage 2:} Input image → SAM 2 automatic mask generation → 100-300 mask proposals\\
-\textbf{Stage 3:} Feature maps + Masks + Text prompt → Similarity scoring → Top-K masks\\
-\textbf{Stage 4:} Selected masks + Text prompt → Stable Diffusion Inpainting → Output image\\[0.3cm]
+\textbf{Stage 1 - Dense Prediction:}\\
+\quad Input image → SCLIP (ViT-B/16 with CSA) → Dense class probabilities (H×W×C)\\
+\quad Extract features from layers 6, 12, 18, 24 → Aggregate → Pixel-wise predictions\\[0.3cm]
+\textbf{Stage 2 - SAM2 Refinement:}\\
+\quad SCLIP predictions → Extract prompt points (connected components)\\
+\quad Points → SAM2 predictor → High-quality masks\\
+\quad Masks + SCLIP predictions → Majority voting → Refined segmentation\\[0.3cm]
+\textbf{Stage 3 - Optional Editing:}\\
+\quad Refined masks + Text prompt → Stable Diffusion → Edited image\\[0.3cm]
 \end{tabular}
-\textit{Include visual examples at each stage (e.g., feature heatmaps, mask overlays, final result).}\\
-\textit{Use arrows to show data flow and highlight the integration points between components.}
+\textit{Include visualization: dense heatmap, extracted points, SAM2 masks, final result.}
 \vspace{1cm}
 }}
-\caption{Overview of the proposed open-vocabulary semantic segmentation and editing pipeline. The system combines CLIP's vision-language features, SAM 2's mask generation, and Stable Diffusion's inpainting capabilities.}
-\label{fig:system_pipeline}
+\caption{Overview of our dense SCLIP + SAM2 refinement pipeline. The system combines SCLIP's semantic understanding with SAM2's boundary quality through prompted segmentation.}
+\label{fig:dense_pipeline}
 \end{figure}
 
-The key insight motivating our design is that different components excel at different aspects of the task: CLIP-based models \cite{radford2021learning} provide rich semantic understanding aligned with language, SAM 2 \cite{ravi2024sam2} generates high-quality segmentation masks with precise boundaries, and diffusion models \cite{rombach2022high} enable realistic content generation. By combining these strengths, we achieve both semantic flexibility and visual quality.
+The key insight motivating our design is that dense prediction provides holistic scene understanding, while SAM2's prompted segmentation refines boundaries. By extracting points from SCLIP's high-confidence regions, we guide SAM2 to focus on semantically relevant areas, achieving both accuracy and efficiency.
 
-\subsection{Dense Vision-Language Feature Extraction}
-\label{sec:dense_features}
+\subsection{SCLIP's Cross-layer Self-Attention (CSA) Foundation}
+\label{sec:csa_foundation}
 
-Following the approach of MaskCLIP \cite{zhou2022extract} and CLIPSeg \cite{luddecke2022clipseg}, we extract dense vision-language features that capture pixel-level semantic information. Unlike standard CLIP, which produces image-level embeddings, we need spatially-resolved features to determine which image regions correspond to a given text prompt.
+Our dense prediction approach leverages SCLIP's Cross-layer Self-Attention (CSA), which modifies the standard self-attention mechanism in CLIP's Vision Transformer to produce better features for dense prediction. Standard self-attention computes:
 
-We explore two complementary strategies:
+\begin{equation}
+\text{Attention}(Q, K, V) = \text{softmax}\left(\frac{QK^T}{\sqrt{d}}\right)V
+\end{equation}
+
+where $Q$, $K$, $V$ are query, key, and value matrices. This formulation captures query-key relationships but may miss important spatial correlations. SCLIP's CSA instead computes:
+
+\begin{equation}
+\text{CSA}(Q, K, V) = \text{softmax}\left(\frac{QQ^T + KK^T}{\sqrt{d}}\right)V
+\end{equation}
+
+This modification introduces two key changes:
 
 \begin{itemize}
-    \item \textbf{Modified CLIP Architecture (CLIPSeg approach):} We augment the standard CLIP image encoder with additional decoder layers that produce dense per-pixel predictions. This follows CLIPSeg's transformer-based decoder design, which takes CLIP's intermediate features and progressively upsamples them to produce dense segmentation maps. The decoder is lightweight, adding minimal computational overhead while enabling fine-grained spatial reasoning.
-
-    \item \textbf{Direct Feature Extraction (MaskCLIP approach):} Alternatively, we extract multi-scale features directly from CLIP's vision transformer, using features from multiple layers to capture both high-level semantic information and low-level spatial details. Following MaskCLIP, we compute similarity maps by comparing these dense features with text embeddings, creating pixel-wise affinity scores without requiring additional training.
+    \item \textbf{Query-query similarity ($QQ^T$):} Captures relationships between different spatial positions based on their query representations, encouraging spatial consistency
+    \item \textbf{Key-key similarity ($KK^T$):} Captures relationships based on key representations, providing complementary structural information
 \end{itemize}
+
+By leveraging CSA, we obtain attention maps that are more spatially coherent and better suited for dense prediction tasks.
+
+\subsection{Multi-Layer Feature Aggregation}
+
+Following SCLIP \cite{sclip2024}, MaskCLIP \cite{zhou2022extract}, and ITACLIP \cite{shao2024itaclip}, we extract features from multiple ViT layers to capture information at different semantic levels:
+
+\begin{itemize}
+    \item \textbf{Layer 6 (early):} Low-level features (edges, textures, colors)
+    \item \textbf{Layer 12 (middle):} Mid-level features (object parts, patterns)
+    \item \textbf{Layer 18 (late-middle):} High-level semantic features
+    \item \textbf{Layer 24 (final):} Abstract semantic concepts
+\end{itemize}
+
+For each layer $\ell$, we extract patch features $F_\ell \in \mathbb{R}^{H_p \times W_p \times D}$ where $H_p, W_p$ are the patch grid dimensions and $D$ is the feature dimension. These features are upsampled to the original image resolution using bilinear interpolation and aggregated through weighted averaging.
 
 \begin{figure}[h]
 \centering
@@ -78,337 +127,175 @@ We explore two complementary strategies:
 
 For text encoding, we use CLIP's text encoder to generate embeddings for user-provided prompts. To improve robustness, we employ prompt ensembling \cite{zhou2022learning}, generating multiple variations of the input text (e.g., ``a photo of a \{object\}'', ``\{object\} in the scene'') and averaging their embeddings.
 
-\subsection{Mask Proposal Generation with SAM 2}
+\subsection{Dense Semantic Prediction}
 
-While dense CLIP features provide semantic information, they may lack precise object boundaries. To address this, we leverage SAM 2 \cite{ravi2024sam2} to generate high-quality mask proposals with accurate delineation.
-
-SAM 2 operates in automatic mask generation mode, producing a comprehensive set of object masks across multiple scales without requiring explicit prompts. The model's hierarchical mask generation ensures coverage of objects at different granularities—from small details to large scene elements. This is crucial for open-vocabulary settings where we cannot anticipate which objects users might query.
-
-Key advantages of SAM 2 include:
-\begin{itemize}
-    \item \textbf{Training-free deployment:} SAM 2 requires no fine-tuning, avoiding potential overfitting to specific object categories.
-    \item \textbf{High-quality boundaries:} The model produces masks with precise edges, superior to those obtainable from CLIP features alone.
-    \item \textbf{Comprehensive coverage:} Automatic mask generation yields hundreds of candidate masks per image, ensuring thorough coverage of all potential objects.
-\end{itemize}
-
-\begin{figure}[h]
-\centering
-\fbox{\parbox{0.9\textwidth}{\centering
-\vspace{1cm}
-\textbf{[PLACEHOLDER: SAM 2 Mask Generation Visualization]}\\[0.5cm]
-\textit{This figure should demonstrate SAM 2's hierarchical mask generation:}\\[0.3cm]
-\begin{tabular}{l}
-\textbf{Left:} Input image (e.g., street scene with cars, pedestrians, buildings)\\
-\textbf{Middle:} SAM 2 automatic mask generation with color-coded masks\\
-\quad - Show \textasciitilde150-200 overlapping masks at different scales\\
-\quad - Use semi-transparent colors to visualize overlaps\\
-\textbf{Right:} Hierarchical grouping showing masks at 3 scales:\\
-\quad - Fine scale: Small objects (traffic signs, windows)\\
-\quad - Medium scale: People, cars\\
-\quad - Coarse scale: Buildings, road segments\\[0.3cm]
-\end{tabular}
-\textit{Annotate a few masks with their IoU confidence scores (e.g., 0.92, 0.88, 0.95).}
-\vspace{1cm}
-}}
-\caption{SAM 2 automatic mask generation produces comprehensive coverage at multiple scales. The hierarchical structure ensures both fine-grained details and large scene elements are captured.}
-\label{fig:sam2_masks}
-\end{figure}
-
-\subsection{Mask-Text Alignment and Selection}
-
-Given the dense vision-language features from Section~\ref{sec:dense_features} and mask proposals from SAM 2, we now align masks with the user's text query. This step determines which of SAM 2's masks correspond to the concept specified by the user.
-
-For each mask $M_i$, we compute a relevance score $S_i$ that quantifies its alignment with the text prompt $t$:
+Following SCLIP's approach, we compute pixel-wise semantic scores by matching image features with text embeddings. For each pixel location $(x, y)$ and class $c$, we compute the cosine similarity between the aggregated multi-layer feature $f_{x,y}$ and the text embedding $e_c$:
 
 \begin{equation}
-S_i = \frac{1}{|M_i|} \sum_{p \in M_i} \text{sim}(f_p, e_t)
+S(x, y, c) = \text{sim}(f_{x,y}, e_c) = \frac{f_{x,y} \cdot e_c}{||f_{x,y}|| \, ||e_c||}
 \end{equation}
 
-where $f_p$ is the CLIP feature at pixel $p$, $e_t$ is the text embedding, $|M_i|$ is the number of pixels in mask $M_i$, and $\text{sim}(\cdot, \cdot)$ denotes cosine similarity.
+The initial dense prediction assigns each pixel to the class with highest similarity:
 
-To improve robustness, we incorporate several refinements inspired by recent work:
+\begin{equation}
+\hat{c}(x, y) = \arg\max_{c} S(x, y, c)
+\end{equation}
 
-\begin{itemize}
-    \item \textbf{Background suppression:} We compute a background score using negative prompts (e.g., ``background'', ``nothing'') and subtract it from object scores, reducing false positives from uniform regions.
+This produces a dense semantic segmentation map purely from CLIP features, without requiring any mask proposals. However, while SCLIP's CSA improves spatial coherence, the boundaries may still lack precision compared to dedicated segmentation models.
 
-    \item \textbf{Multi-scale aggregation:} Following MaskCLIP, we extract features from multiple CLIP layers and combine their similarity scores, capturing both semantic and spatial information.
+\subsection{Novel SAM2 Refinement Layer}
 
-    \item \textbf{Adaptive thresholding:} Rather than using a fixed threshold, we select the top-K masks or apply percentile-based thresholding, adapting to the distribution of similarity scores in each image.
-\end{itemize}
+Our key contribution is a novel refinement layer that combines SCLIP's semantic understanding with SAM2's superior boundary quality through prompted segmentation and majority voting.
 
-\subsection{Generative Inpainting with Stable Diffusion}
+\subsubsection{Prompted Segmentation Strategy}
 
-Once semantically relevant masks are identified, we employ Stable Diffusion v2 Inpainting \cite{rombach2022high} to modify the selected regions according to user instructions. The inpainting model operates in the latent space of a variational autoencoder (VAE), enabling high-resolution generation with computational efficiency.
+Instead of using SAM2's automatic mask generation (which produces 100-300 masks from a 48×48 grid), we develop a guided prompting strategy that extracts representative points from SCLIP's predictions:
 
-The inpainting process proceeds as follows:
 \begin{enumerate}
-    \item The original image and binary mask are encoded into the VAE's latent space.
-    \item The masked latent region is iteratively denoised using the diffusion model, conditioned on both the text prompt and the surrounding unmasked context.
-    \item The final latent representation is decoded back to pixel space, producing the modified image.
+    \item \textbf{Connected Components Analysis:} For each predicted class, identify connected regions in SCLIP's dense prediction using morphological operations
+
+    \item \textbf{Point Extraction:} Extract centroids from each connected component, ensuring minimum spatial separation (20 pixels) to avoid redundant prompts
+
+    \item \textbf{SAM2 Prompting:} Pass extracted points to SAM2's predictor, which generates 3 masks per point at different granularities (tight, medium, loose)
+
+    \item \textbf{Majority Voting:} For each SAM2 mask, compute overlap with SCLIP prediction. Keep masks where $\geq$60\% of pixels match the predicted class
+
+    \item \textbf{Mask Combination:} Combine retained masks using logical OR to produce final refined segmentation
 \end{enumerate}
 
-We employ several techniques to ensure coherent and high-quality results:
-\begin{itemize}
-    \item \textbf{Prompt engineering:} User queries are reformulated into detailed prompts suitable for the diffusion model, incorporating context from the original image.
-    \item \textbf{Classifier-free guidance:} We use high guidance scales (typically 7-10) to ensure generated content closely follows the text prompt while maintaining realism.
-    \item \textbf{Mask refinement:} Mask boundaries are slightly blurred to ensure smooth transitions between inpainted and original regions, preventing visible seams.
-\end{itemize}
+This prompted approach achieves 2× speedup over automatic mask generation ($\sim$60 targeted points vs 2,304 grid points) while maintaining segmentation quality through semantic-guided prompting.
 
-The integration of these components—dense CLIP features, SAM 2 masks, and diffusion-based inpainting—yields a flexible system capable of understanding and modifying images based solely on natural language instructions, without requiring category-specific training or annotations.
+\subsubsection{Majority Voting for Semantic Consistency}
 
-\section{Implementation Details}
-This section provides specific implementation details for each component of our system, including model selection, hyperparameters, and design choices that impact performance.
-
-\subsection{CLIP Feature Extraction}
-
-We use the CLIP ViT-L/14 variant, which provides a good balance between computational efficiency and feature quality. The vision transformer processes images at $336 \times 336$ resolution, producing a $24 \times 24$ grid of patch embeddings. To obtain dense features:
-
-\begin{itemize}
-    \item We extract features from multiple transformer layers (layers 6, 12, 18, and 24), capturing information at different levels of abstraction.
-    \item Each layer's features are bilinearly upsampled to a common resolution and concatenated, following MaskCLIP's multi-scale approach.
-    \item The resulting feature map has dimensions $H \times W \times D$, where $D$ is the combined feature dimension.
-\end{itemize}
-
-For text encoding, we generate prompt ensembles using templates: ``a photo of a \{class\}'', ``\{class\} in a scene'', ``a rendering of a \{class\}''. The resulting embeddings are averaged to improve robustness to prompt variations.
-
-\subsection{SAM 2 Configuration}
-
-We employ SAM 2 in automatic mask generation mode with the following parameters:
-
-\begin{itemize}
-    \item \textbf{Points per side:} 32 (generating a $32 \times 32$ grid of point prompts)
-    \item \textbf{Predicted IoU threshold:} 0.88 (filtering low-confidence masks)
-    \item \textbf{Stability score threshold:} 0.95 (ensuring stable mask predictions)
-    \item \textbf{Crop overlap ratio:} 512/1500 (for handling large images through cropping)
-\end{itemize}
-
-These settings typically generate 100-300 mask candidates per image, providing comprehensive coverage across different object scales. We use the ``sam2\_hiera\_large'' checkpoint, which offers strong performance while remaining computationally tractable.
-
-\subsection{Mask Scoring and Selection}
-
-For each mask $M_i$, we employ a multi-scale CLIP voting strategy to compute robust alignment scores. Instead of evaluating masks at a single resolution, we extract CLIP features at three scales to capture different levels of detail:
-
-\subsubsection{Multi-Scale CLIP Voting}
-
-To address CLIP's sensitivity to object scale, we resize each masked region to three target resolutions:
-\begin{itemize}
-    \item \textbf{224px:} Captures fine-grained details, beneficial for small objects
-    \item \textbf{336px:} Standard CLIP resolution, provides balanced semantic features
-    \item \textbf{512px:} Captures broader context, helps with large objects
-\end{itemize}
-
-For each scale $s \in \{224, 336, 512\}$, we compute the cosine similarity between the resized mask region's CLIP embedding and the text embedding:
+The majority voting mechanism ensures SAM2's masks align with SCLIP's semantic understanding. For each mask $M$ generated by SAM2, we compute:
 
 \begin{equation}
-S_i^{(s)} = \text{sim}(f_{M_i}^{(s)}, e_t)
+\text{coverage}(M, c) = \frac{|\{p \in M : \hat{c}(p) = c\}|}{|M|}
 \end{equation}
 
-where $f_{M_i}^{(s)}$ is the CLIP image embedding of mask region $M_i$ at scale $s$. The final similarity score is computed as a weighted average:
+where $\hat{c}(p)$ is SCLIP's predicted class at pixel $p$. We retain mask $M$ for class $c$ if $\text{coverage}(M, c) \geq 0.6$, filtering out masks that don't align with SCLIP's semantic predictions.
+
+This intelligent fusion combines:
+\begin{itemize}
+    \item \textbf{SCLIP's semantic accuracy:} Correct class assignment from vision-language understanding
+    \item \textbf{SAM2's boundary quality:} Precise object delineation from specialized segmentation model
+\end{itemize}
+
+\subsection{Generative Editing Integration}
+
+Once refined segmentation masks are obtained, we optionally integrate Stable Diffusion v2 Inpainting \cite{rombach2022high} for text-driven image modification. The inpainting model operates in the latent space of a variational autoencoder (VAE), enabling high-resolution generation with computational efficiency.
+
+We employ several techniques to ensure coherent results:
+\begin{itemize}
+    \item \textbf{Mask dilation:} Expand mask boundaries by 5-10 pixels for smoother blending
+    \item \textbf{Classifier-free guidance:} Use guidance scale of 7.5 to balance prompt following and realism
+    \item \textbf{Prompt engineering:} Reformulate user queries into detailed prompts suitable for the diffusion model
+\end{itemize}
+
+This completes our primary dense SCLIP + SAM2 refinement pipeline, enabling fully annotation-free open-vocabulary segmentation with high-quality boundaries.
+
+\section{Alternative Exploration: Proposal-Based Segmentation}
+\label{sec:proposal_based}
+
+As a complementary exploration, we also investigated a proposal-based paradigm that operates inversely to our primary dense approach. Instead of generating pixel-wise semantic predictions first and then refining with SAM2, this alternative method first generates class-agnostic mask proposals using SAM2's automatic mask generation, then scores each proposal using CLIP to determine its semantic class.
+
+\subsection{Methodology Overview}
+
+The proposal-based approach consists of three main stages:
+
+\begin{enumerate}
+    \item \textbf{Automatic Mask Generation:} SAM2 generates 100-300 class-agnostic mask proposals across multiple scales without requiring any prompts. The model uses a 32×32 grid of point prompts to ensure comprehensive coverage of all potential objects in the image.
+
+    \item \textbf{CLIP-based Mask Scoring:} Each mask region is cropped, resized, and encoded using CLIP's image encoder. The resulting embedding is compared against text embeddings for all classes using cosine similarity to determine semantic relevance.
+
+    \item \textbf{Multi-Scale Voting:} To improve robustness to object scale, each mask is evaluated at three resolutions (224px, 336px, 512px) and scored using weighted voting. This addresses CLIP's sensitivity to input resolution.
+\end{enumerate}
+
+\subsection{Key Technical Components}
+
+\subsubsection{SAM2 Configuration}
+
+We employ SAM2's automatic mask generation mode with parameters optimized for comprehensive coverage:
+
+\begin{itemize}
+    \item \textbf{Points per side:} 32 (generating a 32×32 grid)
+    \item \textbf{Predicted IoU threshold:} 0.88
+    \item \textbf{Stability score threshold:} 0.95
+    \item \textbf{Model variant:} \texttt{sam2\_hiera\_large}
+\end{itemize}
+
+This configuration typically produces 100-300 mask candidates per image, ensuring both small details and large scene elements are captured.
+
+\subsubsection{Multi-Scale CLIP Scoring}
+
+For each mask $M_i$, we compute similarity scores at three scales:
+
+\begin{equation}
+S_i^{(s)} = \text{sim}(\text{CLIP}_{\text{img}}(M_i^{(s)}), \text{CLIP}_{\text{text}}(c))
+\end{equation}
+
+where $s \in \{224, 336, 512\}$ denotes the resize resolution. The final score combines all scales:
 
 \begin{equation}
 S_i = 0.2 \cdot S_i^{(224)} + 0.5 \cdot S_i^{(336)} + 0.3 \cdot S_i^{(512)}
 \end{equation}
 
-The weights reflect that the standard 336px resolution typically provides the most reliable features, while 224px and 512px contribute complementary information for scale robustness.
+The weights reflect that 336px (CLIP's standard resolution) typically provides the most reliable features.
 
-\subsubsection{Background Suppression and Confuser Penalization}
+\subsubsection{Background Suppression}
 
-We also compute a background score $S_{\text{bg}}$ using negative prompts (``background'', ``nothing'', ``empty space'') and a confuser score $S_{\text{conf}}$ that penalizes common mismatches (e.g., distinguishing ``tire'' from ``grille''). The final score incorporates all three components:
-
-\begin{equation}
-S_i^{\text{final}} = S_i - \alpha \cdot S_{\text{bg}} - \beta \cdot S_{\text{conf}}
-\end{equation}
-
-with $\alpha = 0.3$ and $\beta = 0.3$ to balance object similarity against background and confuser suppression. Masks are filtered using adaptive thresholds based on mask size (0.15-0.20), and multiple non-overlapping instances are retained to handle queries that may refer to multiple objects (e.g., ``person'' in a group photo).
-
-\subsubsection{Multi-Instance Selection Strategy}
-
-A key challenge in open-vocabulary segmentation is determining how many masks to select for a given query. A query like ``car'' typically refers to a single complete object, while ``tire'' might refer to four parts, and ``person'' in a group photo should capture all individuals. We employ a multi-instance selection strategy that addresses this challenge:
-
-\begin{enumerate}
-    \item \textbf{Size-based filtering:} Masks smaller than 0.1\% of the image area are discarded as noise.
-
-    \item \textbf{Score-based selection:} Masks must exceed an adaptive threshold (0.15 for large masks, 0.20 for small masks) based on their multi-scale similarity score.
-
-    \item \textbf{Non-maximum suppression:} For each class, masks are sorted by size (largest first) and selected iteratively. A new mask is added only if it has less than 70\% overlap with already-selected masks of the same class, ensuring diverse coverage of distinct object instances.
-
-    \item \textbf{Confidence-based assignment:} When multiple classes' masks overlap, pixels are assigned to the class with the highest confidence score, enabling proper handling of class boundaries and occlusions.
-\end{enumerate}
-
-This strategy ensures that the system adaptively selects the appropriate number of masks based on the query semantics and image content, capturing single objects, multiple instances, or object parts as needed.
-
-\subsection{Stable Diffusion Inpainting}
-
-We use the \texttt{stabilityai/stable-diffusion-2-inpainting} model with the following configuration:
-
-\begin{itemize}
-    \item \textbf{Inference steps:} 50 (balancing quality and speed)
-    \item \textbf{Guidance scale:} 7.5 (standard value for classifier-free guidance)
-    \item \textbf{Negative prompts:} ``blurry, low quality, distorted, artifacts'' (improving output quality)
-    \item \textbf{Mask blur radius:} 8 pixels (ensuring smooth transitions)
-\end{itemize}
-
-Before inpainting, we dilate the selected mask by 5 pixels to ensure complete coverage of the target region and prevent edge artifacts. The diffusion model operates on $512 \times 512$ images; larger images are processed in tiles with overlapping regions to maintain coherence.
-
-\subsection{Computational Considerations}
-
-The pipeline's computational requirements are as follows:
-\begin{itemize}
-    \item \textbf{CLIP feature extraction:} $\sim$100ms per image (ViT-L/14 on GPU)
-    \item \textbf{SAM 2 mask generation:} $\sim$2-4 seconds per image (depending on image size)
-    \item \textbf{Mask scoring:} $\sim$50ms for 200 masks
-    \item \textbf{Stable Diffusion inpainting:} $\sim$5-10 seconds per mask (50 steps)
-\end{itemize}
-
-Total processing time for end-to-end segmentation and editing is typically 10-20 seconds per image on an NVIDIA RTX 3090 GPU. The most expensive component is Stable Diffusion; for applications requiring real-time performance, fewer diffusion steps (20-30) can be used with minimal quality degradation.
-
-\section{Benefits and Applications}
-This methodology offers several advantages:
-\begin{itemize}
-    \item \textbf{Open-Vocabulary Flexibility:}  
-    The system does not rely on a fixed set of class labels. Users can specify arbitrary concepts in natural language, and the pipeline adapts by filtering segmentation masks accordingly.
-
-    \item \textbf{Interactive and Semantic Editing:}  
-    Instead of manually selecting regions to edit, users can rely on semantic descriptions. For example, describing “the red car” will allow the system to segment and modify that object without further manual intervention.
-
-    \item \textbf{Generative Capabilities:}  
-    The integration of stable diffusion inpainting models allows for creative image modifications. Objects can be removed, replaced, or stylized based on textual instructions. This leads to endless possibilities in content creation, data augmentation, and user-driven image editing.
-\end{itemize}
-
-In summary, this proposal-based approach leverages promptable segmentation from SAM2, open-vocabulary alignment from CLIP, and generative inpainting from Stable Diffusion v2 to create a versatile tool. It seamlessly combines segmentation, natural language understanding, and generative transformations into a unified pipeline, achieving 69.3\% mIoU on PASCAL VOC and enabling interactive semantic editing.
-
-\section{Approach 2: Extended SCLIP with Novel SAM2 Refinement}
-
-As a complementary exploration, we investigate dense prediction methods that directly extract pixel-wise semantic labels from CLIP without relying on mask proposals. We build upon SCLIP's \cite{sclip2024} Cross-layer Self-Attention (CSA) mechanism for improved dense feature quality, and extend it with a novel SAM2-based mask refinement layer that significantly improves segmentation accuracy through majority voting.
-
-\subsection{Motivation and Design Philosophy}
-
-While the proposal-based approach (Section 2.1) excels at segmenting discrete objects with well-defined boundaries, dense prediction methods offer advantages for:
-
-\begin{itemize}
-    \item \textbf{Stuff classes:} Amorphous regions like sky, grass, water that lack clear object boundaries
-    \item \textbf{Fine-grained semantic understanding:} Pixel-level classification captures subtle semantic variations
-    \item \textbf{Datasets with many classes:} COCO-Stuff (171 classes) benefits from dense semantic reasoning rather than proposal filtering
-    \item \textbf{Training-free deployment:} No reliance on external mask generators, purely CLIP-based
-\end{itemize}
-
-SCLIP addresses a fundamental limitation of standard CLIP: its self-attention mechanism is optimized for image-level classification, not dense prediction. By modifying the attention computation, SCLIP produces spatially-coherent features suitable for pixel-wise segmentation.
-
-\subsection{SCLIP's Cross-layer Self-Attention (CSA) Foundation}
-
-Our dense prediction approach leverages SCLIP's Cross-layer Self-Attention (CSA), which modifies the standard self-attention mechanism in CLIP's Vision Transformer to produce better features for dense prediction. Standard self-attention computes:
+To reduce false positives from uniform regions, we compute background scores using negative prompts (``background'', ``nothing'', ``empty space'') and subtract them from object scores:
 
 \begin{equation}
-\text{Attention}(Q, K, V) = \text{softmax}\left(\frac{QK^T}{\sqrt{d}}\right)V
+S_i^{\text{final}} = S_i - \alpha \cdot S_{\text{bg}}
 \end{equation}
 
-where $Q$, $K$, $V$ are query, key, and value matrices. This formulation captures query-key relationships but may miss important spatial correlations. SCLIP's CSA instead computes:
+with $\alpha = 0.3$ to balance object detection sensitivity.
 
-\begin{equation}
-\text{CSA}(Q, K, V) = \text{softmax}\left(\frac{QQ^T + KK^T}{\sqrt{d}}\right)V
-\end{equation}
+\subsubsection{Multi-Instance Selection}
 
-This modification introduces two key changes that we utilize in our approach:
-
-\begin{itemize}
-    \item \textbf{Query-query similarity ($QQ^T$):} Captures relationships between different spatial positions based on their query representations, encouraging spatial consistency
-    \item \textbf{Key-key similarity ($KK^T$):} Captures relationships based on key representations, providing complementary structural information
-\end{itemize}
-
-By leveraging CSA, we obtain attention maps that are more spatially coherent and better suited for dense prediction tasks. The attention mechanism now considers not just ``which keys match this query'' but also ``which queries are similar to each other'' and ``which keys are similar to each other,'' leading to smoother, more consistent segmentation maps that serve as the foundation for our SAM2 refinement layer.
-
-\subsection{Multi-Layer Feature Aggregation}
-
-Following MaskCLIP \cite{zhou2022extract} and ITACLIP \cite{shao2024itaclip}, we extract features from multiple ViT layers to capture information at different semantic levels:
-
-\begin{itemize}
-    \item \textbf{Layer 6 (early):} Low-level features (edges, textures, colors)
-    \item \textbf{Layer 12 (middle):} Mid-level features (object parts, patterns)
-    \item \textbf{Layer 18 (late-middle):} High-level semantic features
-    \item \textbf{Layer 24 (final):} Abstract semantic concepts
-\end{itemize}
-
-For each layer $\ell$, we extract patch features $F_\ell \in \mathbb{R}^{H_p \times W_p \times D}$ where $H_p, W_p$ are the patch grid dimensions and $D$ is the feature dimension. These features are upsampled to the original image resolution using bilinear interpolation.
-
-\subsection{Dense Prediction Pipeline}
-
-The SCLIP dense prediction pipeline consists of the following steps:
+A key challenge is determining how many masks to select for each query. We employ an adaptive strategy:
 
 \begin{enumerate}
-    \item \textbf{Feature extraction:} Extract CSA-enhanced features from layers 6, 12, 18, 24 of CLIP ViT-B/16
-
-    \item \textbf{Text encoding:} Encode class labels using CLIP's text encoder with prompt templates (``a photo of a \{class\}'')
-
-    \item \textbf{Similarity computation:} Compute pixel-wise cosine similarity between image features and text embeddings:
-    \begin{equation}
-    S_{\ell}(x, y, c) = \text{sim}(F_\ell(x, y), T_c)
-    \end{equation}
-    where $F_\ell(x, y)$ is the feature at pixel $(x, y)$ from layer $\ell$ and $T_c$ is the text embedding for class $c$
-
-    \item \textbf{Multi-layer fusion:} Aggregate similarity maps across layers using weighted averaging:
-    \begin{equation}
-    S(x, y, c) = \sum_{\ell \in \{6,12,18,24\}} w_\ell \cdot S_\ell(x, y, c)
-    \end{equation}
-    with equal weights $w_\ell = 0.25$
-
-    \item \textbf{Temperature scaling:} Apply temperature scaling to sharpen the distribution:
-    \begin{equation}
-    P(x, y, c) = \frac{\exp(S(x, y, c) / T)}{\sum_{c'} \exp(S(x, y, c') / T)}
-    \end{equation}
-    with temperature $T = 0.01$ following SCLIP's configuration
-
-    \item \textbf{Prediction:} Assign each pixel to the class with maximum probability:
-    \begin{equation}
-    \hat{y}(x, y) = \arg\max_c P(x, y, c)
-    \end{equation}
+    \item Filter masks by size (discard those <0.1\% of image area)
+    \item Apply score threshold (0.15-0.20 depending on mask size)
+    \item Use non-maximum suppression (70\% IoU threshold) to avoid duplicates
+    \item Select multiple non-overlapping instances when appropriate
 \end{enumerate}
 
-This pure SCLIP approach (without SAM2 refinement) achieves 38.50\% mIoU on PASCAL VOC and 35.41\% mIoU on COCO-Stuff, representing a 10.3$\times$ improvement over naive CLIP baseline (4.68\% VOC).
+This enables the system to correctly handle queries referring to single objects (``car''), multiple instances (``person'' in a crowd), or object parts (``tire'').
 
-\subsection{Novel SAM2 Mask Refinement Layer}
+\subsection{Integration with Stable Diffusion}
 
-While SCLIP's dense predictions capture rich semantic information, boundaries may be imprecise. This is our key extension: we propose a novel SAM2-based refinement layer that combines SCLIP's semantic understanding with SAM2's boundary quality through majority voting:
-
-\begin{enumerate}
-    \item \textbf{SAM2 mask generation:} Generate comprehensive mask proposals using SAM2's automatic mode (same configuration as Approach 1)
-
-    \item \textbf{Majority voting:} For each SAM2 mask $M_i$, determine its predicted class by majority voting over SCLIP predictions within the mask:
-    \begin{equation}
-    \hat{c}_i = \arg\max_c \sum_{(x,y) \in M_i} \mathbb{1}[\hat{y}(x,y) = c]
-    \end{equation}
-
-    \item \textbf{Mask filtering:} Retain only masks where the majority class covers at least 60\% of the mask area, ensuring semantic consistency
-
-    \item \textbf{Final prediction:} For pixels covered by multiple masks, assign the class with highest average SCLIP confidence within the mask
-\end{enumerate}
-
-This novel refinement layer represents our key contribution to extending SCLIP. By leveraging SAM2's superior boundary quality while maintaining SCLIP's semantic understanding, our refinement strategy significantly improves results to 48.09\% mIoU on PASCAL VOC (+24.9\% relative improvement over SCLIP alone) and 49.52\% mIoU on COCO-Stuff (+39.9\% relative improvement), achieving 83\% improvement over state-of-the-art ITACLIP (27.0\%) on COCO-Stuff.
-
-\subsection{Text Feature Caching}
-
-A key optimization for deployment efficiency is text feature caching. Since text embeddings for class labels are constant across all images, we pre-compute and cache them:
+The proposal-based approach integrates seamlessly with generative editing. Since masks are already class-specific and high-quality, they can be directly fed to Stable Diffusion v2 Inpainting for text-driven image modification:
 
 \begin{itemize}
-    \item \textbf{Preprocessing:} Encode all class labels once using CLIP's text encoder
-    \item \textbf{Storage:} Cache embeddings in memory (171 classes $\times$ 512 dimensions $\approx$ 350KB)
-    \item \textbf{Inference:} Reuse cached embeddings for all images in the dataset
+    \item \textbf{Inference steps:} 50
+    \item \textbf{Guidance scale:} 7.5
+    \item \textbf{Mask dilation:} 5 pixels for smooth blending
 \end{itemize}
 
-This optimization provides a 41\% speedup (37.55s → 26.57s per image on first vs. subsequent images) with zero accuracy loss, making the approach practical for large-scale evaluation.
+This enables interactive applications where users specify objects via text and modify them through natural language instructions.
 
-\subsection{Computational Considerations}
+\subsection{Complementary Strengths}
 
-The SCLIP+SAM2 pipeline has the following computational profile:
+While our primary dense SCLIP + SAM2 approach excels at holistic scene understanding and ``stuff'' classes, the proposal-based method offers distinct advantages:
 
 \begin{itemize}
-    \item \textbf{CSA feature extraction:} $\sim$500ms per image (4 layers from ViT-B/16)
-    \item \textbf{Multi-layer upsampling:} $\sim$200ms (bilinear interpolation to full resolution)
-    \item \textbf{Similarity computation:} $\sim$100ms (171 classes for COCO-Stuff)
-    \item \textbf{SAM2 mask generation:} $\sim$2-4 seconds per image
-    \item \textbf{Majority voting refinement:} $\sim$300ms (200 masks $\times$ 171 classes)
+    \item \textbf{Speed:} 2-4 seconds per image (6-7× faster than dense approach)
+    \item \textbf{Discrete objects:} Superior performance on well-defined objects with clear boundaries
+    \item \textbf{Precise boundaries:} SAM2's automatic masks provide exceptional edge quality
+    \item \textbf{Generative editing:} Natural integration with inpainting for interactive applications
 \end{itemize}
 
-Total inference time is approximately 27-30 seconds per image on an NVIDIA RTX 3090 GPU, which is 6.75$\times$ slower than the proposal-based approach but still practical for offline evaluation. The text caching optimization amortizes the text encoding cost across the dataset.
+However, it faces challenges with:
+\begin{itemize}
+    \item \textbf{Stuff classes:} Amorphous regions (sky, grass, water) lack clear boundaries for proposal generation
+    \item \textbf{Semantic fragmentation:} May produce inconsistent labels for continuous semantic regions
+    \item \textbf{Computational overhead:} Generating hundreds of proposals is slower than single dense prediction pass
+\end{itemize}
+
+This complementary nature motivates our comparative analysis in the following section, where we examine when each paradigm is most effective.
 
 \section{Comparative Analysis and Method Selection}
 

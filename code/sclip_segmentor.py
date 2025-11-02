@@ -241,39 +241,454 @@ class SCLIPSegmentor:
         else:
             return pred_mask, None
 
+    def _extract_hierarchical_prompts(
+        self,
+        dense_pred: np.ndarray,
+        logits: torch.Tensor,
+        class_idx: int,
+        num_positive: int = 10,
+        num_negative: int = 5,
+        min_distance: int = 20,
+        confidence_threshold: float = 0.7
+    ) -> Tuple[List[Tuple[int, int]], List[int]]:
+        """
+        Extract hierarchical prompts using SCLIP confidence scores.
+
+        Strategy:
+        - High-confidence regions (>threshold) → positive prompts (label=1)
+        - Low-confidence regions from OTHER classes → negative prompts (label=0)
+        - Helps SAM2 distinguish boundaries and suppress false positives
+
+        Args:
+            dense_pred: Dense prediction mask (H, W) with class indices
+            logits: SCLIP logits (num_classes, H, W) with confidence scores
+            class_idx: Target class index
+            num_positive: Number of positive prompts to extract
+            num_negative: Number of negative prompts to extract
+            min_distance: Minimum distance between points
+            confidence_threshold: Confidence threshold for positive prompts
+
+        Returns:
+            Tuple of (points, labels) where labels: 1=foreground, 0=background
+        """
+        # Convert logits to probabilities
+        probs = torch.nn.functional.softmax(logits, dim=0)  # (num_classes, H, W)
+        target_prob = probs[class_idx].cpu().numpy()  # (H, W)
+
+        # Get binary mask for target class
+        class_mask = (dense_pred == class_idx).astype(np.uint8)
+
+        if class_mask.sum() == 0:
+            return [], []
+
+        points = []
+        labels = []
+
+        # 1. Extract POSITIVE prompts from high-confidence regions
+        high_conf_mask = (target_prob > confidence_threshold) & (class_mask > 0)
+
+        if high_conf_mask.sum() > 0:
+            # Find connected components in high-confidence regions
+            num_labels, label_map = cv2.connectedComponents(high_conf_mask.astype(np.uint8))
+
+            # Extract centroid from each component
+            for label_id in range(1, num_labels):
+                component_mask = (label_map == label_id)
+
+                # Skip very small components
+                if component_mask.sum() < 100:
+                    continue
+
+                # Find weighted centroid using confidence scores
+                y_coords, x_coords = np.where(component_mask)
+                weights = target_prob[y_coords, x_coords]
+
+                # Weighted average for centroid
+                centroid_x = int(np.average(x_coords, weights=weights))
+                centroid_y = int(np.average(y_coords, weights=weights))
+
+                # Check minimum distance
+                too_close = False
+                for existing_x, existing_y, _ in points:
+                    dist = np.sqrt((centroid_x - existing_x)**2 + (centroid_y - existing_y)**2)
+                    if dist < min_distance:
+                        too_close = True
+                        break
+
+                if not too_close:
+                    points.append((centroid_x, centroid_y, target_prob[centroid_y, centroid_x]))
+                    labels.append(1)  # Positive prompt
+
+                    if len([l for l in labels if l == 1]) >= num_positive:
+                        break
+
+        # If still need more positive points, sample from medium-confidence regions
+        if len([l for l in labels if l == 1]) < num_positive // 2 and class_mask.sum() > 0:
+            medium_conf_mask = (target_prob > 0.5) & (target_prob <= confidence_threshold) & (class_mask > 0)
+
+            if medium_conf_mask.sum() > 0:
+                y_coords, x_coords = np.where(medium_conf_mask)
+                weights = target_prob[y_coords, x_coords]
+
+                # Sample points weighted by confidence
+                num_samples = min(num_positive - len([l for l in labels if l == 1]), len(y_coords))
+                if num_samples > 0:
+                    probs_normalized = weights / weights.sum()
+                    indices = np.random.choice(len(y_coords), num_samples, replace=False, p=probs_normalized)
+
+                    for idx in indices:
+                        x, y = int(x_coords[idx]), int(y_coords[idx])
+                        points.append((x, y, target_prob[y, x]))
+                        labels.append(1)
+
+        # 2. Extract NEGATIVE prompts from competing classes
+        # Find pixels where OTHER classes have higher confidence
+        max_prob = probs.max(dim=0)[0].cpu().numpy()
+        max_class = probs.argmax(dim=0).cpu().numpy()
+
+        # Regions where another class is predicted with high confidence
+        competing_mask = (max_class != class_idx) & (max_prob > 0.6) & (max_class != 0)  # Exclude background
+
+        if competing_mask.sum() > 0:
+            # Find regions near the target class (boundary confusion)
+            kernel = np.ones((15, 15), np.uint8)
+            dilated_class_mask = cv2.dilate(class_mask, kernel, iterations=1)
+
+            # Negative prompts: near target class but assigned to other class
+            negative_candidate_mask = competing_mask & (dilated_class_mask > 0)
+
+            if negative_candidate_mask.sum() > 0:
+                y_coords, x_coords = np.where(negative_candidate_mask)
+
+                # Sample negative points
+                num_samples = min(num_negative, len(y_coords))
+                if num_samples > 0:
+                    indices = np.random.choice(len(y_coords), num_samples, replace=False)
+
+                    for idx in indices:
+                        x, y = int(x_coords[idx]), int(y_coords[idx])
+
+                        # Check minimum distance from existing points
+                        too_close = False
+                        for existing_x, existing_y, _ in points:
+                            dist = np.sqrt((x - existing_x)**2 + (y - existing_y)**2)
+                            if dist < min_distance:
+                                too_close = True
+                                break
+
+                        if not too_close:
+                            points.append((x, y, 0.0))  # Confidence=0 for negative
+                            labels.append(0)  # Negative prompt
+
+        # Sort by confidence (positive prompts first, then by confidence)
+        sorted_data = sorted(zip(points, labels), key=lambda x: (x[1], x[0][2]), reverse=True)
+
+        if sorted_data:
+            points_sorted, labels_sorted = zip(*sorted_data)
+            # Remove confidence score from points
+            points_sorted = [(x, y) for x, y, _ in points_sorted]
+            return list(points_sorted), list(labels_sorted)
+
+        return [], []
+
+    def _extract_prompt_points(
+        self,
+        dense_pred: np.ndarray,
+        class_idx: int,
+        num_points: int = 16,
+        min_distance: int = 20
+    ) -> List[Tuple[int, int]]:
+        """
+        Extract point prompts from dense SCLIP prediction for a specific class.
+
+        Uses connected components analysis to find representative points.
+
+        Args:
+            dense_pred: Dense prediction mask (H, W) with class indices
+            class_idx: Target class index
+            num_points: Target number of points to extract
+            min_distance: Minimum distance between points
+
+        Returns:
+            List of (x, y) coordinates for SAM2 prompting
+        """
+        # Get binary mask for target class
+        class_mask = (dense_pred == class_idx).astype(np.uint8)
+
+        if class_mask.sum() == 0:
+            return []
+
+        # Find connected components
+        num_labels, labels = cv2.connectedComponents(class_mask)
+
+        points = []
+
+        # For each component, find centroid
+        for label_id in range(1, num_labels):  # Skip background (0)
+            component_mask = (labels == label_id)
+
+            # Skip very small components
+            if component_mask.sum() < 100:
+                continue
+
+            # Find centroid using median for robustness
+            y_coords, x_coords = np.where(component_mask)
+            centroid_y = int(np.median(y_coords))
+            centroid_x = int(np.median(x_coords))
+
+            # Check minimum distance from existing points
+            too_close = False
+            for existing_x, existing_y in points:
+                dist = np.sqrt((centroid_x - existing_x)**2 + (centroid_y - existing_y)**2)
+                if dist < min_distance:
+                    too_close = True
+                    break
+
+            if not too_close:
+                points.append((centroid_x, centroid_y))
+
+        # If we have too few points, sample from high-confidence interior regions
+        if len(points) < num_points // 2 and class_mask.sum() > 0:
+            # Erode mask to get high-confidence interior points
+            kernel = np.ones((5, 5), np.uint8)
+            eroded = cv2.erode(class_mask, kernel, iterations=2)
+
+            if eroded.sum() > 0:
+                # Sample additional points from eroded mask
+                y_coords, x_coords = np.where(eroded > 0)
+                indices = np.random.choice(
+                    len(y_coords),
+                    min(num_points - len(points), len(y_coords)),
+                    replace=False
+                )
+
+                for idx in indices:
+                    x, y = int(x_coords[idx]), int(y_coords[idx])
+                    points.append((x, y))
+
+        return points[:num_points]
+
+    def _compute_mask_iou(self, mask1: np.ndarray, mask2: np.ndarray) -> float:
+        """Compute IoU between two binary masks."""
+        intersection = np.logical_and(mask1, mask2).sum()
+        union = np.logical_or(mask1, mask2).sum()
+        if union == 0:
+            return 0.0
+        return float(intersection / union)
+
+    def _non_maximum_suppression(
+        self,
+        masks: List,
+        iou_threshold: float = 0.7
+    ) -> List:
+        """
+        Apply Non-Maximum Suppression to remove overlapping masks.
+
+        Keeps masks with highest predicted_iou scores, removes heavily overlapping duplicates.
+
+        Args:
+            masks: List of MaskCandidate objects
+            iou_threshold: IoU threshold for suppression (0.7 = remove if >70% overlap)
+
+        Returns:
+            Filtered list of masks after NMS
+        """
+        if not masks:
+            return []
+
+        # Sort by predicted_iou (best first)
+        masks = sorted(masks, key=lambda x: x.predicted_iou, reverse=True)
+
+        keep = []
+        suppressed = [False] * len(masks)
+
+        for i, mask_i in enumerate(masks):
+            if suppressed[i]:
+                continue
+
+            keep.append(mask_i)
+
+            # Suppress overlapping masks
+            for j in range(i + 1, len(masks)):
+                if suppressed[j]:
+                    continue
+
+                iou = self._compute_mask_iou(mask_i.mask > 0, masks[j].mask > 0)
+                if iou > iou_threshold:
+                    suppressed[j] = True
+
+        return keep
+
     @torch.no_grad()
     def predict_with_sam(
         self,
         image: np.ndarray,
-        class_names: List[str]
+        class_names: List[str],
+        use_prompted_sam: bool = True,
+        use_hierarchical_prompts: bool = False,  # Disabled: standard prompting for best quality
+        min_coverage: float = 0.6,
+        min_iou_score: float = 0.0,  # No filtering by default (best quality)
+        nms_iou_threshold: float = 1.0,  # No NMS by default (best coverage)
+        use_best_mask_only: bool = False  # Use all masks for best coverage
     ) -> np.ndarray:
         """
         Hybrid: Dense SCLIP + SAM refinement.
 
-        Strategy:
+        Two modes:
+        1. Prompted SAM (default, faster): Extract points from SCLIP predictions
+           and prompt SAM2 at those locations for targeted refinement
+        2. Automatic SAM (legacy): Generate all masks and refine globally
+
+        Strategy (prompted mode):
         1. Get dense SCLIP predictions first
-        2. Generate SAM masks for boundary refinement
-        3. For each SAM mask, vote using SCLIP predictions within the mask
-        4. This keeps all detections but with cleaner boundaries
+        2. For each detected class, extract representative points
+        3. Prompt SAM2 at those points for targeted mask generation
+        4. Apply quality filtering and NMS to select best masks
+        5. Use majority voting to assign class labels to refined masks
 
         Args:
             image: Input image (H, W, 3)
             class_names: List of class names
+            use_prompted_sam: If True, use prompted segmentation (faster, more targeted)
+            min_coverage: Minimum coverage threshold for majority voting (default: 0.6)
+            min_iou_score: Minimum SAM2 predicted_iou score to keep mask (default: 0.70)
+            nms_iou_threshold: IoU threshold for Non-Maximum Suppression (default: 0.8)
+            use_best_mask_only: If True, use only best mask per point (default: True)
 
         Returns:
             Segmentation mask (H, W) with class indices
         """
         H, W = image.shape[:2]
 
-        # Step 1: Get dense SCLIP predictions
-        dense_pred, _ = self.predict_dense(image, class_names)
+        # Step 1: Get dense SCLIP predictions with confidence scores
+        dense_pred, logits = self.predict_dense(image, class_names, return_logits=True)
 
-        # Step 2: Generate SAM masks for boundary refinement
-        sam_masks = self.sam_generator.generate_masks(image)
+        if use_prompted_sam:
+            # NEW: Prompted SAM2 refinement (more efficient)
+            if self.verbose:
+                prompt_type = "hierarchical (confidence-based)" if use_hierarchical_prompts else "standard"
+                print(f"[SAM Refinement] Using prompted SAM2 segmentation ({prompt_type})...")
 
-        # Step 3: Refine predictions using SAM masks
-        # For each SAM mask, use majority voting from dense predictions
+            # Collect all prompt points from detected classes
+            all_points = []
+            all_labels = []
+            point_to_class = {}  # Map point index to class index
+
+            num_positive_total = 0
+            num_negative_total = 0
+
+            for class_idx in range(len(class_names)):
+                if class_idx == 0:  # Skip background
+                    continue
+
+                if use_hierarchical_prompts:
+                    # Extract hierarchical prompts with positive and negative points
+                    class_points, class_labels = self._extract_hierarchical_prompts(
+                        dense_pred,
+                        logits,
+                        class_idx,
+                        num_positive=10,
+                        num_negative=5,
+                        min_distance=20,
+                        confidence_threshold=0.7
+                    )
+                else:
+                    # Extract simple positive points only
+                    class_points = self._extract_prompt_points(
+                        dense_pred,
+                        class_idx,
+                        num_points=16
+                    )
+                    class_labels = [1] * len(class_points)  # All foreground
+
+                if class_points:
+                    # Count positive and negative prompts
+                    num_pos = sum(1 for l in class_labels if l == 1)
+                    num_neg = sum(1 for l in class_labels if l == 0)
+                    num_positive_total += num_pos
+                    num_negative_total += num_neg
+
+                    # Store mapping for later
+                    for pt, label in zip(class_points, class_labels):
+                        point_to_class[len(all_points)] = class_idx
+                        all_points.append(pt)
+                        all_labels.append(label)
+
+                    if self.verbose:
+                        if use_hierarchical_prompts:
+                            print(f"  Class '{class_names[class_idx]}': {num_pos} positive, {num_neg} negative points")
+                        else:
+                            print(f"  Class '{class_names[class_idx]}': {len(class_points)} points")
+
+            if not all_points:
+                if self.verbose:
+                    print("  No valid points found, returning dense prediction")
+                return dense_pred
+
+            if self.verbose:
+                if use_hierarchical_prompts:
+                    print(f"  Total: {num_positive_total} positive + {num_negative_total} negative = {len(all_points)} prompts across {len(class_names)-1} classes")
+                else:
+                    print(f"  Total: {len(all_points)} prompt points across {len(class_names)-1} classes")
+
+            # Generate SAM masks with prompts
+            sam_masks = self.sam_generator.segment_with_points(image, all_points, all_labels)
+
+            if self.verbose:
+                print(f"  Generated {len(sam_masks)} mask candidates from {len(all_points)} points")
+
+        else:
+            # OLD: Automatic SAM2 mask generation
+            if self.verbose:
+                print("[SAM Refinement] Using automatic SAM2 mask generation...")
+            sam_masks = self.sam_generator.generate_masks(image)
+
+        # Step 2: Quality filtering - keep high-quality masks
+        filtered_masks = []
+        num_points = len(all_points) if use_prompted_sam else len(sam_masks)
+
+        if use_best_mask_only and use_prompted_sam:
+            # Select best mask per point only
+            for i in range(0, len(sam_masks), 3):
+                point_masks = sam_masks[i:i+3]
+                if point_masks:
+                    # Select mask with highest predicted_iou
+                    best = max(point_masks, key=lambda m: m.predicted_iou)
+                    if best.predicted_iou >= min_iou_score:
+                        filtered_masks.append(best)
+
+            if self.verbose:
+                print(f"  Selected best mask per point: {len(filtered_masks)}/{num_points} (IoU ≥ {min_iou_score})")
+        else:
+            # Keep top 2 masks per point (allows for multi-scale detection)
+            if use_prompted_sam:
+                for i in range(0, len(sam_masks), 3):
+                    point_masks = sam_masks[i:i+3]
+                    # Sort by IoU and take top 2
+                    point_masks_sorted = sorted(point_masks, key=lambda m: m.predicted_iou, reverse=True)
+                    for mask in point_masks_sorted[:2]:
+                        if mask.predicted_iou >= min_iou_score:
+                            filtered_masks.append(mask)
+
+                if self.verbose:
+                    print(f"  Selected top-2 masks per point: {len(filtered_masks)}/{num_points*2} (IoU ≥ {min_iou_score})")
+            else:
+                # For automatic mode, just filter by IoU
+                filtered_masks = [m for m in sam_masks if m.predicted_iou >= min_iou_score]
+
+        sam_masks = filtered_masks
+
+        # Step 3: Apply Non-Maximum Suppression to remove overlapping duplicates
+        if len(sam_masks) > 1:
+            sam_masks_before_nms = len(sam_masks)
+            sam_masks = self._non_maximum_suppression(sam_masks, iou_threshold=nms_iou_threshold)
+
+            if self.verbose:
+                print(f"  After NMS: {len(sam_masks)}/{sam_masks_before_nms} masks (removed {sam_masks_before_nms - len(sam_masks)} overlaps)")
+
+        # Step 4: Refine predictions using SAM masks with majority voting
         output_mask = dense_pred.copy()
+        refined_count = 0
 
         for mask_candidate in sam_masks:
             mask = mask_candidate.mask
@@ -285,12 +700,21 @@ class SCLIPSegmentor:
             # Get dense predictions within this SAM mask
             masked_predictions = dense_pred[mask_region]
 
-            # Majority vote: assign the most common class in this region
+            # Majority vote: find the most common class in this region
             unique_classes, counts = np.unique(masked_predictions, return_counts=True)
             majority_class = unique_classes[counts.argmax()]
+            max_count = counts.max()  # FIXED: get actual max count, not index
+            total_pixels = mask_region.sum()
 
-            # Assign majority class to entire SAM mask (refines boundaries)
-            output_mask[mask_region] = majority_class
+            # Only refine if majority class has sufficient coverage
+            coverage = max_count / total_pixels
+            if coverage >= min_coverage:
+                # Assign majority class to entire SAM mask (refines boundaries)
+                output_mask[mask_region] = majority_class
+                refined_count += 1
+
+        if self.verbose:
+            print(f"  Final: Refined {refined_count} regions with SAM2 masks")
 
         return output_mask
 

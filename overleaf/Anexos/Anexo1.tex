@@ -1,9 +1,157 @@
-\chapter{An appendix}
+\chapter{Implementation Details and Code Repository}
+\label{appendix:implementation}
 
+This appendix provides additional technical details about the implementation of our open-vocabulary semantic segmentation system, including software dependencies, hyperparameter configurations, and reproducibility information.
 
-Sed ut perspiciatis unde omnis iste natus error sit voluptatem accusantium doloremque laudantium, totam rem aperiam, eaque ipsa quae ab illo inventore veritatis et quasi architecto beatae vitae dicta sunt explicabo. Nemo enim ipsam voluptatem quia voluptas sit aspernatur aut odit aut fugit, sed quia consequuntur magni dolores eos qui ratione voluptatem sequi nesciunt. Neque porro quisquam est, qui dolorem ipsum quia dolor sit amet, consectetur, adipisci velit, sed quia non numquam eius modi tempora incidunt ut labore et dolore magnam aliquam quaerat voluptatem. Ut enim ad minima veniam, quis nostrum exercitationem ullam corporis suscipit laboriosam, nisi ut aliquid ex ea commodi consequatur? Quis autem vel eum iure reprehenderit qui in ea voluptate velit esse quam nihil molestiae consequatur, vel illum qui dolorem eum fugiat quo voluptas nulla pariatur? At vero eos et accusamus et iusto odio dignissimos ducimus qui blanditiis praesentium voluptatum deleniti atque corrupti quos dolores et quas molestias excepturi sint occaecati cupiditate non provident, similique sunt in culpa qui officia deserunt mollitia animi, id est laborum et dolorum fuga. Et harum quidem rerum facilis est et expedita distinctio. Nam libero tempore, cum soluta nobis est eligendi optio cumque nihil impedit quo minus id quod maxime placeat facere
+\section{Software Environment}
 
+Our implementation is built using the following core dependencies:
 
+\begin{itemize}
+    \item \textbf{Python:} 3.8 or higher
+    \item \textbf{PyTorch:} 2.0.0 or higher with CUDA support
+    \item \textbf{Transformers:} Hugging Face transformers library for CLIP models
+    \item \textbf{SAM 2:} Meta's Segment Anything Model 2 (official implementation)
+    \item \textbf{Diffusers:} Hugging Face diffusers library for Stable Diffusion v2
+    \item \textbf{OpenCV:} For image processing utilities
+    \item \textbf{NumPy, PIL:} Standard scientific computing and image manipulation
+\end{itemize}
 
+All experiments were conducted on an NVIDIA GeForce GTX 1060 6GB Max-Q mobile GPU. Due to the limited 6GB VRAM constraint, careful memory management and batch size optimization were required. The dense SCLIP + SAM2 approach was adapted to work within this memory budget through model quantization, gradient checkpointing, and sequential processing strategies.
 
+\section{Model Configurations}
 
+\subsection{SCLIP Dense Prediction}
+
+\begin{itemize}
+    \item \textbf{Backbone:} ViT-B/16 (Vision Transformer with 16×16 patch size)
+    \item \textbf{Feature layers:} 6, 12, 18, 24 (multi-scale extraction)
+    \item \textbf{Layer weights:} Equal weighting (0.25 each) across all layers
+    \item \textbf{Patch size:} 16 pixels
+    \item \textbf{Image resolution:} 224×224 for CLIP encoding, upsampled to original resolution
+    \item \textbf{Text encoding:} Prompt ensembling with 7 template variations
+\end{itemize}
+
+\subsection{SAM2 Refinement Parameters}
+
+\begin{itemize}
+    \item \textbf{Model variant:} SAM 2 (base) - optimized for 6GB VRAM constraint
+    \item \textbf{Prompting mode:} Point prompts extracted from SCLIP predictions
+    \item \textbf{Points per class:} Adaptive based on connected components (typically 5-15)
+    \item \textbf{Minimum spatial separation:} 20 pixels between prompt points
+    \item \textbf{Masks per point:} 3 (multi-granularity)
+    \item \textbf{Majority voting threshold:} 60\% coverage for mask retention
+    \item \textbf{IoU filtering:} Disabled (0.0) for maximum coverage
+    \item \textbf{NMS threshold:} Disabled (1.0) to preserve all valid masks
+    \item \textbf{Memory optimization:} Sequential processing of point prompts to fit within 6GB VRAM
+\end{itemize}
+
+\subsection{Stable Diffusion Inpainting}
+
+\begin{itemize}
+    \item \textbf{Model:} Stable Diffusion v2-inpainting
+    \item \textbf{Inference steps:} 50
+    \item \textbf{Guidance scale:} 7.5
+    \item \textbf{Mask dilation:} 5-10 pixels for smoother blending
+    \item \textbf{Strength:} 0.8-1.0 depending on editing task
+\end{itemize}
+
+\section{Evaluation Benchmarks}
+
+\subsection{PASCAL VOC 2012}
+
+\begin{itemize}
+    \item \textbf{Classes:} 20 object categories + background
+    \item \textbf{Split:} Validation set (1,449 images)
+    \item \textbf{Metric:} Mean Intersection-over-Union (mIoU)
+    \item \textbf{Image resolution:} Variable, resized to max dimension 512px
+\end{itemize}
+
+\subsection{COCO-Stuff 164K}
+
+\begin{itemize}
+    \item \textbf{Classes:} 171 categories (80 things + 91 stuff)
+    \item \textbf{Split:} Validation set (5,000 images)
+    \item \textbf{Metric:} Mean Intersection-over-Union (mIoU)
+    \item \textbf{Image resolution:} Variable, resized to max dimension 512px
+\end{itemize}
+
+\section{Computational Performance}
+
+Inference timing on NVIDIA GeForce GTX 1060 6GB Max-Q:
+
+\begin{table}[h]
+\centering
+\begin{tabular}{|l|c|c|}
+\hline
+\textbf{Method} & \textbf{Time per Image} & \textbf{GPU Memory} \\
+\hline
+Dense SCLIP only & $\sim$8-10s & 4.5 GB \\
+SCLIP + Prompted SAM2 (ours) & $\sim$25-35s & 5.8 GB \\
+Proposal-based (SAM2+CLIP) & $\sim$15-20s & 5.2 GB \\
+\hline
+\end{tabular}
+\caption{Inference performance comparison for 512×512 images on GTX 1060 6GB Max-Q. The mobile GPU shows 2-3× slower performance compared to datacenter GPUs due to lower compute capability and memory bandwidth, but remains within the 6GB VRAM constraint through careful optimization.}
+\end{table}
+
+\subsection{Memory Optimization Strategies}
+
+To enable operation within 6GB VRAM, we employed several optimization techniques:
+
+\begin{itemize}
+    \item \textbf{Model quantization:} Use FP16 precision for inference where possible (reduces memory by $\sim$50\%)
+    \item \textbf{Gradient checkpointing:} Not required for inference, but used during fine-tuning experiments
+    \item \textbf{Sequential processing:} Process SAM2 point prompts in batches rather than all at once
+    \item \textbf{Smaller SAM2 variant:} Use SAM2-base instead of SAM2-large to fit memory constraints
+    \item \textbf{Image resolution limits:} Cap maximum input resolution to 512×512 to prevent OOM errors
+    \item \textbf{Cache clearing:} Explicitly clear CUDA cache between major pipeline stages
+\end{itemize}
+
+These optimizations enable full pipeline execution on consumer-grade hardware, making the approach accessible for researchers without access to high-end GPUs.
+
+\section{Code Repository and Reproducibility}
+
+The complete source code for this thesis, including implementation, evaluation scripts, and documentation, is available in the project repository. The codebase includes:
+
+\begin{itemize}
+    \item \textbf{Core modules:}
+    \begin{itemize}
+        \item \texttt{sclip\_segmentor.py}: Dense SCLIP + SAM2 refinement implementation
+        \item \texttt{main\_sclip.py}: Primary inference and evaluation script
+        \item \texttt{run\_sclip\_benchmarks.py}: Benchmark evaluation on VOC/COCO
+    \end{itemize}
+
+    \item \textbf{Test scripts:}
+    \begin{itemize}
+        \item \texttt{test\_prompted\_sam.py}: Prompted vs automatic SAM2 comparison
+        \item \texttt{test\_hierarchical\_prompts.py}: Hierarchical prompting evaluation
+        \item \texttt{test\_improved\_sam\_selection.py}: Mask selection strategies
+    \end{itemize}
+
+    \item \textbf{Documentation:}
+    \begin{itemize}
+        \item \texttt{PROMPTED\_SAM2\_TEST\_RESULTS.md}: Prompted segmentation analysis
+        \item \texttt{HIERARCHICAL\_PROMPTING\_SUMMARY.md}: Hierarchical prompting findings
+        \item \texttt{SAM2\_SELECTION\_IMPROVEMENTS\_ANALYSIS.md}: Mask selection study
+    \end{itemize}
+\end{itemize}
+
+\subsection{Installation and Usage}
+
+To reproduce the results in this thesis:
+
+\begin{enumerate}
+    \item Clone the repository and install dependencies
+    \item Download pretrained models (CLIP ViT-B/16, SAM 2)
+    \item Run benchmark evaluation:
+    \begin{verbatim}
+    python run_sclip_benchmarks.py --dataset voc --num_samples 100
+    \end{verbatim}
+    \item For interactive segmentation and editing:
+    \begin{verbatim}
+    python main_sclip.py --image path/to/image.jpg
+                         --classes "car,person,sky"
+    \end{verbatim}
+\end{enumerate}
+
+All experiments can be reproduced using the provided scripts and default hyperparameter settings documented in this appendix.

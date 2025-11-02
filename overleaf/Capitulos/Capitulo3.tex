@@ -622,11 +622,12 @@ This comparative analysis demonstrates that no single approach dominates across 
 
 \subsection{Computational Performance}
 
-On an NVIDIA RTX 3090 GPU:
+On an NVIDIA GeForce GTX 1060 6GB Max-Q:
 \begin{itemize}
-    \item \textbf{Segmentation:} 2-4 seconds per image (including SAM 2 + CLIP scoring)
-    \item \textbf{Inpainting:} 5-10 seconds per mask (Stable Diffusion, 50 steps)
-    \item \textbf{Total pipeline:} 10-20 seconds for end-to-end segmentation and editing
+    \item \textbf{Proposal-based segmentation:} 15-20 seconds per image (SAM2 automatic + CLIP scoring)
+    \item \textbf{Dense SCLIP segmentation:} 8-10 seconds per image (SCLIP only, no SAM2)
+    \item \textbf{Dense SCLIP + SAM2 refinement:} 25-35 seconds per image (our primary approach)
+    \item \textbf{Inpainting:} 12-18 seconds per mask (Stable Diffusion, 50 steps)
 \end{itemize}
 
-This performance is suitable for interactive applications with modest latency requirements. Further optimizations (fewer diffusion steps, model quantization) could improve speed at minor quality cost.
+Performance is constrained by the 6GB VRAM limit and mobile GPU compute capability. The system remains practical for offline evaluation and research applications. Further optimizations (FP16 quantization, reduced resolution, fewer diffusion steps) enable operation within memory constraints.

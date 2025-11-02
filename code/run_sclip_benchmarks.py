@@ -310,8 +310,8 @@ def main():
     print("Results:")
     print()
     print(f"{args.dataset.upper()}:")
-    print(f"  mIoU: {results['miou']:.2f}%")
-    print(f"  F1: {results['f1']:.2f}%")
+    print(f"  mIoU: {results['miou']*100:.2f}%")
+    print(f"  F1: {results['f1']*100:.2f}%")
 
 
 if __name__ == '__main__':

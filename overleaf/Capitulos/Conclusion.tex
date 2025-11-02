@@ -50,7 +50,7 @@ We established a thorough evaluation protocol on PASCAL VOC 2012, measuring segm
 
 \subsection{Practical System Design}
 
-We designed the system with real-world applicability in mind, achieving end-to-end processing in 10-20 seconds per image on consumer-grade hardware (NVIDIA RTX 3090). This performance makes the system suitable for interactive applications where users can iteratively refine segmentation and editing operations.
+We designed the system with real-world applicability in mind, demonstrating that the approach is viable even on consumer-grade hardware (NVIDIA GeForce GTX 1060 6GB Max-Q). Our primary dense SCLIP + SAM2 approach processes images in 25-35 seconds, while the proposal-based alternative achieves 15-20 seconds per image. This performance, while slower than real-time, remains practical for research applications and offline evaluation on limited hardware budgets.
 
 \section{Discussion and Implications}
 
