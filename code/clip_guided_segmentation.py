@@ -400,6 +400,10 @@ def main():
     parser.add_argument("--edit", type=str, choices=["segment", "replace", "remove"],
                        default="segment",
                        help="Edit style for filtered visualization: segment (overlay), replace (mask), remove (blacken)")
+    parser.add_argument("--use-inpainting", action="store_true",
+                       help="Use Stable Diffusion inpainting for remove/replace modes")
+    parser.add_argument("--edit-prompt", type=str, default=None,
+                       help="Prompt for replace mode (e.g., 'a red sports car')")
     parser.add_argument("--checkpoint", default="checkpoints/sam2_hiera_large.pt",
                        help="Path to SAM 2 checkpoint")
     parser.add_argument("--model-cfg", default="sam2_hiera_l.yaml",
@@ -502,6 +506,56 @@ def main():
             mask_image = (combined_mask.astype(np.uint8) * 255)
             cv2.imwrite(mask_output, mask_image)
             print(f"Saved binary mask to {mask_output}")
+
+            # Perform Stable Diffusion inpainting if requested
+            if args.use_inpainting:
+                print("\n" + "="*50)
+                print("STABLE DIFFUSION INPAINTING")
+                print("="*50)
+
+                try:
+                    from models.inpainting import StableDiffusionInpainter
+
+                    # Initialize Stable Diffusion
+                    inpainter = StableDiffusionInpainter(
+                        model_id="stabilityai/stable-diffusion-2-inpainting",
+                        device=args.device or ("cuda" if torch.cuda.is_available() else "cpu")
+                    )
+
+                    # Perform inpainting
+                    if args.edit == "remove":
+                        inpainted = inpainter.remove_object(image, mask_image)
+                        inpainted_output = f"{base_name}_inpainted_removed_{args.prompt}.{ext}"
+                    else:  # replace
+                        if args.edit_prompt is None:
+                            print("Warning: --edit-prompt not specified for replace mode")
+                            replacement_prompt = f"a {args.prompt}"
+                        else:
+                            replacement_prompt = args.edit_prompt
+                        inpainted = inpainter.replace_object(image, mask_image, replacement_prompt)
+                        inpainted_output = f"{base_name}_inpainted_replaced_{args.prompt}.{ext}"
+
+                    # Convert PIL to numpy if needed
+                    if not isinstance(inpainted, np.ndarray):
+                        inpainted = np.array(inpainted)
+
+                    # Save result
+                    cv2.imwrite(inpainted_output, cv2.cvtColor(inpainted, cv2.COLOR_RGB2BGR))
+                    print(f"Saved inpainted result to {inpainted_output}")
+
+                    # Create comparison visualization
+                    comparison = inpainter.compare_results(image, inpainted, mask_image)
+                    comparison_output = f"{base_name}_inpainting_comparison_{args.prompt}.{ext}"
+                    cv2.imwrite(comparison_output, cv2.cvtColor(comparison, cv2.COLOR_RGB2BGR))
+                    print(f"Saved comparison to {comparison_output}")
+
+                except ImportError as e:
+                    print(f"Error: Could not import Stable Diffusion inpainter: {e}")
+                    print("Install with: pip install diffusers transformers accelerate")
+                except Exception as e:
+                    print(f"Error during inpainting: {e}")
+                    import traceback
+                    traceback.print_exc()
 
     # Statistics
     print_statistics(results, args.vocabulary)
