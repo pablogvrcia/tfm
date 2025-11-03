@@ -16,8 +16,57 @@ import subprocess
 import tempfile
 import shutil
 import os
+import colorsys
 from typing import List, Dict
 from sam2.build_sam import build_sam2_video_predictor
+
+
+def generate_distinct_colors(n):
+    """
+    Generate visually distinct colors using a curated palette.
+
+    Args:
+        n: Number of colors needed
+
+    Returns:
+        List of RGB tuples in range [0, 255] (for OpenCV)
+    """
+    # Curated palette of visually distinct colors (RGB in 0-255 range for OpenCV)
+    base_palette = [
+        (31, 119, 180),   # Blue
+        (255, 127, 14),   # Orange
+        (44, 160, 44),    # Green
+        (214, 39, 40),    # Red
+        (148, 103, 189),  # Purple
+        (140, 86, 75),    # Brown
+        (227, 119, 194),  # Pink
+        (127, 127, 127),  # Gray
+        (188, 189, 34),   # Yellow
+        (23, 190, 207),   # Cyan
+        (255, 166, 0),    # Gold
+        (51, 204, 51),    # Lime
+        (204, 0, 204),    # Magenta
+        (0, 128, 128),    # Teal
+        (128, 0, 0),      # Maroon
+        (0, 0, 128),      # Navy
+    ]
+
+    if n <= len(base_palette):
+        return [list(c) for c in base_palette[:n]]
+
+    # If we need more colors, generate additional ones using HSV
+    colors = [list(c) for c in base_palette]
+    for i in range(n - len(base_palette)):
+        hue = (i * 0.618033988749895) % 1.0  # Golden ratio for spacing
+        saturation = 0.6 + (i % 3) * 0.15
+        value = 0.7 + (i % 2) * 0.2
+
+        # Convert HSV to RGB (0-255)
+        rgb_01 = colorsys.hsv_to_rgb(hue, saturation, value)
+        rgb_255 = [int(c * 255) for c in rgb_01]
+        colors.append(rgb_255)
+
+    return colors
 
 
 class CLIPGuidedVideoSegmentor:
@@ -183,11 +232,13 @@ class CLIPGuidedVideoSegmentor:
         # Create class_idx -> class_name mapping
         class_names = {p['class_idx']: p['class_name'] for p in prompts}
 
-        # Create colors for each class
-        np.random.seed(42)
+        # Create colors for each class using distinct colors
+        distinct_colors = generate_distinct_colors(len(class_names))
+        # Map class indices to colors
+        class_idx_list = sorted(class_names.keys())
         class_colors = {
-            class_idx: np.random.randint(0, 255, 3).tolist()
-            for class_idx in class_names.keys()
+            class_idx: distinct_colors[i]
+            for i, class_idx in enumerate(class_idx_list)
         }
 
         # Create temporary directory for frames

@@ -29,6 +29,54 @@ from scipy.ndimage import label, center_of_mass
 import cv2
 
 
+def generate_distinct_colors(n):
+    """
+    Generate visually distinct colors using a curated palette.
+
+    Args:
+        n: Number of colors needed
+
+    Returns:
+        List of RGB tuples in range [0, 1]
+    """
+    # Curated palette of visually distinct colors (RGB in 0-1 range)
+    base_palette = [
+        (0.12, 0.47, 0.71),  # Blue
+        (1.00, 0.50, 0.05),  # Orange
+        (0.17, 0.63, 0.17),  # Green
+        (0.84, 0.15, 0.16),  # Red
+        (0.58, 0.40, 0.74),  # Purple
+        (0.55, 0.34, 0.29),  # Brown
+        (0.89, 0.47, 0.76),  # Pink
+        (0.50, 0.50, 0.50),  # Gray
+        (0.74, 0.74, 0.13),  # Yellow
+        (0.09, 0.75, 0.81),  # Cyan
+        (1.00, 0.65, 0.00),  # Gold
+        (0.20, 0.80, 0.20),  # Lime
+        (0.80, 0.00, 0.80),  # Magenta
+        (0.00, 0.50, 0.50),  # Teal
+        (0.50, 0.00, 0.00),  # Maroon
+        (0.00, 0.00, 0.50),  # Navy
+    ]
+
+    if n <= len(base_palette):
+        return base_palette[:n]
+
+    # If we need more colors, generate additional ones using HSV
+    colors = list(base_palette)
+    for i in range(n - len(base_palette)):
+        hue = (i * 0.618033988749895) % 1.0  # Golden ratio for spacing
+        saturation = 0.6 + (i % 3) * 0.15
+        value = 0.7 + (i % 2) * 0.2
+
+        # Convert HSV to RGB
+        import colorsys
+        rgb = colorsys.hsv_to_rgb(hue, saturation, value)
+        colors.append(rgb)
+
+    return colors
+
+
 def is_video_file(file_path):
     """Check if file is a video."""
     video_extensions = {'.mp4', '.avi', '.mov', '.mkv', '.flv', '.wmv', '.webm'}
@@ -242,9 +290,9 @@ def visualize_results(image, results, vocabulary, output_path=None):
     fig, ax = plt.subplots(figsize=(20, 20))
     ax.imshow(image)
 
-    # Create color map for classes
-    np.random.seed(42)
-    class_colors = {i: np.random.random(3) for i in range(len(vocabulary))}
+    # Create color map for classes using distinct colors
+    distinct_colors = generate_distinct_colors(len(vocabulary))
+    class_colors = {i: distinct_colors[i] for i in range(len(vocabulary))}
 
     # Sort by region size (draw larger regions first)
     sorted_results = sorted(results, key=lambda x: x['region_size'], reverse=True)
@@ -323,9 +371,9 @@ def visualize_filtered_results(image, results, target_class, vocabulary, output_
         ax.imshow(image)
 
         # Use a single color for the target class
-        np.random.seed(42)
         target_class_idx = vocabulary.index(target_class)
-        class_colors = {i: np.random.random(3) for i in range(len(vocabulary))}
+        distinct_colors = generate_distinct_colors(len(vocabulary))
+        class_colors = {i: distinct_colors[i] for i in range(len(vocabulary))}
         target_color = class_colors[target_class_idx]
 
         # Sort by region size (draw larger regions first)
