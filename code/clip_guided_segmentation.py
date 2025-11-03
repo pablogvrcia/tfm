@@ -323,6 +323,22 @@ def visualize_results(image, results, vocabulary, output_path=None):
                 ha='center', va='center'
             )
 
+    # Add legend with color-to-class mapping
+    from matplotlib.patches import Patch
+    legend_elements = [
+        Patch(facecolor=class_colors[i], edgecolor='black', linewidth=1.5, label=vocabulary[i])
+        for i in range(len(vocabulary))
+    ]
+    ax.legend(
+        handles=legend_elements,
+        loc='upper right',
+        fontsize=12,
+        framealpha=0.95,
+        edgecolor='black',
+        fancybox=True,
+        shadow=True
+    )
+
     ax.axis('off')
     plt.tight_layout()
 
