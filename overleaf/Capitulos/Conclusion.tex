@@ -52,6 +52,20 @@ We established a thorough evaluation protocol on PASCAL VOC 2012, measuring segm
 
 We designed the system with real-world applicability in mind, demonstrating that the approach is viable even on consumer-grade hardware (NVIDIA GeForce GTX 1060 6GB Max-Q). Our CLIP-guided prompting approach processes images in 12-33 seconds depending on the number of extracted prompts. This performance, while slower than real-time, remains practical for research applications and offline evaluation on limited hardware budgets.
 
+\subsection{Extension to Video Segmentation}
+
+Beyond image segmentation, we demonstrate that our CLIP-guided prompting naturally extends to video by leveraging SAM2's temporal tracking capabilities:
+
+\begin{itemize}
+    \item \textbf{Efficient video processing:} CLIP analysis performed only on first frame, with SAM2 handling temporal propagation across all frames
+    \item \textbf{Memory-efficient implementation:} CPU offloading enables video processing on consumer GPUs (6GB VRAM)
+    \item \textbf{Consistent object tracking:} SAM2's memory-based architecture maintains object identity throughout videos
+    \item \textbf{Practical demonstrations:} Sports footage segmentation (MotoGP racing, NBA basketball) with person-specific identification (e.g., "Valentino Rossi", "Stephen Curry")
+    \item \textbf{Limitation acknowledged:} Video inpainting not implemented due to resource constraints of video diffusion models
+\end{itemize}
+
+This video extension demonstrates the versatility of our approach, showing how CLIP-guided prompting can be applied beyond static images while maintaining efficiency through intelligent prompt extraction.
+
 \section{Discussion and Implications}
 
 \subsection{Open-Vocabulary Paradigm Shift}

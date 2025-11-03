@@ -614,9 +614,37 @@ SAM2 generates a high-quality instance mask $M_i$ at prompt $p_i$, and we direct
     \item \textbf{Efficient processing:} No need for majority voting or multi-scale evaluation
 \end{itemize}
 
+\subsection{Extension to Video Segmentation}
+
+While our primary focus is on image segmentation evaluated on Pascal VOC 2012, our CLIP-guided prompting approach naturally extends to video segmentation by leveraging SAM2's native video tracking capabilities.
+
+\subsubsection{Video Segmentation Pipeline}
+
+SAM2 includes a video predictor with temporal propagation that tracks objects across frames using a memory-based architecture. Our extension to video follows this workflow:
+
+\begin{enumerate}
+    \item \textbf{First frame analysis:} Run SCLIP dense prediction on frame 0 to identify objects and their locations
+    \item \textbf{Prompt extraction:} Extract 50-300 semantic prompt points from high-confidence CLIP regions (same as image pipeline)
+    \item \textbf{SAM2 video initialization:} Initialize SAM2 video predictor with prompts on frame 0
+    \item \textbf{Temporal propagation:} SAM2 automatically tracks objects across all frames using its memory mechanism
+    \item \textbf{Video generation:} Render segmented video with colored mask overlays
+\end{enumerate}
+
+\subsubsection{Implementation Considerations}
+
+\textbf{Memory efficiency:} Video processing uses CPU offloading to handle GPU memory constraints. SAM2's video predictor supports \texttt{offload\_video\_to\_cpu=True} and \texttt{offload\_state\_to\_cpu=True} flags to keep video frames and intermediate states on CPU, enabling processing on consumer-grade GPUs (e.g., GTX 1060 6GB).
+
+\textbf{One-time CLIP analysis:} Unlike per-frame dense prediction, CLIP analysis is performed only on the first frame. SAM2's temporal tracking propagates the identified objects across all subsequent frames, making video segmentation efficient.
+
+\textbf{Limitation - No video inpainting:} While mask generation works for videos, we do not implement video inpainting due to computational resource constraints. Video diffusion models (e.g., Stable Video Diffusion) require significantly more GPU memory and processing time than single-frame inpainting, making them impractical on our hardware setup (GTX 1060 6GB).
+
+\subsubsection{Video Examples}
+
+We demonstrate video segmentation on sports footage (MotoGP racing, NBA basketball) where CLIP identifies specific riders/players by name (e.g., "Valentino Rossi", "Stephen Curry") and SAM2 tracks them consistently across frames. Video outputs are encoded with H.264 codec and faststart flag for universal compatibility and streaming.
+
 \subsection{Generative Editing Integration}
 
-Once refined segmentation masks are obtained, we optionally integrate Stable Diffusion v2 Inpainting \cite{rombach2022high} for text-driven image modification. The inpainting model operates in the latent space of a variational autoencoder (VAE), enabling high-resolution generation with computational efficiency.
+Once refined segmentation masks are obtained from images, we optionally integrate Stable Diffusion v2 Inpainting \cite{rombach2022high} for text-driven image modification. The inpainting model operates in the latent space of a variational autoencoder (VAE), enabling high-resolution generation with computational efficiency.
 
 We employ several techniques to ensure coherent results:
 \begin{itemize}

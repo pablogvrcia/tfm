@@ -63,7 +63,9 @@ This thesis makes the following key contributions:
 
 \item \textbf{Integration with generative AI for text-driven editing:} The dense segmentation system is seamlessly integrated with Stable Diffusion v2 \cite{rombach2022high}, enabling realistic image modification based on natural language descriptions. This integration demonstrates practical applications including inpainting, object replacement, and style transfer.
 
-\item \textbf{Evaluation on multiple benchmark datasets:} The system's performance is rigorously evaluated on both COCO-Stuff and PASCAL VOC 2012, demonstrating substantial improvements over baseline dense prediction methods. The evaluation includes comprehensive analysis of the SAM2 refinement layer's contribution and ablation studies on different design choices.
+\item \textbf{Extension to video segmentation:} We demonstrate that our CLIP-guided prompting approach naturally extends to video by leveraging SAM2's temporal tracking capabilities. CLIP analysis on the first frame combined with SAM2's memory-based propagation enables efficient video segmentation with person-specific tracking, demonstrated on sports footage (MotoGP, NBA).
+
+\item \textbf{Rigorous evaluation on PASCAL VOC 2012:} The system's performance is thoroughly evaluated on PASCAL VOC 2012, achieving 59.78\% mIoU in the open-vocabulary setting. The evaluation includes comprehensive metrics (mIoU, pixel accuracy, F1, precision, recall) and per-class analysis across 21 object categories.
 
 \item \textbf{Comparative analysis with baseline methods:} We provide comprehensive experimental validation comparing our CLIP-guided prompting approach against pure dense prediction methods (SCLIP, MaskCLIP, ITACLIP), demonstrating the effectiveness of intelligent semantic guidance for efficient segmentation.
 
