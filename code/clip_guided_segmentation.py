@@ -308,7 +308,7 @@ def visualize_results(image, results, vocabulary, output_path=None):
         img_overlay = np.ones((mask.shape[0], mask.shape[1], 3))
         for i in range(3):
             img_overlay[:, :, i] = color[i]
-        ax.imshow(np.dstack((img_overlay, mask * 0.5)))
+        ax.imshow(np.dstack((img_overlay, mask * 0.7)))
 
         # Add label at prompt point
         point = result['prompt_point']
@@ -403,7 +403,7 @@ def visualize_filtered_results(image, results, target_class, vocabulary, output_
             img_overlay = np.ones((mask.shape[0], mask.shape[1], 3))
             for i in range(3):
                 img_overlay[:, :, i] = target_color[i]
-            ax.imshow(np.dstack((img_overlay, mask * 0.5)))
+            ax.imshow(np.dstack((img_overlay, mask * 0.7)))
 
             # Add label at prompt point
             point = result['prompt_point']

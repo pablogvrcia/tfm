@@ -11,3 +11,5 @@ python clip_guided_segmentation.py --image examples/football_frame.png --vocabul
 python clip_guided_segmentation.py --image examples/congress.png --vocabulary "Obama" "Michael Jordan" people background --output examples_results/congress
 
 python clip_guided_segmentation.py --image examples/brands.png --vocabulary "Nike Shoe" "Adidas Sneaker" background --output examples_results/brands
+
+python clip_guided_segmentation.py --image examples/podium.png --vocabulary "champagne" background hat "red bull driver" "Lewis Hamilton" podium hand --output examples_results/podium
