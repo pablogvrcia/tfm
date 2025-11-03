@@ -48,6 +48,29 @@ python clip_guided_segmentation.py \
     --output examples_results/motogp_video
 ```
 
+<table>
+<tr>
+<td width="50%">
+
+**Input Video**
+
+https://github.com/user-attachments/assets/motogp_video.mp4
+
+<video src="motogp_video.mp4" controls controlsList="nodownload" style="width: 100%;" preload="metadata"></video>
+
+</td>
+<td width="50%">
+
+**Output Video**
+
+https://github.com/user-attachments/assets/motogp_video_output.mp4
+
+<video src="../examples_results/motogp_video.mp4" controls controlsList="nodownload" style="width: 100%;" preload="metadata"></video>
+
+</td>
+</tr>
+</table>
+
 - **Classes:** Riders (Rossi, Marquez), track, background, grass
 
 ---
@@ -90,6 +113,25 @@ python clip_guided_segmentation.py \
     --vocabulary "Stephen Curry" "LeBron James" floor crowd background \
     --output examples_results/nba_video
 ```
+
+<table>
+<tr>
+<td width="50%">
+
+**Input Video**
+
+<video src="nba_video.mp4" controls controlsList="nodownload" style="width: 100%;" preload="metadata"></video>
+
+</td>
+<td width="50%">
+
+**Output Video**
+
+<video src="../examples_results/nba_video.mp4" controls controlsList="nodownload" style="width: 100%;" preload="metadata"></video>
+
+</td>
+</tr>
+</table>
 
 - **Classes:** Players (Curry, LeBron), floor, crowd, background
 
