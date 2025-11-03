@@ -1,12 +1,18 @@
 """
-CLIP-guided SAM segmentation.
+CLIP-guided SAM segmentation for images and videos.
 Uses CLIP dense predictions to intelligently place SAM prompts instead of blind grid.
 
-Strategy:
+Strategy (Images):
 1. Run CLIP dense prediction first (fast)
 2. Extract high-confidence regions for each class
 3. Use those as point prompts for SAM (much fewer prompts than 64x64 grid)
 4. Get high-quality SAM masks only where CLIP says objects are
+
+Strategy (Videos):
+1. Extract first frame and run CLIP dense prediction
+2. Get prompt points for detected objects
+3. Use SAM2 video predictor to track across all frames
+4. Generate segmented video output
 """
 
 import argparse
@@ -14,11 +20,36 @@ import numpy as np
 import torch
 from PIL import Image
 import matplotlib.pyplot as plt
+from pathlib import Path
 from sam2.build_sam import build_sam2
 from sam2.sam2_image_predictor import SAM2ImagePredictor
 from models.sclip_segmentor import SCLIPSegmentor
+from models.video_segmentation import CLIPGuidedVideoSegmentor
 from scipy.ndimage import label, center_of_mass
 import cv2
+
+
+def is_video_file(file_path):
+    """Check if file is a video."""
+    video_extensions = {'.mp4', '.avi', '.mov', '.mkv', '.flv', '.wmv', '.webm'}
+    return Path(file_path).suffix.lower() in video_extensions
+
+
+def extract_first_frame(video_path):
+    """Extract first frame from video as numpy array."""
+    cap = cv2.VideoCapture(video_path)
+    if not cap.isOpened():
+        raise ValueError(f"Could not open video: {video_path}")
+
+    ret, frame = cap.read()
+    cap.release()
+
+    if not ret:
+        raise ValueError(f"Could not read first frame from: {video_path}")
+
+    # Convert BGR to RGB
+    frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    return frame_rgb
 
 
 def load_image(image_path):
@@ -388,11 +419,39 @@ def print_statistics(results, vocabulary):
             print(f"  {class_name:20s}: {avg_conf:.3f}")
 
 
+def print_statistics_video(video_segments, prompts):
+    """Print statistics for video segmentation."""
+    print("\n" + "="*50)
+    print("VIDEO SEGMENTATION STATISTICS")
+    print("="*50)
+
+    # Count frames where each object appears
+    num_frames = len(video_segments)
+    class_names = {p['class_idx']: p['class_name'] for p in prompts}
+
+    print(f"\nTotal frames: {num_frames}")
+    print(f"Tracked objects: {len(prompts)}")
+
+    print("\nObject tracking across frames:")
+    for prompt in prompts:
+        obj_id = prompt['class_idx']
+        class_name = prompt['class_name']
+
+        # Count frames where this object is present
+        frames_present = sum(
+            1 for frame_idx, masks in video_segments.items()
+            if obj_id in masks and masks[obj_id].sum() > 0
+        )
+
+        percentage = (frames_present / num_frames * 100) if num_frames > 0 else 0
+        print(f"  {class_name:20s}: {frames_present:4d}/{num_frames} frames ({percentage:5.1f}%)")
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="CLIP-guided SAM segmentation (optimized)"
     )
-    parser.add_argument("--image", required=True, help="Path to input image")
+    parser.add_argument("--image", required=True, help="Path to input image or video")
     parser.add_argument("--vocabulary", nargs='+', required=True,
                        help="List of class names for CLIP")
     parser.add_argument("--prompt", type=str, default=None,
@@ -427,9 +486,27 @@ def main():
             f"Available classes: {', '.join(args.vocabulary)}"
         )
 
-    # Load image
-    print(f"Loading image from {args.image}...")
-    image = load_image(args.image)
+    # Check if input is video or image
+    is_video = is_video_file(args.image)
+
+    if is_video:
+        print(f"Detected video input: {args.image}")
+
+        # Check for unsupported features
+        if args.edit in ["replace", "remove"] or args.use_inpainting:
+            print("\nWARNING: Video inpainting/editing is not yet supported!")
+            print("Only segmentation visualization is available for videos.")
+            print("Use --edit segment (default) for video segmentation.\n")
+            if args.edit != "segment":
+                return
+
+        # Extract first frame for CLIP analysis
+        print("Extracting first frame for CLIP analysis...")
+        image = extract_first_frame(args.image)
+    else:
+        # Load image
+        print(f"Loading image from {args.image}...")
+        image = load_image(args.image)
 
     # Step 1: Get CLIP dense predictions (fast)
     print("\n" + "="*50)
@@ -469,25 +546,62 @@ def main():
         print("\nNo prompts to process. Exiting.")
         return
 
-    print("\n" + "="*50)
-    print("STEP 3: SAM Segmentation")
-    print("="*50)
+    # Handle video vs image differently
+    if is_video:
+        print("\n" + "="*50)
+        print("STEP 3: SAM2 Video Segmentation")
+        print("="*50)
 
-    results = segment_with_guided_prompts(
-        image, prompts,
-        checkpoint_path=args.checkpoint,
-        model_cfg=args.model_cfg,
-        device=args.device
-    )
+        # Initialize video segmentor
+        video_segmentor = CLIPGuidedVideoSegmentor(
+            checkpoint_path=args.checkpoint,
+            model_cfg=args.model_cfg,
+            device=args.device
+        )
 
-    # Step 4: Merge overlapping masks
-    results = merge_overlapping_masks(results, iou_threshold=args.iou_threshold)
+        # Determine output path (change extension to .mp4)
+        output_path = args.output
+        if not output_path.endswith('.mp4'):
+            output_path = output_path.rsplit('.', 1)[0] + '.mp4'
 
-    # Visualize all results
-    visualize_results(image, results, args.vocabulary, output_path=args.output)
+        # Segment video
+        video_segments = video_segmentor.segment_video(
+            video_path=args.image,
+            prompts=prompts,
+            output_path=output_path,
+            visualize=True
+        )
 
-    # If prompt is specified, create filtered visualization
-    if args.prompt:
+        print(f"\n{'='*50}")
+        print("VIDEO SEGMENTATION COMPLETE!")
+        print(f"{'='*50}")
+        print(f"Output saved to: {output_path}")
+        print(f"Tracked {len(prompts)} objects across video")
+
+        # Statistics
+        print_statistics_video(video_segments, prompts)
+
+    else:
+        # Image segmentation (original workflow)
+        print("\n" + "="*50)
+        print("STEP 3: SAM Segmentation")
+        print("="*50)
+
+        results = segment_with_guided_prompts(
+            image, prompts,
+            checkpoint_path=args.checkpoint,
+            model_cfg=args.model_cfg,
+            device=args.device
+        )
+
+        # Step 4: Merge overlapping masks
+        results = merge_overlapping_masks(results, iou_threshold=args.iou_threshold)
+
+        # Visualize all results
+        visualize_results(image, results, args.vocabulary, output_path=args.output)
+
+    # If prompt is specified, create filtered visualization (images only)
+    if args.prompt and not is_video:
         print("\n" + "="*50)
         print(f"FILTERED VISUALIZATION: {args.prompt} (style: {args.edit})")
         print("="*50)
@@ -557,8 +671,9 @@ def main():
                     import traceback
                     traceback.print_exc()
 
-    # Statistics
-    print_statistics(results, args.vocabulary)
+    # Statistics (for images only, video stats already printed)
+    if not is_video:
+        print_statistics(results, args.vocabulary)
 
 
 if __name__ == "__main__":

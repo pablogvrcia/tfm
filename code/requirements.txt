@@ -26,3 +26,5 @@ tqdm>=4.65.0
 
 # Development and testing
 pytest>=7.4.0
+
+decord
