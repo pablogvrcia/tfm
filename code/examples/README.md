@@ -273,6 +273,102 @@ python clip_guided_segmentation.py \
 
 ---
 
+### Car Sky Replacement
+
+Segment and replace the sky in a scenic car image with inpainting.
+
+```bash
+python clip_guided_segmentation.py \
+  --image examples/car.jpg \
+  --vocabulary sky car road sea mountain background \
+  --prompt "sky" \
+  --edit replace \
+  --use-inpainting \
+  --edit-prompt "realistic sunset with a reddish sky" \
+  --output examples_results/car-sky-replacement
+```
+
+<table>
+<tr>
+<td width="33%">
+
+**Original Image**
+
+![Car Original](car.jpg)
+
+</td>
+<td width="33%">
+
+**Segmentation**
+
+![Car Segmentation](../examples_results/car-sky-replacement.png)
+
+</td>
+<td width="33%">
+
+**Sky Replaced**
+
+![Car Sky Replaced](../examples_results/car-sky-replacement_inpainted_replaced_sky.png)
+
+</td>
+</tr>
+</table>
+
+- **Operation:** Replace sky segment with sunset using Stable Diffusion inpainting
+- **Classes:** Sky, car, road, sea, mountain, background
+- **Edit Prompt:** "realistic sunset with a reddish sky"
+- **Results stored in:** `examples_results/car-sky-replacement*.png`
+
+---
+
+### Car Road to Ski Slope
+
+Transform the road into a snowy ski slope using inpainting.
+
+```bash
+python clip_guided_segmentation.py \
+  --image examples/car.jpg \
+  --vocabulary sky car road sea mountain background \
+  --prompt "road" \
+  --edit replace \
+  --use-inpainting \
+  --edit-prompt "snowy ski slope with fresh powder, mountain skiing terrain, winter landscape" \
+  --output examples_results/car-ski-slope-replacement
+```
+
+<table>
+<tr>
+<td width="33%">
+
+**Original Image**
+
+![Car Original](car.jpg)
+
+</td>
+<td width="33%">
+
+**Segmentation**
+
+![Car Segmentation](../examples_results/car-ski-slope-replacement.png)
+
+</td>
+<td width="33%">
+
+**Road to Ski Slope**
+
+![Car Ski Slope](../examples_results/car-ski-slope-replacement_inpainted_replaced_road.png)
+
+</td>
+</tr>
+</table>
+
+- **Operation:** Replace road segment with ski slope using Stable Diffusion inpainting
+- **Classes:** Sky, car, road, sea, mountain, background
+- **Edit Prompt:** "snowy ski slope with fresh powder, mountain skiing terrain, winter landscape"
+- **Results stored in:** `examples_results/car-ski-slope-replacement*.png`
+
+---
+
 ## Features Demonstrated
 
 ### Image Segmentation
