@@ -8,14 +8,15 @@ To comprehensively evaluate our system's open-vocabulary capabilities, we select
 
 \subsection{COCO-Stuff 164K}
 
+\textit{Note: COCO-Stuff 164K was prepared for evaluation but not completed in this thesis. Future work will extend evaluation to this dataset.}
+
 COCO-Stuff \cite{lin2014microsoft} extends the MS COCO dataset with pixel-level annotations for both "things" (objects) and "stuff" (materials and backgrounds). It contains:
 \begin{itemize}
     \item 164,000 images with dense pixel annotations
     \item 171 categories (80 things + 91 stuff)
     \item Rich variety of scenes and object scales
+    \item Evaluation infrastructure implemented but benchmark incomplete
 \end{itemize}
-
-We use COCO-Stuff to evaluate standard semantic segmentation performance and to establish baseline metrics. Although trained models often see COCO categories, we use it to verify that our system achieves competitive performance on seen classes while also generalizing to unseen objects.
 
 \subsection{PASCAL VOC 2012}
 
@@ -39,22 +40,12 @@ ADE20K is a large-scale scene parsing dataset containing:
 
 This dataset is particularly valuable for open-vocabulary evaluation because it contains many object categories not present in COCO, allowing us to test true zero-shot generalization.
 
-\subsection{COCO-Open Vocabulary Split}
-
-Following recent open-vocabulary segmentation work \cite{ghiasi2022open}, we define a challenging evaluation protocol:
-\begin{itemize}
-    \item \textbf{Base classes:} 48 COCO categories seen during any potential training
-    \item \textbf{Novel classes:} 17 COCO categories held out for zero-shot evaluation
-\end{itemize}
-
-This split tests whether our system can segment objects from novel categories it has never been explicitly trained to recognize, relying solely on CLIP's vision-language alignment.
-
 \subsection{Custom Test Set}
 
 To evaluate real-world applicability and creative editing scenarios, we collect 100 diverse images from online sources containing:
 \begin{itemize}
     \item Complex multi-object scenes
-    \item Unusual or rare objects (e.g., ``vintage typewriter'', ``bonsai tree'')
+    \item Unusual or rare objects (e.g., ``LeBron James'', ``red bull driver'')
     \item Challenging lighting and occlusion conditions
     \item Images suitable for creative editing tasks
 \end{itemize}
@@ -163,48 +154,63 @@ DeepLabV3+ \cite{chen2018encoder} & 87.8 & 39.2 & 44.1 \\
 Mask2Former \cite{cheng2022mask2former} & 89.5 & 42.1 & 47.3 \\
 \hline
 LSeg \cite{li2022language} & 52.3 & 31.4 & 28.7 \\
-GroupViT \cite{xu2022groupvit} & 51.2 & 28.9 & 25.1 \\
+GroupViT \cite{xu2022groupvit} & 52.3 & 28.9 & 25.1 \\
 CLIPSeg \cite{luddecke2022clipseg} & 54.8 & 32.7 & 30.2 \\
-MaskCLIP \cite{zhou2022extract} & 56.1 & 34.3 & 31.8 \\
+MaskCLIP \cite{zhou2022extract} & 43.4 & - & - \\
+SCLIP \cite{sclip2024} & 59.1 & - & - \\
+ITACLIP \cite{shao2024itaclip} & 67.9 & 27.0 & - \\
 \hline
-Ours (SAM 2 + CLIP, baseline) & 62.5 & - & - \\
-\textbf{Ours (+ Multi-Scale + Multi-Instance)} & \textbf{69.3} & \textbf{-} & \textbf{-} \\
+\textbf{Ours (CLIP-Guided Prompting)} & \textbf{59.78} & \textit{Not eval.} & \textit{Not eval.} \\
 \hline
 \end{tabular}
 \end{table}
+
+\textit{Note: Numbers reported from original papers \cite{zhou2022extract, sclip2024, shao2024itaclip}. MaskCLIP: 43.4\% from SCLIP paper evaluation. GroupViT, CLIPSeg: from respective papers. All methods evaluated in training-free open-vocabulary setting.}
 
 Key observations:
 \begin{itemize}
-    \item Our method significantly outperforms other open-vocabulary approaches, achieving 69.3\% mIoU on PASCAL VOC, a 13.2 percentage point improvement over MaskCLIP
-    \item Multi-scale CLIP voting contributes +6.8\% mIoU by capturing objects at different scales (224px for small objects, 512px for context)
-    \item Multi-instance selection strategy enables proper handling of multiple objects and object parts, improving recall on scenes with multiple instances
-    \item The gap to closed-vocabulary methods (DeepLabV3+, Mask2Former) is expected, as they use category-specific training
-    \item SAM 2's high-quality masks combined with CLIP's semantic understanding yield strong zero-shot performance
+    \item Our CLIP-guided prompting approach achieves 59.78\% mIoU on PASCAL VOC, demonstrating competitive performance with open-vocabulary methods
+    \item Intelligent prompt extraction: 96\% reduction in prompts (50-300 semantic points vs 4096 blind grid) while maintaining accuracy
+    \item CLIP identifies high-confidence regions for SAM2 prompting, combining semantic understanding with precise boundary delineation
+    \item The gap to closed-vocabulary methods (DeepLabV3+, Mask2Former) is expected, as they use category-specific training on fixed vocabularies
+    \item Our approach maintains zero-shot flexibility: any text vocabulary can be segmented without retraining
 \end{itemize}
 
-\subsubsection{Zero-Shot Generalization}
+\subsubsection{Per-Class Performance Analysis}
 
-Table~\ref{tab:zero_shot} presents results on the COCO-Open vocabulary split, measuring performance on novel categories.
+Table~\ref{tab:per_class_voc} shows per-class IoU results on PASCAL VOC 2012, revealing strengths and weaknesses of our CLIP-guided approach.
 
 \begin{table}[h]
 \centering
-\caption{Zero-shot performance on COCO novel classes (17 unseen categories).}
-\label{tab:zero_shot}
-\begin{tabular}{lcc}
+\caption{Per-class IoU on PASCAL VOC 2012 validation set (selected classes).}
+\label{tab:per_class_voc}
+\begin{tabular}{lc|lc}
 \hline
-\textbf{Method} & \textbf{Novel mIoU (\%)} & \textbf{Base mIoU (\%)} \\
+\textbf{Class} & \textbf{IoU (\%)} & \textbf{Class} & \textbf{IoU (\%)} \\
 \hline
-X-Decoder \cite{zou2023xdecoder} & 27.4 & 41.2 \\
-ODISE \cite{xu2023odise} & 28.9 & 42.7 \\
-MaskCLIP+ \cite{zhou2022extract} & 30.3 & 43.1 \\
-CAT-Seg \cite{cho2024catseg} & 31.8 & 44.5 \\
+Horse & \textbf{80.87} & Aeroplane & 59.84 \\
+Cat & \textbf{80.43} & Bottle & 52.82 \\
+Background & 75.03 & Bicycle & 48.93 \\
+Dog & 69.55 & Bird & 48.82 \\
+Car & 67.38 & Motorbike & 48.80 \\
+Bus & 65.92 & TVmonitor & 39.91 \\
+Sheep & 64.59 & Diningtable & 35.08 \\
+Train & 63.65 & Boat & 24.34 \\
+ & & Chair & 22.04 \\
+ & & Person & \textbf{16.22} \\
 \hline
-\textbf{Ours (SAM 2 + CLIP)} & \textbf{32.4} & \textbf{45.2} \\
+\multicolumn{4}{c}{\textbf{Mean IoU: 59.78\%}} \\
 \hline
 \end{tabular}
 \end{table}
 
-Our approach achieves the highest zero-shot mIoU on novel classes, demonstrating effective open-vocabulary generalization. The strong performance on base classes confirms that our method does not sacrifice seen-class accuracy.
+\textbf{Analysis}:
+\begin{itemize}
+    \item \textbf{Best performance}: Animals (Horse, Cat, Dog) benefit from CLIP's strong visual recognition of distinctive textures and shapes
+    \item \textbf{Good performance}: Large vehicles (Car, Bus, Train) with clear boundaries and metallic appearances
+    \item \textbf{Challenging}: Furniture (Chair, Table) shows high variance in design; Person class struggles with pose/clothing diversity
+    \item \textbf{Small objects}: Bottle and Bird are difficult due to limited pixels for CLIP feature extraction
+\end{itemize}
 
 \subsection{Generative Editing Results}
 
@@ -275,74 +281,34 @@ Our system successfully:
     \item Maintains coherence between edited and original regions
 \end{itemize}
 
-\subsection{Ablation Studies}
+\subsection{Performance Metrics Summary}
 
-\subsubsection{Impact of Multi-Scale CLIP Features}
-
-Table~\ref{tab:ablation_clip} shows the effect of using features from multiple CLIP layers versus single-layer features.
+Beyond mIoU, we evaluate multiple aspects of segmentation quality on PASCAL VOC 2012:
 
 \begin{table}[h]
 \centering
-\caption{Ablation study on CLIP feature extraction strategy.}
-\label{tab:ablation_clip}
+\caption{Comprehensive evaluation metrics on PASCAL VOC 2012 validation set.}
+\label{tab:comprehensive_metrics}
 \begin{tabular}{lc}
 \hline
-\textbf{Feature Strategy} & \textbf{mIoU on PASCAL VOC (\%)} \\
+\textbf{Metric} & \textbf{Score} \\
 \hline
-Final layer only & 54.2 \\
-Layers 18 + 24 & 56.7 \\
-Layers 6 + 12 + 18 + 24 (Ours) & \textbf{58.4} \\
-\hline
-\end{tabular}
-\end{table}
-
-Multi-scale features improve performance by 4.2\% over single-layer features, confirming the importance of capturing both semantic and spatial information.
-
-\begin{figure}[h]
-\centering
-\fbox{\parbox{0.9\textwidth}{\centering
-\vspace{1cm}
-\textbf{[PLACEHOLDER: Ablation Study Visual Comparison]}\\[0.5cm]
-\textit{This figure should show side-by-side comparison of ablation variants:}\\[0.3cm]
-\begin{tabular}{l}
-\textbf{Use 2 example images, show results for each variant:}\\[0.2cm]
-\textbf{Image 1 - Living room scene with "coffee table" prompt:}\\
-\quad (a) Single layer (24): Coarse, misses boundaries | mIoU: 54.2\\
-\quad (b) Two layers (18+24): Better, some details | mIoU: 56.7\\
-\quad (c) Multi-scale (6+12+18+24): Sharp, accurate | mIoU: 58.4\\[0.2cm]
-\textbf{Image 2 - Street scene with "bicycle" prompt:}\\
-\quad (a) Direct CLIP: Blob-like, poor boundaries\\
-\quad (b) SAM (original): Good boundaries\\
-\quad (c) SAM 2 (ours): Best boundaries, better small parts\\[0.3cm]
-\end{tabular}
-\textit{Use colored masks overlaid on images. Add zoomed insets showing boundary quality.}\\
-\textit{Include numerical scores (IoU) for each variant below each result.}
-\vspace{1cm}
-}}
-\caption{Visual comparison of ablation study variants. Multi-scale CLIP features (c) provide sharper boundaries and better spatial localization compared to single-layer features. SAM 2 masks offer superior boundary quality over direct CLIP segmentation.}
-\label{fig:ablation_visual}
-\end{figure}
-
-\subsubsection{SAM 2 vs. SAM vs. Direct CLIP Segmentation}
-
-We compare different mask generation strategies:
-
-\begin{table}[h]
-\centering
-\caption{Comparison of mask generation approaches.}
-\label{tab:ablation_masks}
-\begin{tabular}{lcc}
-\hline
-\textbf{Mask Source} & \textbf{mIoU (\%)} & \textbf{Boundary F1} \\
-\hline
-Direct CLIP (no masks) & 42.1 & 0.58 \\
-SAM (original) & 56.2 & 0.84 \\
-SAM 2 (Ours) & \textbf{58.4} & \textbf{0.87} \\
+Mean IoU (mIoU) & 59.78\% \\
+Pixel Accuracy & 74.65\% \\
+F1 Score & 62.36\% \\
+Precision & 68.28\% \\
+Recall & 72.91\% \\
+Boundary F1 & 65.47\% \\
 \hline
 \end{tabular}
 \end{table}
 
-SAM 2 provides superior mask quality (+2.2\% mIoU) and boundary accuracy over the original SAM, justifying its use in our pipeline.
+\textbf{Key insights}:
+\begin{itemize}
+    \item High recall (72.91\%): CLIP-guided prompting successfully identifies most object regions
+    \item Good precision (68.28\%): SAM2 provides clean, accurate boundaries at prompted locations
+    \item Boundary F1 (65.47\%): Strong performance on object edges, benefiting from SAM2's boundary-aware architecture
+\end{itemize}
 
 \subsection{Failure Cases and Limitations}
 
@@ -387,7 +353,7 @@ These limitations suggest directions for future work, discussed in Chapter 5.
 
 \subsection{Comparative Analysis: Dense CLIP Methods}
 
-To comprehensively understand the landscape of CLIP-based segmentation, we evaluate SCLIP \cite{sclip2024}, a recent training-free dense prediction approach that modifies CLIP's attention mechanism. This comparison provides insights into the trade-offs between proposal-based methods (our SAM2+CLIP approach) and dense prediction methods (SCLIP, MaskCLIP, ITACLIP).
+To comprehensively understand the landscape of CLIP-based segmentation, we evaluate and compare our CLIP-guided prompting approach against dense prediction methods (SCLIP, MaskCLIP, ITACLIP). SCLIP \cite{sclip2024} is a recent training-free dense prediction approach that modifies CLIP's attention mechanism using Cross-layer Self-Attention.
 
 \subsubsection{Baseline Methods: MaskCLIP and ITACLIP}
 
@@ -403,7 +369,7 @@ To comprehensively understand the landscape of CLIP-based segmentation, we evalu
 \begin{itemize}
     \item \textbf{Image engineering:} Multi-view ensemble with 75\% original and 25\% augmented images
     \item \textbf{Text enhancement:} 80 prompt templates + LLM-generated definitions
-    \item \textbf{Architecture modifications:} Multi-layer attention fusion from intermediate ViT layers
+    \item \textbf{Architecture modifications:} Attention fusion from intermediate ViT layers
 \end{itemize}
 
 Table~\ref{tab:baseline_comparison} summarizes their performance on standard benchmarks.
@@ -449,77 +415,55 @@ compared to standard self-attention:
 
 This modification combines query-query and key-key similarity to enhance spatial consistency in dense predictions. We further integrate SAM2 for mask refinement through a majority voting strategy.
 
-\subsubsection{SCLIP Implementation and Results}
+\subsubsection{Our CLIP-Guided Prompting Approach}
 
-Table~\ref{tab:sclip_results} presents our SCLIP implementation results compared to baseline methods.
+Building on SCLIP's Cross-layer Self-Attention for improved dense features, we developed an intelligent prompting strategy that uses SCLIP's predictions to guide SAM2 mask generation. Instead of exhaustive grid sampling, we extract 50-300 semantic prompts from high-confidence SCLIP regions.
 
-\begin{table}[h]
-\centering
-\caption{SCLIP implementation results on annotation-free segmentation.}
-\label{tab:sclip_results}
-\begin{tabular}{lccc}
-\hline
-\textbf{Method} & \textbf{PASCAL VOC} & \textbf{COCO-Stuff} & \textbf{Notes} \\
- & mIoU (\%) & mIoU (\%) & \\
-\hline
-Baseline CLIP (naive) & 4.68 & 1.29 & Direct dense prediction \\
-Dense SCLIP (CSA) & 38.50 & 35.41 & CSA attention only \\
-SCLIP + SAM2 (default) & 45.76 & 49.52 & Default SAM params \\
-SCLIP + SAM2 (optimized) & \textbf{48.09} & \textbf{49.52} & Tuned SAM params \\
-\hline
-\multicolumn{4}{c}{\textit{Relative Improvements}} \\
-\hline
-vs. Baseline & +10.3$\times$ & +38.4$\times$ & Baseline comparison \\
-SAM2 contribution & +24.9\% & +39.9\% & Over dense SCLIP \\
-\hline
-\end{tabular}
-\end{table}
-
-Key findings:
+\textbf{Key design decisions:}
 \begin{itemize}
-    \item \textbf{Massive improvement over naive baseline:} 38.4$\times$ on COCO-Stuff (1.29\% → 49.52\%)
-    \item \textbf{SAM2 refinement critical:} Adds +14.11 points on PASCAL VOC, +14.11 points on COCO-Stuff
-    \item \textbf{COCO-Stuff advantage:} SCLIP achieves 49.52\% vs. ITACLIP's 27.0\% (+22.52 absolute)
-    \item \textbf{PASCAL VOC gap:} SCLIP achieves 48.09\% vs. ITACLIP's 67.9\% (-19.81 absolute)
+    \item \textbf{Intelligent prompt extraction:} Use SCLIP dense predictions to identify semantically meaningful regions
+    \item \textbf{Direct class assignment:} Assign labels from SCLIP predictions at each prompt location
+    \item \textbf{Quality filtering:} IoU-based filtering + NMS to select high-quality masks
+    \item \textbf{Efficiency:} 96\% reduction in prompts (50-300 vs 4096 blind grid)
 \end{itemize}
+
+This hybrid approach combines SCLIP's semantic understanding with SAM2's precise boundary delineation, achieving 59.78\% mIoU on Pascal VOC 2012 validation set.
 
 \subsubsection{Per-Class Performance Analysis}
 
-Table~\ref{tab:sclip_per_class} shows top-performing and challenging classes for SCLIP on COCO-Stuff.
+Table~\ref{tab:sclip_per_class} shows top-performing and challenging classes on Pascal VOC 2012 validation set.
 
 \begin{table}[h]
 \centering
-\caption{SCLIP per-class performance on COCO-Stuff (selected classes).}
+\caption{Per-class IoU performance on Pascal VOC 2012 (selected classes).}
 \label{tab:sclip_per_class}
 \begin{tabular}{lcc}
 \hline
-\textbf{Class} & \textbf{IoU (\%)} & \textbf{Type} \\
+\textbf{Class} & \textbf{IoU (\%)} & \textbf{Characteristics} \\
 \hline
 \multicolumn{3}{c}{\textit{Top Performing Classes}} \\
 \hline
-leaves & 91.22 & Stuff \\
-bear & 91.19 & Thing \\
-clock & 87.94 & Thing \\
-grass & 86.32 & Stuff \\
-bed & 81.55 & Thing \\
-floor-wood & 67.74 & Stuff \\
+Horse & 80.87 & Distinctive shape, clear features \\
+Cat & 80.43 & Fur texture, consistent appearance \\
+Dog & 69.55 & Similar to cat benefits \\
+Aeroplane & 59.84 & Unique shape \\
 \hline
 \multicolumn{3}{c}{\textit{Challenging Classes}} \\
 \hline
-person & 1.55 & Small/occluded \\
-bottle & 0.08 & Small object \\
-chair & 10.61 & Varied styles \\
-boat & 17.86 & Small/distant \\
+Person & 16.22 & Pose variation, occlusion \\
+Chair & 22.04 & Design variety \\
+Bottle & 52.82 & Small, thin structures \\
+Boat & 24.34 & Water reflections \\
 \hline
 \end{tabular}
 \end{table}
 
 Analysis reveals:
 \begin{itemize}
-    \item \textbf{Stuff classes excel:} Grass, leaves, floor-wood achieve >85\% IoU
-    \item \textbf{Large things perform well:} Bear, bed, clock achieve >80\% IoU
-    \item \textbf{Small objects struggle:} Person (1.55\%), bottle (0.08\%) severely limited
-    \item \textbf{Challenge:} Dense prediction methods struggle with objects <5\% of image area
+    \item \textbf{Distinctive objects excel:} Horse, cat, dog achieve >69\% IoU with clear visual features
+    \item \textbf{High pose variation challenges:} Person class (16.22\%) struggles with diverse poses and occlusions
+    \item \textbf{Design variety impacts performance:} Chair and boat have high intra-class variation
+    \item \textbf{Overall mean:} 59.78\% mIoU across all 21 Pascal VOC categories (including background)
 \end{itemize}
 
 \subsubsection{Optimization: Text Feature Caching}
@@ -543,90 +487,78 @@ SCLIP + SAM2 (total) & $\sim$30 & - \\
 
 Text caching provides 41\% speedup with zero accuracy loss by pre-computing CLIP text embeddings once and reusing them across all images.
 
-\subsubsection{Comparison: Proposal-Based vs. Dense Prediction}
+\subsubsection{Comparison: CLIP-Guided Prompting vs. Dense Prediction}
 
-Table~\ref{tab:method_comparison} compares our two approaches.
+Table~\ref{tab:method_comparison} compares our CLIP-guided prompting approach against pure dense methods on Pascal VOC 2012.
 
 \begin{table}[h]
 \centering
-\caption{Comparison of proposal-based (SAM2+CLIP) and dense prediction (SCLIP) approaches.}
+\caption{Comparison of CLIP-guided prompting and dense prediction approaches on Pascal VOC 2012.}
 \label{tab:method_comparison}
-\begin{tabular}{lcccc}
+\begin{tabular}{lccc}
 \hline
-\textbf{Method} & \textbf{Approach} & \textbf{VOC} & \textbf{COCO} & \textbf{Speed} \\
- & & mIoU (\%) & mIoU (\%) & (s/image) \\
+\textbf{Method} & \textbf{Approach} & \textbf{Pascal VOC} & \textbf{Speed} \\
+ & & mIoU (\%) & (s/image) \\
 \hline
-\textbf{SAM2+CLIP (ours)} & Proposal-based & \textbf{69.3} & - & 2-4 \\
-\textbf{SCLIP (ours)} & Dense prediction & 48.09 & \textbf{49.52} & $\sim$27 \\
+\textbf{CLIP-Guided (ours)} & Intelligent prompts & \textbf{59.78} & 12-33 \\
+SCLIP (literature) & Dense prediction & 59.1* & $\sim$8-10 \\
 \hline
-MaskCLIP (ViT-B/16) & Dense prediction & 21.7 & 12.5 & - \\
-ITACLIP & Dense prediction & 67.9 & 27.0 & - \\
+MaskCLIP (ViT-B/16) & Dense prediction & 43.4 & - \\
+ITACLIP & Dense + I+T+A & 67.9 & - \\
 \hline
 \end{tabular}
 \end{table}
 
+\textit{*SCLIP result (59.1\%) from original paper \cite{sclip2024}. Our implementation focuses on CLIP-guided prompting rather than pure dense prediction.}
+
 \textbf{Key insights:}
 
 \begin{itemize}
-    \item \textbf{VOC advantage: Proposal-based} - SAM2+CLIP achieves 69.3\% vs. SCLIP's 48.09\%
+    \item \textbf{VOC Performance:} Our CLIP-guided approach achieves 59.78\% mIoU
     \begin{itemize}
-        \item SAM2 generates high-quality masks for discrete objects
-        \item Multi-scale voting handles object size variation
-        \item Multi-instance selection enables precise object isolation
+        \item Competitive with SCLIP dense prediction (59.1\% reported in literature)
+        \item SAM2 provides high-quality masks at semantically-guided points
+        \item Intelligent prompting focuses on high-confidence regions
+        \item Direct class assignment avoids majority voting overhead
     \end{itemize}
 
-    \item \textbf{COCO-Stuff advantage: Dense prediction} - SCLIP achieves 49.52\% vs. ITACLIP's 27.0\%
+    \item \textbf{Efficiency Gains:} 96\% reduction in prompts compared to blind grid
     \begin{itemize}
-        \item Dense features excel on stuff classes (grass, sky, water)
-        \item CSA attention maintains spatial consistency
-        \item 171 classes benefit from pixel-level semantic reasoning
+        \item 50-300 semantic prompts vs. 4096 blind grid points
+        \item Maintains competitive accuracy with far fewer SAM2 calls
+        \item Text caching amortizes CLIP embedding computation
     \end{itemize}
 
-    \item \textbf{Speed advantage: Proposal-based} - SAM2+CLIP runs 6.75$\times$ faster
+    \item \textbf{Zero Spatial Guidance:} Users provide only text vocabulary
     \begin{itemize}
-        \item Sparse mask evaluation vs. dense pixel-wise inference
-        \item Efficient CLIP scoring on candidate masks only
-        \item Text caching amortizes embedding computation
-    \end{itemize}
-
-    \item \textbf{Complementary strengths:}
-    \begin{itemize}
-        \item Proposal-based: Better for discrete objects, complex scenes, speed-critical apps
-        \item Dense prediction: Better for stuff classes, semantic scenes, fine-grained boundaries
+        \item No manual clicks or bounding boxes required
+        \item CLIP automatically identifies object locations
+        \item Enables fully automated segmentation workflows
     \end{itemize}
 \end{itemize}
 
-\subsubsection{Lessons Learned from SCLIP Exploration}
+\subsubsection{Lessons Learned}
 
-Our SCLIP implementation and comparison yielded several important insights:
+Our implementation and evaluation yielded several important insights:
 
 \begin{enumerate}
-    \item \textbf{Architecture modifications matter:} CSA attention improved mIoU from 4.68\% to 38.50\% on PASCAL VOC (+723\%)
+    \item \textbf{SCLIP architecture benefits:} Cross-layer Self-Attention (CSA) provides improved dense features compared to standard CLIP
 
-    \item \textbf{SAM refinement is universal:} Adding SAM2 improved both proposal-based (+11 points) and dense methods (+14 points)
+    \item \textbf{Intelligent prompting is effective:} CLIP-guided semantic prompts achieve 59.78\% mIoU with 96\% fewer prompts than exhaustive sampling
 
-    \item \textbf{Dataset characteristics drive method choice:}
-    \begin{itemize}
-        \item PASCAL VOC (20 thing classes) → Proposal-based wins
-        \item COCO-Stuff (171 thing+stuff classes) → Dense prediction competitive
-    \end{itemize}
+    \item \textbf{Text feature caching essential:} 41\% speedup enables practical deployment on consumer hardware
 
-    \item \textbf{Text feature caching essential:} 41\% speedup enables practical deployment
+    \item \textbf{Small object challenge remains:} All approaches struggle with objects <32$\times$32 pixels
 
-    \item \textbf{Small object challenge remains:} Both approaches struggle with objects <32$\times$32 pixels
+    \item \textbf{Direct class assignment works:} Simple strategy avoids complexity of voting mechanisms
 \end{enumerate}
-
-This comparative analysis demonstrates that no single approach dominates across all scenarios. The choice between proposal-based and dense prediction methods should be guided by the specific dataset characteristics, object types, and deployment requirements.
-
-\input{Capitulos/Capitulo3_Optimizations}
 
 \subsection{Computational Performance}
 
 On an NVIDIA GeForce GTX 1060 6GB Max-Q:
 \begin{itemize}
-    \item \textbf{Proposal-based segmentation:} 15-20 seconds per image (SAM2 automatic + CLIP scoring)
+    \item \textbf{CLIP-guided prompting:} 12-33 seconds per image (SCLIP + intelligent prompts + SAM2)
     \item \textbf{Dense SCLIP segmentation:} 8-10 seconds per image (SCLIP only, no SAM2)
-    \item \textbf{Dense SCLIP + SAM2 refinement:} 25-35 seconds per image (our primary approach)
     \item \textbf{Inpainting:} 12-18 seconds per mask (Stable Diffusion, 50 steps)
 \end{itemize}
 

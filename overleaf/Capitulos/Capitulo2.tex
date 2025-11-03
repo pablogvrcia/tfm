@@ -3,182 +3,615 @@
 
 This chapter details the methodology employed to develop our open-vocabulary semantic segmentation system. Unlike traditional approaches that rely on closed-vocabulary classifiers, our work leverages recent advances in vision-language models and promptable segmentation to enable flexible, language-driven image understanding and manipulation.
 
-Our primary contribution is a dense prediction approach that extends SCLIP's Cross-layer Self-Attention (CSA) mechanism with a novel SAM2-based mask refinement layer. This fully annotation-free method combines the semantic understanding of dense CLIP-based features with SAM2's superior boundary quality through intelligent prompted segmentation.
+Our contribution is a CLIP-guided prompting approach that combines SCLIP's dense predictions with SAM2's segmentation quality through intelligent prompt extraction. This fully annotation-free method extracts semantic prompt points from CLIP's high-confidence regions, using SAM2 to generate high-quality masks with direct class assignment.
 
-Additionally, we explore a proposal-based approach (SAM2+CLIP) as an alternative paradigm to understand the complementary strengths of different methodological strategies. This exploration provides valuable insights into when dense versus proposal-based methods are most effective.
+Building upon insights from SCLIP \cite{sclip2024}, MaskCLIP \cite{zhou2022extract}, CLIPSeg \cite{luddecke2022clipseg}, and SAM 2 \cite{ravi2024sam2}, this chapter presents our CLIP-guided prompting methodology in detail.
 
-Building upon insights from SCLIP \cite{sclip2024}, MaskCLIP \cite{zhou2022extract}, CLIPSeg \cite{luddecke2022clipseg}, and SAM 2 \cite{ravi2024sam2}, this chapter presents our primary dense methodology in detail, followed by a brief description of the proposal-based alternative and comparative analysis of both approaches.
+\section{CLIP-Guided Prompting Approach}
+\label{sec:clip_guided_approach}
 
-\section{Primary Approach: Dense SCLIP with Novel SAM2 Refinement}
-\label{sec:dense_sclip_approach}
-
-Our main contribution is a dense prediction system that builds upon SCLIP's Cross-layer Self-Attention mechanism and extends it with a novel SAM2-based mask refinement layer. This approach achieves fully annotation-free open-vocabulary segmentation by combining dense semantic understanding with high-quality boundary delineation.
+Our main contribution is a CLIP-guided prompting system that leverages SCLIP's Cross-layer Self-Attention mechanism to extract intelligent prompt points for SAM2 segmentation. This approach achieves fully annotation-free open-vocabulary segmentation by combining semantic understanding with high-quality boundary delineation through efficient, semantically-guided prompting.
 
 \subsection{Motivation and Design Philosophy}
 
-Dense prediction methods offer several key advantages for open-vocabulary segmentation:
+CLIP-guided prompting offers several key advantages for open-vocabulary segmentation:
 
 \begin{itemize}
-    \item \textbf{Holistic scene understanding:} Dense approaches naturally segment both discrete objects (``things'') and amorphous regions (``stuff'' classes like sky, road, grass), providing comprehensive scene interpretation.
+    \item \textbf{Efficient semantic guidance:} Instead of blindly prompting SAM2 at thousands of points (e.g., 4096 in a grid), CLIP identifies 50-300 semantically meaningful locations, reducing computational cost by 96\% while maintaining competitive accuracy.
 
-    \item \textbf{Annotation-free operation:} Unlike proposal-based methods that require generating and scoring hundreds of candidate masks, dense prediction produces a complete segmentation in a single forward pass, making it computationally efficient and conceptually simpler.
+    \item \textbf{Zero spatial user input:} Users provide only a text vocabulary; the system automatically determines where objects are located without requiring manual clicks or bounding boxes.
 
-    \item \textbf{Semantic coherence:} Dense predictions maintain spatial consistency across the entire image, avoiding fragmentation artifacts that can occur when combining discrete mask proposals.
+    \item \textbf{High-quality segmentation:} SAM2 provides precise object boundaries at each semantically-guided prompt point, combining CLIP's semantic understanding with SAM2's superior mask quality.
+
+    \item \textbf{Training-free operation:} Uses frozen CLIP and SAM2 models without any fine-tuning, enabling zero-shot transfer to new domains.
 \end{itemize}
 
-However, dense CLIP-based features alone often produce imprecise boundaries. Our key insight is to leverage SAM2's superior segmentation quality to refine SCLIP's dense predictions, combining the strengths of both models.
+Our key insight is to use CLIP's dense predictions not as the final output, but as intelligent guidance for SAM2 prompting, achieving both efficiency and quality.
 
 \subsection{System Overview}
 
-Our dense SCLIP + SAM2 refinement pipeline consists of three main stages:
+Our CLIP-guided prompting pipeline consists of four main stages:
 
 \begin{enumerate}
-    \item \textbf{Dense Semantic Prediction:} SCLIP extracts multi-layer CSA features and produces pixel-wise class predictions through similarity matching with text embeddings.
+    \item \textbf{Dense Semantic Prediction:} SCLIP extracts dense features using Cross-layer Self-Attention (CSA) and produces pixel-wise class predictions through similarity matching with text embeddings.
 
-    \item \textbf{Prompted SAM2 Refinement:} Extract representative points from SCLIP's predictions to guide SAM2's mask generation, then apply majority voting to combine semantic understanding with precise boundaries.
+    \item \textbf{Intelligent Prompt Extraction:} Extract 50-300 representative points from high-confidence regions in SCLIP's predictions using connected component analysis and centroid computation.
 
-    \item \textbf{Generative Editing (Optional):} Integrate with Stable Diffusion v2 for text-driven image modification based on the refined segmentation masks.
+    \item \textbf{SAM2 Segmentation:} Prompt SAM2 at each extracted point to generate high-quality instance masks with direct class assignment based on CLIP predictions.
+
+    \item \textbf{Overlap Resolution:} Resolve overlapping masks through IoU-based filtering and confidence-based priority assignment.
 \end{enumerate}
 
 \begin{figure}[h]
 \centering
 \fbox{\parbox{0.9\textwidth}{\centering
 \vspace{1cm}
-\textbf{[PLACEHOLDER: Dense SCLIP + SAM2 Pipeline Diagram]}\\[0.5cm]
-\textit{This figure should show the dense prediction pipeline:}\\[0.3cm]
+\textbf{[PLACEHOLDER: CLIP-Guided Prompting Pipeline Diagram]}\\[0.5cm]
+\textit{This figure should show the CLIP-guided prompting pipeline:}\\[0.3cm]
 \begin{tabular}{l}
-\textbf{Stage 1 - Dense Prediction:}\\
+\textbf{Stage 1 - Dense CLIP Prediction:}\\
 \quad Input image → SCLIP (ViT-B/16 with CSA) → Dense class probabilities (H×W×C)\\
-\quad Extract features from layers 6, 12, 18, 24 → Aggregate → Pixel-wise predictions\\[0.3cm]
-\textbf{Stage 2 - SAM2 Refinement:}\\
-\quad SCLIP predictions → Extract prompt points (connected components)\\
-\quad Points → SAM2 predictor → High-quality masks\\
-\quad Masks + SCLIP predictions → Majority voting → Refined segmentation\\[0.3cm]
-\textbf{Stage 3 - Optional Editing:}\\
-\quad Refined masks + Text prompt → Stable Diffusion → Edited image\\[0.3cm]
+\quad Apply Cross-layer Self-Attention → Extract dense patch features → Pixel-wise predictions\\[0.3cm]
+\textbf{Stage 2 - Intelligent Prompt Extraction:}\\
+\quad SCLIP predictions → Connected component analysis → Extract centroids\\
+\quad Filter by confidence (>0.3) and size (>100 pixels) → 50-300 prompt points\\[0.3cm]
+\textbf{Stage 3 - SAM2 Segmentation:}\\
+\quad Prompt points → SAM2 predictor → High-quality instance masks\\
+\quad Direct class assignment from CLIP predictions → Instance-level segmentation\\[0.3cm]
+\textbf{Stage 4 - Overlap Resolution:}\\
+\quad IoU-based filtering → Confidence-based priority → Final segmentation\\[0.3cm]
 \end{tabular}
 \textit{Include visualization: dense heatmap, extracted points, SAM2 masks, final result.}
 \vspace{1cm}
 }}
-\caption{Overview of our dense SCLIP + SAM2 refinement pipeline. The system combines SCLIP's semantic understanding with SAM2's boundary quality through prompted segmentation.}
-\label{fig:dense_pipeline}
+\caption{Overview of our CLIP-guided prompting pipeline. The system uses CLIP's dense predictions to extract intelligent prompt points, achieving 96\% reduction in prompts compared to blind grid sampling while maintaining competitive accuracy.}
+\label{fig:clip_guided_pipeline}
 \end{figure}
 
-The key insight motivating our design is that dense prediction provides holistic scene understanding, while SAM2's prompted segmentation refines boundaries. By extracting points from SCLIP's high-confidence regions, we guide SAM2 to focus on semantically relevant areas, achieving both accuracy and efficiency.
+The key insight motivating our design is that CLIP's dense predictions identify where objects are located, enabling intelligent SAM2 prompting with far fewer points than blind grid sampling. By extracting points from SCLIP's high-confidence regions, we guide SAM2 to focus on semantically relevant areas, achieving both efficiency and accuracy.
 
-\subsection{SCLIP's Cross-layer Self-Attention (CSA) Foundation}
-\label{sec:csa_foundation}
+\subsection{Foundation: Vision Transformer and CLIP Architecture}
+\label{sec:vit_clip_foundation}
 
-Our dense prediction approach leverages SCLIP's Cross-layer Self-Attention (CSA), which modifies the standard self-attention mechanism in CLIP's Vision Transformer to produce better features for dense prediction. Standard self-attention computes:
+Before explaining SCLIP's modifications, we first establish how the Vision Transformer (ViT) and CLIP architectures function. Understanding these foundations is essential for comprehending SCLIP's Cross-layer Self-Attention innovation.
 
-\begin{equation}
-\text{Attention}(Q, K, V) = \text{softmax}\left(\frac{QK^T}{\sqrt{d}}\right)V
-\end{equation}
+\subsubsection{Vision Transformer: From Images to Sequences}
 
-where $Q$, $K$, $V$ are query, key, and value matrices. This formulation captures query-key relationships but may miss important spatial correlations. SCLIP's CSA instead computes:
+The Vision Transformer \cite{dosovitskiy2020image} adapts the Transformer architecture \cite{vaswani2017attention} from NLP to computer vision by treating an image as a sequence of patches.
 
-\begin{equation}
-\text{CSA}(Q, K, V) = \text{softmax}\left(\frac{QQ^T + KK^T}{\sqrt{d}}\right)V
-\end{equation}
+\textbf{Core Idea:} Instead of processing images through convolutional layers, ViT:
+\begin{enumerate}
+    \item Divides the image into fixed-size patches
+    \item Linearly embeds each patch
+    \item Processes the patch sequence through standard Transformer layers
+    \item Uses the output for classification or (in our case) dense prediction
+\end{enumerate}
 
-This modification introduces two key changes:
+\textbf{Why this works:} Transformers excel at modeling long-range dependencies through self-attention. By treating spatial patches as sequence elements, ViT can capture relationships between distant image regions (e.g., "this patch of sky relates to that patch of sky") more effectively than CNNs with limited receptive fields.
 
+\subsubsection{Self-Attention Mechanism: The Heart of Transformers}
+
+Self-attention allows each element in a sequence to attend to all other elements, computing context-aware representations.
+
+\textbf{Input:} Sequence of $N$ token embeddings $X \in \mathbb{R}^{N \times D}$
+
+\textbf{Learnable Parameters:} Three weight matrices per attention head:
 \begin{itemize}
-    \item \textbf{Query-query similarity ($QQ^T$):} Captures relationships between different spatial positions based on their query representations, encouraging spatial consistency
-    \item \textbf{Key-key similarity ($KK^T$):} Captures relationships based on key representations, providing complementary structural information
+    \item $W_Q \in \mathbb{R}^{D \times d_h}$ (Query projection)
+    \item $W_K \in \mathbb{R}^{D \times d_h}$ (Key projection)
+    \item $W_V \in \mathbb{R}^{D \times d_h}$ (Value projection)
+\end{itemize}
+where $d_h = D / H$ is the dimension per head ($H$ = number of heads, typically 8-16).
+
+\textbf{Step-by-step computation:}
+
+\textbf{(1) Project to Queries, Keys, Values:}
+\begin{align}
+Q &= X W_Q \in \mathbb{R}^{N \times d_h} \quad \text{(What am I looking for?)} \\
+K &= X W_K \in \mathbb{R}^{N \times d_h} \quad \text{(What do I contain?)} \\
+V &= X W_V \in \mathbb{R}^{N \times d_h} \quad \text{(What information do I provide?)}
+\end{align}
+
+\textbf{Intuition:}
+\begin{itemize}
+    \item Each token $i$ produces a \textit{query} $Q_i$: "What information am I seeking?"
+    \item Each token $j$ produces a \textit{key} $K_j$: "What information do I offer?"
+    \item Each token $j$ produces a \textit{value} $V_j$: "Here's my actual information"
 \end{itemize}
 
-By leveraging CSA, we obtain attention maps that are more spatially coherent and better suited for dense prediction tasks.
+\textbf{(2) Compute Attention Weights:}
+\begin{equation}
+A = \text{softmax}\left(\frac{Q K^T}{\sqrt{d_h}}\right) \in \mathbb{R}^{N \times N}
+\end{equation}
 
-\subsection{Multi-Layer Feature Aggregation}
+This computes how much token $i$ should attend to token $j$:
+\begin{equation}
+A_{ij} = \frac{\exp(Q_i \cdot K_j / \sqrt{d_h})}{\sum_{k=1}^{N} \exp(Q_i \cdot K_k / \sqrt{d_h})}
+\end{equation}
 
-Following SCLIP \cite{sclip2024}, MaskCLIP \cite{zhou2022extract}, and ITACLIP \cite{shao2024itaclip}, we extract features from multiple ViT layers to capture information at different semantic levels:
+\textbf{Why $Q K^T$?} It measures compatibility: if token $i$'s query is similar to token $j$'s key (high dot product), then $j$ likely has relevant information for $i$.
 
+\textbf{Why divide by $\sqrt{d_h}$?} Scaling factor prevents dot products from becoming too large in high dimensions, which would cause softmax to produce very peaked distributions (gradient saturation).
+
+\textbf{(3) Weighted Aggregation:}
+\begin{equation}
+\text{Output} = A V \in \mathbb{R}^{N \times d_h}
+\end{equation}
+
+Each output token is a weighted sum of all value vectors:
+\begin{equation}
+\text{Output}_i = \sum_{j=1}^{N} A_{ij} V_j
+\end{equation}
+
+\textbf{Intuition:} Token $i$ aggregates information from all other tokens, weighted by attention scores. If $A_{i,j} = 0.7$ and $A_{i,k} = 0.3$, then output $i$ is 70\% influenced by token $j$ and 30\% by token $k$.
+
+\subsubsection{Multi-Head Attention: Parallel Attention Patterns}
+
+Instead of one attention mechanism, Transformers use $H$ parallel heads (e.g., $H=8$) to capture different types of relationships.
+
+\textbf{Why multiple heads?} Different heads can specialize:
 \begin{itemize}
-    \item \textbf{Layer 6 (early):} Low-level features (edges, textures, colors)
-    \item \textbf{Layer 12 (middle):} Mid-level features (object parts, patterns)
-    \item \textbf{Layer 18 (late-middle):} High-level semantic features
-    \item \textbf{Layer 24 (final):} Abstract semantic concepts
+    \item Head 1 might learn positional relationships ("nearby patches")
+    \item Head 2 might learn color similarity
+    \item Head 3 might learn semantic relationships ("all sky patches")
 \end{itemize}
 
-For each layer $\ell$, we extract patch features $F_\ell \in \mathbb{R}^{H_p \times W_p \times D}$ where $H_p, W_p$ are the patch grid dimensions and $D$ is the feature dimension. These features are upsampled to the original image resolution using bilinear interpolation and aggregated through weighted averaging.
+\textbf{Computation:}
+\begin{align}
+\text{head}_h &= \text{Attention}(X W_Q^h, X W_K^h, X W_V^h) \in \mathbb{R}^{N \times d_h} \\
+\text{MultiHead}(X) &= \text{Concat}(\text{head}_1, \ldots, \text{head}_H) W_O \in \mathbb{R}^{N \times D}
+\end{align}
 
-\begin{figure}[h]
+where $W_O \in \mathbb{R}^{D \times D}$ is an output projection matrix.
+
+\subsubsection{Complete Transformer Layer}
+
+A full Transformer layer combines multi-head self-attention with position-wise feed-forward networks:
+
+\textbf{(1) Multi-Head Self-Attention with Residual:}
+\begin{align}
+\hat{X} &= \text{LayerNorm}(X) \\
+X' &= X + \text{MultiHead}(\hat{X})
+\end{align}
+
+\textbf{(2) Feed-Forward Network (MLP) with Residual:}
+\begin{align}
+\hat{X}' &= \text{LayerNorm}(X') \\
+X_{\text{out}} &= X' + \text{MLP}(\hat{X}')
+\end{align}
+
+where MLP typically consists of two linear layers with GELU activation:
+\begin{equation}
+\text{MLP}(x) = W_2 \cdot \text{GELU}(W_1 x + b_1) + b_2
+\end{equation}
+
+\textbf{Why residual connections?} They allow gradients to flow directly through the network, enabling training of very deep models (12-24 layers for ViT).
+
+\textbf{Why LayerNorm before (not after)?} Pre-normalization stabilizes training and is the modern standard (vs. original post-normalization).
+
+\subsubsection{Vision Transformer (ViT) Complete Pipeline}
+
+\textbf{Architecture: ViT-B/16 (used in CLIP and SCLIP)}
+\begin{itemize}
+    \item Patch size: $P = 16$ pixels
+    \item Embedding dimension: $D = 512$
+    \item Number of layers: $L = 12$
+    \item Number of heads: $H = 8$
+    \item MLP hidden dimension: $2048$ (4× expansion)
+\end{itemize}
+
+\textbf{Complete forward pass:}
+
+\textbf{(a) Patch Embedding:}
+\begin{equation}
+X_{\text{patches}} = \text{LinearProjection}(\text{Flatten}(\text{Patches}(I))) \in \mathbb{R}^{N \times D}
+\end{equation}
+where $N = H_{\text{img}} W_{\text{img}} / P^2$ (e.g., $N = 224 \times 224 / 16^2 = 196$).
+
+\textbf{(b) Prepend CLS Token:}
+\begin{equation}
+X_0 = [\text{CLS}; X_{\text{patches}}] \in \mathbb{R}^{(N+1) \times D}
+\end{equation}
+
+The CLS (classification) token is a learnable embedding that aggregates global image information. For classification, only the CLS token output is used. For dense prediction (our case), we use all patch tokens.
+
+\textbf{(c) Add Position Embeddings:}
+\begin{equation}
+X_0 \leftarrow X_0 + E_{\text{pos}}
+\end{equation}
+
+Position embeddings are learned vectors that encode spatial location, allowing the model to distinguish between patches at different positions.
+
+\textbf{(d) Process through $L$ Transformer Layers:}
+\begin{equation}
+X_\ell = \text{TransformerLayer}_\ell(X_{\ell-1}) \quad \text{for } \ell = 1, \ldots, 12
+\end{equation}
+
+\textbf{(e) Extract Features:}
+\begin{itemize}
+    \item \textbf{For classification:} Use CLS token: $X_{12}[0, :]$
+    \item \textbf{For dense prediction:} Use all patch tokens: $X_{12}[1:, :]$
+\end{itemize}
+
+\subsubsection{CLIP: Connecting Vision and Language}
+
+CLIP \cite{radford2021learning} trains a Vision Transformer and Text Transformer jointly to align image and text representations in a shared embedding space.
+
+\textbf{Training Objective (Contrastive Learning):}
+
+Given a batch of $B$ image-text pairs $(I_i, T_i)$:
+
+\textbf{(1) Encode images and texts:}
+\begin{align}
+f_i &= \text{ViT}(I_i) \in \mathbb{R}^{D} \quad \text{(use CLS token)} \\
+t_i &= \text{TextTransformer}(T_i) \in \mathbb{R}^{D}
+\end{align}
+
+\textbf{(2) Normalize:}
+\begin{align}
+f_i &\leftarrow f_i / \|f_i\|_2 \\
+t_i &\leftarrow t_i / \|t_i\|_2
+\end{align}
+
+\textbf{(3) Compute similarity matrix:}
+\begin{equation}
+S_{ij} = f_i \cdot t_j \quad \in [-1, 1]
+\end{equation}
+
+\textbf{(4) Contrastive loss:} Maximize $S_{ii}$ (matching pairs) and minimize $S_{ij}$ for $i \neq j$ (non-matching pairs):
+\begin{equation}
+\mathcal{L} = -\frac{1}{B} \sum_{i=1}^{B} \left[ \log \frac{\exp(S_{ii}/\tau)}{\sum_{j=1}^{B} \exp(S_{ij}/\tau)} + \log \frac{\exp(S_{ii}/\tau)}{\sum_{j=1}^{B} \exp(S_{ji}/\tau)} \right]
+\end{equation}
+
+where $\tau$ is a learnable temperature parameter.
+
+\textbf{Result:} After training on 400M image-text pairs, CLIP learns:
+\begin{itemize}
+    \item Images of "dogs" are close to text "a photo of a dog"
+    \item Images of "cars" are close to text "a car on the road"
+    \item Zero-shot transfer: Can classify/segment unseen categories by comparing to text embeddings
+\end{itemize}
+
+\textbf{Why CLIP enables open-vocabulary segmentation:}
+\begin{enumerate}
+    \item \textbf{Shared embedding space:} Both images and text map to the same 512-D space
+    \item \textbf{Semantic understanding:} Learned on natural language descriptions, not just class labels
+    \item \textbf{Zero-shot:} Given text "airplane", CLIP can recognize airplanes without airplane-specific training
+\end{enumerate}
+
+\subsection{SCLIP's Dense Feature Extraction: Complete Pipeline}
+\label{sec:sclip_dense_extraction}
+
+Building on the Vision Transformer and CLIP foundations, this section explains how SCLIP modifies CLIP's final attention layer to extract dense semantic features using Cross-layer Self-Attention (CSA).
+
+\subsubsection{Step 1: Image Preprocessing and Patchification}
+
+\textbf{Input:} RGB image $I \in \mathbb{R}^{H \times W \times 3}$ (e.g., 224×224×3)
+
+\textbf{Normalization:}
+\begin{equation}
+I_{\text{norm}} = \frac{I / 255 - \mu}{\sigma}
+\end{equation}
+where $\mu = [0.48145466, 0.4578275, 0.40821073]$ and $\sigma = [0.26862954, 0.26130258, 0.27577711]$ are CLIP's standard normalization parameters.
+
+\textbf{Patch Embedding:} The normalized image is divided into non-overlapping patches of size $P \times P$ (ViT-B/16 uses $P=16$):
+\begin{equation}
+\text{Number of patches: } N = \frac{H}{P} \times \frac{W}{P} = 14 \times 14 = 196 \text{ (for 224×224 input)}
+\end{equation}
+
+Each patch is linearly projected to a $D$-dimensional embedding ($D=512$ for ViT-B/16):
+\begin{equation}
+X_{\text{patch}} \in \mathbb{R}^{N \times D}
+\end{equation}
+
+A learnable [CLS] token is prepended:
+\begin{equation}
+X_0 = [\text{CLS}; X_{\text{patch}}] \in \mathbb{R}^{(N+1) \times D}
+\end{equation}
+
+\textbf{Positional Encoding:} Learnable positional embeddings $E_{\text{pos}} \in \mathbb{R}^{(N+1) \times D}$ are added:
+\begin{equation}
+X_0 \leftarrow X_0 + E_{\text{pos}}
+\end{equation}
+
+\subsubsection{Step 2: Transformer Layers with Standard Attention}
+
+ViT-B/16 has 12 transformer layers. Layers 1-11 use standard multi-head self-attention (MHSA):
+
+\textbf{For each layer $\ell = 1, \ldots, 11$:}
+
+\textbf{(a) Layer Normalization:}
+\begin{equation}
+\hat{X}_{\ell-1} = \text{LayerNorm}(X_{\ell-1})
+\end{equation}
+
+\textbf{(b) Standard Multi-Head Self-Attention:}
+
+For each attention head $h$:
+\begin{align}
+Q_h &= \hat{X}_{\ell-1} W_Q^h \in \mathbb{R}^{(N+1) \times d_h} \\
+K_h &= \hat{X}_{\ell-1} W_K^h \in \mathbb{R}^{(N+1) \times d_h} \\
+V_h &= \hat{X}_{\ell-1} W_V^h \in \mathbb{R}^{(N+1) \times d_h}
+\end{align}
+
+where $d_h = D / H$ (head dimension, $d_h = 512/8 = 64$ for ViT-B/16 with 8 heads).
+
+\textbf{Standard attention computation:}
+\begin{equation}
+\text{Attention}_h(Q_h, K_h, V_h) = \text{softmax}\left(\frac{Q_h K_h^T}{\sqrt{d_h}}\right) V_h
+\end{equation}
+
+The attention matrix $A_h = \text{softmax}\left(\frac{Q_h K_h^T}{\sqrt{d_h}}\right) \in \mathbb{R}^{(N+1) \times (N+1)}$ represents how much each token attends to every other token.
+
+\textbf{Concatenate all heads and project:}
+\begin{equation}
+\text{MHSA}(\hat{X}_{\ell-1}) = \text{Concat}(\text{Attention}_1, \ldots, \text{Attention}_H) W_O
+\end{equation}
+
+\textbf{(c) Residual Connection + MLP:}
+\begin{align}
+X'_{\ell} &= X_{\ell-1} + \text{MHSA}(\hat{X}_{\ell-1}) \\
+X_{\ell} &= X'_{\ell} + \text{MLP}(\text{LayerNorm}(X'_{\ell}))
+\end{align}
+
+\subsubsection{Step 3: Final Layer with Cross-layer Self-Attention (CSA)}
+
+\textbf{This is SCLIP's key innovation.} The final layer ($\ell = 12$) uses CSA instead of standard attention.
+
+\textbf{(a) Layer Normalization:}
+\begin{equation}
+\hat{X}_{11} = \text{LayerNorm}(X_{11})
+\end{equation}
+
+\textbf{(b) Compute Q, K, V as before:}
+\begin{align}
+Q_h &= \hat{X}_{11} W_Q^h \in \mathbb{R}^{(N+1) \times d_h} \\
+K_h &= \hat{X}_{11} W_K^h \in \mathbb{R}^{(N+1) \times d_h} \\
+V_h &= \hat{X}_{11} W_V^h \in \mathbb{R}^{(N+1) \times d_h}
+\end{align}
+
+\textbf{(c) Cross-layer Self-Attention (CSA) - The Key Difference:}
+
+Instead of computing $Q_h K_h^T$, CSA computes:
+\begin{equation}
+\boxed{A_h^{\text{CSA}} = \text{softmax}\left(\frac{Q_h Q_h^T + K_h K_h^T}{\sqrt{d_h}}\right)}
+\end{equation}
+
+\textbf{Why this works better for dense prediction:}
+
+\begin{itemize}
+    \item \textbf{$Q_h Q_h^T$:} Measures similarity between queries. If patch $i$ and patch $j$ have similar queries, they likely belong to the same semantic region (e.g., both are "sky"). This encourages \textit{spatial grouping}.
+
+    \item \textbf{$K_h K_h^T$:} Measures similarity between keys. Provides complementary structural information about which patches should be grouped together.
+
+    \item \textbf{Combined effect:} Patches in the same semantic region mutually reinforce each other through both query and key similarities, producing more spatially coherent features.
+
+    \item \textbf{Contrast with standard $Q_h K_h^T$:} Standard attention measures query-key compatibility, which works well for global understanding (classification) but can create noisy, fragmented dense predictions.
+\end{itemize}
+
+\textbf{Apply attention to values:}
+\begin{equation}
+\text{CSA}_h(Q_h, K_h, V_h) = A_h^{\text{CSA}} V_h \in \mathbb{R}^{(N+1) \times d_h}
+\end{equation}
+
+\textbf{(d) Concatenate and project:}
+\begin{equation}
+X_{12} = X_{11} + \text{Concat}(\text{CSA}_1, \ldots, \text{CSA}_H) W_O + \text{MLP}(\cdots)
+\end{equation}
+
+\subsubsection{Step 4: Extract Dense Patch Features}
+
+From the final layer output $X_{12} \in \mathbb{R}^{(N+1) \times D}$:
+
+\textbf{(a) Remove CLS token:}
+\begin{equation}
+F_{\text{patch}} = X_{12}[1:, :] \in \mathbb{R}^{N \times D} = \mathbb{R}^{196 \times 512}
+\end{equation}
+
+\textbf{(b) Reshape to spatial grid:}
+\begin{equation}
+F_{\text{spatial}} = \text{reshape}(F_{\text{patch}}, (H_p, W_p, D)) \in \mathbb{R}^{14 \times 14 \times 512}
+\end{equation}
+
+where $H_p = W_p = \sqrt{N} = 14$ (for 224×224 input).
+
+\textbf{(c) L2 Normalization:}
+\begin{equation}
+F_{\text{norm}}[i,j,:] = \frac{F_{\text{spatial}}[i,j,:]}{\|F_{\text{spatial}}[i,j,:]\|_2}
+\end{equation}
+
+Now $F_{\text{norm}} \in \mathbb{R}^{14 \times 14 \times 512}$ contains normalized dense features.
+
+\subsubsection{Step 5: Text Encoding with Prompt Ensembling}
+
+For each class name $c$ (e.g., "car"), we generate multiple text prompts using templates \cite{zhou2022learning}:
+
+\textbf{Prompt templates:}
+\begin{itemize}
+    \item "a photo of a \{class\}"
+    \item "\{class\} in the scene"
+    \item "a rendering of a \{class\}"
+    \item \ldots (80 templates total in practice)
+\end{itemize}
+
+For class "car", this produces: ["a photo of a car", "car in the scene", \ldots]
+
+\textbf{Encode each prompt:} Use CLIP's text transformer to get embeddings:
+\begin{equation}
+t_{c,i} = \text{CLIP}_{\text{text}}(\text{template}_i(c)) \in \mathbb{R}^{D}
+\end{equation}
+
+\textbf{Average embeddings (prompt ensembling):}
+\begin{equation}
+e_c = \frac{1}{M} \sum_{i=1}^{M} t_{c,i} \in \mathbb{R}^{D}
+\end{equation}
+where $M$ is the number of templates.
+
+\textbf{L2 Normalization:}
+\begin{equation}
+e_c \leftarrow \frac{e_c}{\|e_c\|_2}
+\end{equation}
+
+This gives us normalized text embeddings $e_c \in \mathbb{R}^{512}$ for each class.
+
+\subsubsection{Step 6: Compute Dense Similarity Scores}
+
+For each spatial location $(i, j)$ in the 14×14 grid and each class $c$:
+
+\begin{equation}
+S_{i,j,c} = F_{\text{norm}}[i,j,:] \cdot e_c \in [-1, 1]
+\end{equation}
+
+This is the cosine similarity (dot product of normalized vectors). We get a similarity tensor:
+\begin{equation}
+S \in \mathbb{R}^{14 \times 14 \times C}
+\end{equation}
+where $C$ is the number of classes (e.g., $C=3$ for ["car", "road", "background"]).
+
+\subsubsection{Step 7: Upsample to Original Resolution}
+
+The 14×14 similarity maps are upsampled to the original image resolution using bilinear interpolation:
+
+\begin{equation}
+S_{\text{full}} = \text{Upsample}(S, \text{size}=(H, W)) \in \mathbb{R}^{H \times W \times C}
+\end{equation}
+
+For example, if the original image is 512×512, we upsample from 14×14 to 512×512.
+
+\subsubsection{Step 8: Generate Dense Predictions}
+
+\textbf{(a) Apply temperature scaling:}
+\begin{equation}
+L = S_{\text{full}} \times T
+\end{equation}
+where $T = 40.0$ is the temperature (sharpens the distribution).
+
+\textbf{(b) Convert to probabilities via softmax:}
+\begin{equation}
+P_{x,y,c} = \frac{\exp(L_{x,y,c})}{\sum_{c'=1}^{C} \exp(L_{x,y,c'})}
+\end{equation}
+
+\textbf{(c) Assign class labels:}
+\begin{equation}
+\boxed{\hat{c}(x, y) = \arg\max_{c} P_{x,y,c}}
+\end{equation}
+
+This produces the final dense segmentation mask $\hat{c} \in \mathbb{R}^{H \times W}$ where each pixel is assigned a class index.
+
+\subsubsection{Visual Summary: SCLIP Dense Feature Extraction Flowchart}
+
+\begin{figure}[!h]
 \centering
-\fbox{\parbox{0.9\textwidth}{\centering
-\vspace{1cm}
-\textbf{[PLACEHOLDER: Multi-Scale CLIP Feature Visualization]}\\[0.5cm]
-\textit{This figure should illustrate the multi-scale feature extraction process:}\\[0.3cm]
+\fbox{\parbox{0.95\textwidth}{\centering
+\vspace{0.5cm}
+\textbf{SCLIP Dense Feature Extraction Pipeline}\\[0.4cm]
+
 \begin{tabular}{l}
-\textbf{Left:} Input image (e.g., a living room scene)\\
-\textbf{Middle:} Four heatmaps showing CLIP features from layers 6, 12, 18, and 24\\
-\quad - Layer 6: Low-level edges and textures\\
-\quad - Layer 12: Mid-level patterns and shapes\\
-\quad - Layer 18: Object parts and regions\\
-\quad - Layer 24: High-level semantic concepts\\
-\textbf{Right:} Combined multi-scale feature map with similarity scores for prompt "sofa"\\[0.3cm]
+\textbf{[1] Input Image} \\
+\quad $I \in \mathbb{R}^{224 \times 224 \times 3}$ \\
+\quad $\downarrow$ \textit{Normalize, Divide into 16×16 patches} \\[0.2cm]
+
+\textbf{[2] Patch Embeddings + Positional Encoding} \\
+\quad $X_0 \in \mathbb{R}^{197 \times 512}$ \quad (196 patches + 1 CLS token) \\
+\quad $\downarrow$ \textit{Add learnable position embeddings} \\[0.2cm]
+
+\textbf{[3] Transformer Layers 1-11: Standard Attention} \\
+\quad For $\ell = 1, \ldots, 11$: \\
+\quad \quad $A_h = \text{softmax}(\frac{Q_h K_h^T}{\sqrt{d_h}})$ \quad \textit{(Standard attention)} \\
+\quad \quad $X_{\ell} = X_{\ell-1} + \text{MHSA}(X_{\ell-1}) + \text{MLP}(\cdots)$ \\
+\quad $\downarrow$ \\[0.2cm]
+
+\textbf{[4] Transformer Layer 12: Cross-layer Self-Attention (CSA)} \\
+\quad \colorbox{yellow!30}{$A_h^{\text{CSA}} = \text{softmax}(\frac{Q_h Q_h^T + K_h K_h^T}{\sqrt{d_h}})$} \quad \textit{\textbf{KEY INNOVATION}} \\
+\quad $X_{12} = X_{11} + \text{CSA}(X_{11}) + \text{MLP}(\cdots)$ \\
+\quad $\downarrow$ \\[0.2cm]
+
+\textbf{[5] Extract Dense Patch Features} \\
+\quad Remove CLS: $F_{\text{patch}} = X_{12}[1:, :] \in \mathbb{R}^{196 \times 512}$ \\
+\quad Reshape: $F_{\text{spatial}} \in \mathbb{R}^{14 \times 14 \times 512}$ \\
+\quad Normalize: $F_{\text{norm}}[i,j,:] = F[i,j,:] / \|F[i,j,:]\|_2$ \\
+\quad $\downarrow$ \\[0.2cm]
+
+\textbf{[6] Text Encoding (Parallel Branch)} \\
+\quad Classes: ["car", "road", "background"] \\
+\quad Prompt ensemble: "a photo of a car", "car in the scene", \ldots \\
+\quad $e_c \in \mathbb{R}^{512}$ \quad (normalized text embedding per class) \\
+\quad $\downarrow$ \\[0.2cm]
+
+\textbf{[7] Compute Similarity} \\
+\quad $S_{i,j,c} = F_{\text{norm}}[i,j,:] \cdot e_c$ \quad $\in \mathbb{R}^{14 \times 14 \times C}$ \\
+\quad $\downarrow$ \textit{Upsample to original resolution (bilinear)} \\[0.2cm]
+
+\textbf{[8] Dense Prediction} \\
+\quad Apply temperature: $L = S \times 40.0$ \\
+\quad Softmax: $P = \text{softmax}(L)$ \\
+\quad Argmax: $\hat{c}(x,y) = \arg\max_c P_{x,y,c}$ \\[0.2cm]
+
+\textbf{[Output] Dense Segmentation Mask} \\
+\quad $\hat{c} \in \mathbb{R}^{H \times W}$ \quad (class index per pixel) \\
 \end{tabular}
-\textit{Use color-coded heatmaps (e.g., blue=low similarity, red=high similarity).}
-\vspace{1cm}
+
+\vspace{0.5cm}
 }}
-\caption{Multi-scale CLIP feature extraction from transformer layers. Different layers capture information at varying levels of abstraction, which are combined to produce spatially-resolved semantic features.}
-\label{fig:multiscale_features}
+\caption{Complete flowchart of SCLIP's dense feature extraction pipeline. The key innovation is Cross-layer Self-Attention (CSA) in the final transformer layer (highlighted), which uses $Q_h Q_h^T + K_h K_h^T$ instead of standard $Q_h K_h^T$ to produce spatially coherent features for dense prediction.}
+\label{fig:sclip_flowchart}
 \end{figure}
 
-For text encoding, we use CLIP's text encoder to generate embeddings for user-provided prompts. To improve robustness, we employ prompt ensembling \cite{zhou2022learning}, generating multiple variations of the input text (e.g., ``a photo of a \{object\}'', ``\{object\} in the scene'') and averaging their embeddings.
+\subsubsection{Summary and Implementation Considerations}
 
-\subsection{Dense Semantic Prediction}
+\begin{enumerate}
+    \item \textbf{Minimal architectural modification:} CSA requires changing only the attention computation in the final layer from $Q K^T$ to $Q Q^T + K K^T$, making it straightforward to implement on top of existing CLIP models.
 
-Following SCLIP's approach, we compute pixel-wise semantic scores by matching image features with text embeddings. For each pixel location $(x, y)$ and class $c$, we compute the cosine similarity between the aggregated multi-layer feature $f_{x,y}$ and the text embedding $e_c$:
+    \item \textbf{Spatial coherence through self-similarity:} The $Q Q^T$ and $K K^T$ terms measure patch-to-patch similarity within the same representation space, encouraging patches with similar semantic content to have strong mutual attention weights, thereby improving spatial consistency in dense predictions.
 
-\begin{equation}
-S(x, y, c) = \text{sim}(f_{x,y}, e_c) = \frac{f_{x,y} \cdot e_c}{||f_{x,y}|| \, ||e_c||}
-\end{equation}
+    \item \textbf{Training-free approach:} SCLIP leverages pre-trained CLIP weights without requiring fine-tuning or additional training data, applying CSA as a modification to the inference-time forward pass.
 
-The initial dense prediction assigns each pixel to the class with highest similarity:
+    \item \textbf{Resolution characteristics:} The Vision Transformer with 16×16 patches produces a 14×14 feature grid for 224×224 input images. These features must be upsampled to the target resolution via bilinear interpolation for pixel-level predictions.
 
-\begin{equation}
-\hat{c}(x, y) = \arg\max_{c} S(x, y, c)
-\end{equation}
+    \item \textbf{Sliding window inference for high-resolution inputs:} Images larger than 224×224 (e.g., 2048×2048) are processed using overlapping 224×224 crops with 50\% stride overlap, and predictions are aggregated through averaging.
 
-This produces a dense semantic segmentation map purely from CLIP features, without requiring any mask proposals. However, while SCLIP's CSA improves spatial coherence, the boundaries may still lack precision compared to dedicated segmentation models.
+    \item \textbf{Temperature scaling for prediction sharpening:} The logit scale parameter $T = 40.0$ amplifies the differences between class scores before softmax, producing more confident and less ambiguous predictions.
+\end{enumerate}
 
-\subsection{Novel SAM2 Refinement Layer}
 
-Our key contribution is a novel refinement layer that combines SCLIP's semantic understanding with SAM2's superior boundary quality through prompted segmentation and majority voting.
+\subsection{Intelligent Prompt Extraction}
 
-\subsubsection{Prompted Segmentation Strategy}
+Our key contribution is intelligent prompt extraction that uses SCLIP's semantic understanding to guide SAM2 prompting, achieving massive efficiency gains without sacrificing accuracy.
 
-Instead of using SAM2's automatic mask generation (which produces 100-300 masks from a 48×48 grid), we develop a guided prompting strategy that extracts representative points from SCLIP's predictions:
+\subsubsection{Prompt Extraction Strategy}
+
+Instead of blindly prompting SAM2 at thousands of grid points (e.g., 64×64 = 4096 points), we extract 50-300 semantically meaningful prompts from SCLIP's predictions:
 
 \begin{enumerate}
     \item \textbf{Connected Components Analysis:} For each predicted class, identify connected regions in SCLIP's dense prediction using morphological operations
 
-    \item \textbf{Point Extraction:} Extract centroids from each connected component, ensuring minimum spatial separation (20 pixels) to avoid redundant prompts
+    \item \textbf{Confidence Filtering:} Filter regions by CLIP confidence threshold (default: 0.3) to focus on high-certainty predictions
 
-    \item \textbf{SAM2 Prompting:} Pass extracted points to SAM2's predictor, which generates 3 masks per point at different granularities (tight, medium, loose)
+    \item \textbf{Size Filtering:} Remove regions smaller than minimum size threshold (default: 100 pixels) to avoid spurious detections
 
-    \item \textbf{Majority Voting:} For each SAM2 mask, compute overlap with SCLIP prediction. Keep masks where $\geq$60\% of pixels match the predicted class
+    \item \textbf{Centroid Extraction:} Extract centroids from each valid connected component as prompt points with associated class labels
 
-    \item \textbf{Mask Combination:} Combine retained masks using logical OR to produce final refined segmentation
+    \item \textbf{Metadata Storage:} Store confidence score, region size, and class label for each prompt point
 \end{enumerate}
 
-This prompted approach achieves 2× speedup over automatic mask generation ($\sim$60 targeted points vs 2,304 grid points) while maintaining segmentation quality through semantic-guided prompting.
+This intelligent extraction achieves 96\% reduction in prompts (from 4096 to 50-300) while maintaining competitive accuracy by focusing SAM2 on semantically meaningful locations.
 
-\subsubsection{Majority Voting for Semantic Consistency}
+\subsubsection{Direct Class Assignment}
 
-The majority voting mechanism ensures SAM2's masks align with SCLIP's semantic understanding. For each mask $M$ generated by SAM2, we compute:
+Unlike methods that require voting or post-processing, our approach performs direct class assignment:
+
+For each prompt point $p_i$ with extracted class label $c_i$:
 
 \begin{equation}
-\text{coverage}(M, c) = \frac{|\{p \in M : \hat{c}(p) = c\}|}{|M|}
+\text{SAM2}(p_i) \rightarrow M_i \text{ where } M_i \text{ is assigned class } c_i
 \end{equation}
 
-where $\hat{c}(p)$ is SCLIP's predicted class at pixel $p$. We retain mask $M$ for class $c$ if $\text{coverage}(M, c) \geq 0.6$, filtering out masks that don't align with SCLIP's semantic predictions.
+SAM2 generates a high-quality instance mask $M_i$ at prompt $p_i$, and we directly assign it the class $c_i$ determined by SCLIP's prediction at that location. This simple yet effective strategy combines:
 
-This intelligent fusion combines:
 \begin{itemize}
-    \item \textbf{SCLIP's semantic accuracy:} Correct class assignment from vision-language understanding
-    \item \textbf{SAM2's boundary quality:} Precise object delineation from specialized segmentation model
+    \item \textbf{SCLIP's semantic understanding:} Correct class assignment from vision-language features
+    \item \textbf{SAM2's segmentation quality:} Precise object boundaries from specialized segmentation model
+    \item \textbf{Efficient processing:} No need for majority voting or multi-scale evaluation
 \end{itemize}
 
 \subsection{Generative Editing Integration}
@@ -192,163 +625,4 @@ We employ several techniques to ensure coherent results:
     \item \textbf{Prompt engineering:} Reformulate user queries into detailed prompts suitable for the diffusion model
 \end{itemize}
 
-This completes our primary dense SCLIP + SAM2 refinement pipeline, enabling fully annotation-free open-vocabulary segmentation with high-quality boundaries.
-
-\section{Alternative Exploration: Proposal-Based Segmentation}
-\label{sec:proposal_based}
-
-As a complementary exploration, we also investigated a proposal-based paradigm that operates inversely to our primary dense approach. Instead of generating pixel-wise semantic predictions first and then refining with SAM2, this alternative method first generates class-agnostic mask proposals using SAM2's automatic mask generation, then scores each proposal using CLIP to determine its semantic class.
-
-\subsection{Methodology Overview}
-
-The proposal-based approach consists of three main stages:
-
-\begin{enumerate}
-    \item \textbf{Automatic Mask Generation:} SAM2 generates 100-300 class-agnostic mask proposals across multiple scales without requiring any prompts. The model uses a 32×32 grid of point prompts to ensure comprehensive coverage of all potential objects in the image.
-
-    \item \textbf{CLIP-based Mask Scoring:} Each mask region is cropped, resized, and encoded using CLIP's image encoder. The resulting embedding is compared against text embeddings for all classes using cosine similarity to determine semantic relevance.
-
-    \item \textbf{Multi-Scale Voting:} To improve robustness to object scale, each mask is evaluated at three resolutions (224px, 336px, 512px) and scored using weighted voting. This addresses CLIP's sensitivity to input resolution.
-\end{enumerate}
-
-\subsection{Key Technical Components}
-
-\subsubsection{SAM2 Configuration}
-
-We employ SAM2's automatic mask generation mode with parameters optimized for comprehensive coverage:
-
-\begin{itemize}
-    \item \textbf{Points per side:} 32 (generating a 32×32 grid)
-    \item \textbf{Predicted IoU threshold:} 0.88
-    \item \textbf{Stability score threshold:} 0.95
-    \item \textbf{Model variant:} \texttt{sam2\_hiera\_large}
-\end{itemize}
-
-This configuration typically produces 100-300 mask candidates per image, ensuring both small details and large scene elements are captured.
-
-\subsubsection{Multi-Scale CLIP Scoring}
-
-For each mask $M_i$, we compute similarity scores at three scales:
-
-\begin{equation}
-S_i^{(s)} = \text{sim}(\text{CLIP}_{\text{img}}(M_i^{(s)}), \text{CLIP}_{\text{text}}(c))
-\end{equation}
-
-where $s \in \{224, 336, 512\}$ denotes the resize resolution. The final score combines all scales:
-
-\begin{equation}
-S_i = 0.2 \cdot S_i^{(224)} + 0.5 \cdot S_i^{(336)} + 0.3 \cdot S_i^{(512)}
-\end{equation}
-
-The weights reflect that 336px (CLIP's standard resolution) typically provides the most reliable features.
-
-\subsubsection{Background Suppression}
-
-To reduce false positives from uniform regions, we compute background scores using negative prompts (``background'', ``nothing'', ``empty space'') and subtract them from object scores:
-
-\begin{equation}
-S_i^{\text{final}} = S_i - \alpha \cdot S_{\text{bg}}
-\end{equation}
-
-with $\alpha = 0.3$ to balance object detection sensitivity.
-
-\subsubsection{Multi-Instance Selection}
-
-A key challenge is determining how many masks to select for each query. We employ an adaptive strategy:
-
-\begin{enumerate}
-    \item Filter masks by size (discard those <0.1\% of image area)
-    \item Apply score threshold (0.15-0.20 depending on mask size)
-    \item Use non-maximum suppression (70\% IoU threshold) to avoid duplicates
-    \item Select multiple non-overlapping instances when appropriate
-\end{enumerate}
-
-This enables the system to correctly handle queries referring to single objects (``car''), multiple instances (``person'' in a crowd), or object parts (``tire'').
-
-\subsection{Integration with Stable Diffusion}
-
-The proposal-based approach integrates seamlessly with generative editing. Since masks are already class-specific and high-quality, they can be directly fed to Stable Diffusion v2 Inpainting for text-driven image modification:
-
-\begin{itemize}
-    \item \textbf{Inference steps:} 50
-    \item \textbf{Guidance scale:} 7.5
-    \item \textbf{Mask dilation:} 5 pixels for smooth blending
-\end{itemize}
-
-This enables interactive applications where users specify objects via text and modify them through natural language instructions.
-
-\subsection{Complementary Strengths}
-
-While our primary dense SCLIP + SAM2 approach excels at holistic scene understanding and ``stuff'' classes, the proposal-based method offers distinct advantages:
-
-\begin{itemize}
-    \item \textbf{Speed:} 2-4 seconds per image (6-7× faster than dense approach)
-    \item \textbf{Discrete objects:} Superior performance on well-defined objects with clear boundaries
-    \item \textbf{Precise boundaries:} SAM2's automatic masks provide exceptional edge quality
-    \item \textbf{Generative editing:} Natural integration with inpainting for interactive applications
-\end{itemize}
-
-However, it faces challenges with:
-\begin{itemize}
-    \item \textbf{Stuff classes:} Amorphous regions (sky, grass, water) lack clear boundaries for proposal generation
-    \item \textbf{Semantic fragmentation:} May produce inconsistent labels for continuous semantic regions
-    \item \textbf{Computational overhead:} Generating hundreds of proposals is slower than single dense prediction pass
-\end{itemize}
-
-This complementary nature motivates our comparative analysis in the following section, where we examine when each paradigm is most effective.
-
-\section{Comparative Analysis and Method Selection}
-
-The two approaches represent complementary paradigms in open-vocabulary segmentation:
-
-\subsection{Proposal-Based (SAM2+CLIP) Strengths}
-\begin{itemize}
-    \item \textbf{Speed:} 2-4s per image (6.75$\times$ faster than dense prediction)
-    \item \textbf{Discrete objects:} Excels on PASCAL VOC (69.3\% mIoU) with well-defined objects
-    \item \textbf{Generative integration:} Seamless connection to Stable Diffusion for image editing
-    \item \textbf{Multi-instance handling:} Adaptive selection strategy for variable object counts
-    \item \textbf{Precise boundaries:} SAM2's high-quality masks provide accurate object delineation
-\end{itemize}
-
-\subsection{Dense Prediction (SCLIP+SAM2) Strengths}
-\begin{itemize}
-    \item \textbf{Stuff classes:} Excels on COCO-Stuff (49.52\% mIoU), 83\% better than ITACLIP (27.0\%)
-    \item \textbf{Semantic consistency:} CSA attention produces spatially coherent predictions
-    \item \textbf{Fine-grained understanding:} Pixel-level classification captures subtle semantic variations
-    \item \textbf{Training-free:} Purely CLIP-based, no dependence on external mask generators for core prediction
-    \item \textbf{Dense semantic scenes:} Better for datasets with many overlapping semantic regions
-\end{itemize}
-
-\subsection{Method Selection Guidelines}
-
-Based on our empirical evaluation, we recommend:
-
-\begin{itemize}
-    \item \textbf{Use Proposal-Based for:}
-    \begin{itemize}
-        \item Datasets dominated by discrete objects (VOC, Objects365)
-        \item Applications requiring speed (<5s per image)
-        \item Interactive image editing scenarios
-        \item Multi-instance object detection and manipulation
-    \end{itemize}
-
-    \item \textbf{Use Dense Prediction for:}
-    \begin{itemize}
-        \item Datasets with many stuff classes (COCO-Stuff, ADE20K)
-        \item Semantic scene understanding tasks
-        \item Applications prioritizing fine-grained semantic consistency
-        \item Scenarios where boundary precision is less critical than semantic coverage
-    \end{itemize}
-\end{itemize}
-
-\subsection{Hybrid Potential}
-
-Future work could explore hybrid approaches that combine both methodologies:
-\begin{itemize}
-    \item Use proposal-based for thing classes (discrete objects)
-    \item Use dense prediction for stuff classes (amorphous regions)
-    \item Ensemble predictions using confidence-weighted averaging
-    \item Adaptive method selection based on query type (object vs. stuff)
-\end{itemize}
-
-In summary, this chapter has presented two complementary open-vocabulary segmentation methodologies, each with distinct strengths. The proposal-based approach achieves state-of-the-art results on discrete object datasets and enables interactive editing, while the dense prediction approach excels on stuff-heavy datasets with superior semantic consistency. Together, they demonstrate the versatility of CLIP-based segmentation across diverse application scenarios.
+This completes our CLIP-guided prompting pipeline, enabling fully annotation-free open-vocabulary segmentation with high-quality boundaries and massive efficiency gains through intelligent semantic guidance.

@@ -26,78 +26,40 @@ The complete implementation is organized into modular components:
 \subsection{Main Entry Points}
 
 \begin{itemize}
-    \item \texttt{main.py}: Unified CLI for both segmentation approaches
+    \item \texttt{clip\_guided\_segmentation.py}: CLIP-guided prompting implementation
     \begin{itemize}
-        \item Dense SCLIP + SAM2 refinement (default)
-        \item Proposal-based SAM2+CLIP (--use-proposals flag)
+        \item Intelligent prompt extraction from CLIP predictions
+        \item SAM2 segmentation at semantic points
+        \item Direct class assignment
         \item Supports segmentation, removal, replacement, and style transfer
     \end{itemize}
 
-    \item \texttt{run\_sclip\_benchmarks.py}: Benchmark evaluation script
+    \item \texttt{run\_benchmarks.py}: Benchmark evaluation script
     \begin{itemize}
-        \item PASCAL VOC 2012 evaluation
-        \item COCO-Stuff 164K evaluation
-        \item Configurable SCLIP modes (dense, hybrid with SAM)
+        \item PASCAL VOC 2012 evaluation (completed)
+        \item COCO-Stuff 164K evaluation (infrastructure ready, not evaluated in this thesis)
+        \item Configurable SCLIP modes (dense, CLIP-guided with SAM)
         \item Metrics computation and visualization
-    \end{itemize}
-
-    \item \texttt{pipeline.py}: Proposal-based segmentation pipeline
-    \begin{itemize}
-        \item OpenVocabSegmentationPipeline class
-        \item SAM2 automatic mask generation
-        \item CLIP-based mask scoring
-        \item Multi-scale voting and adaptive selection
     \end{itemize}
 \end{itemize}
 
 \subsection{Core Models}
 
-\textbf{models/sclip\_segmentor.py} - Dense SCLIP + SAM2 Implementation
-\begin{itemize}
-    \item SCLIPSegmentor class (primary contribution)
-    \item Cross-layer Self-Attention (CSA) feature extraction
-    \item Dense semantic prediction
-    \item Prompted SAM2 refinement with majority voting
-    \item Unified \texttt{segment()} interface
-\end{itemize}
-
 \textbf{models/sclip\_features.py} - SCLIP Feature Extractor
 \begin{itemize}
     \item SCLIPFeatureExtractor class
-    \item Multi-layer feature aggregation (layers 6, 12, 18, 24)
-    \item CSA attention mechanism implementation
+    \item Cross-layer Self-Attention (CSA) mechanism on final transformer layer
+    \item Dense patch feature extraction
     \item Sliding window inference support
+    \item Dense semantic prediction
 \end{itemize}
 
-\textbf{models/sam2\_segmentation.py} - SAM2 Integration
+\textbf{models/sam2\_predictor.py} - SAM2 Integration
 \begin{itemize}
-    \item SAM2MaskGenerator class
-    \item Automatic and prompted mask generation modes
-    \item Point prompt extraction from dense predictions
-    \item Mask quality filtering (IoU, stability scores)
-\end{itemize}
-
-\textbf{models/clip\_features.py} - Standard CLIP Features
-\begin{itemize}
-    \item CLIPFeatureExtractor class (for proposal-based approach)
-    \item Multi-scale feature extraction
-    \item Text encoding with prompt ensembling
-\end{itemize}
-
-\textbf{models/mask\_alignment.py} - Mask-Text Alignment
-\begin{itemize}
-    \item MaskTextAligner class
-    \item Multi-scale CLIP voting (224px, 336px, 512px)
-    \item Background suppression
-    \item Confidence scoring
-\end{itemize}
-
-\textbf{models/adaptive\_selection.py} - Intelligent Mask Selection
-\begin{itemize}
-    \item AdaptiveMaskSelector class
-    \item Query-aware selection strategies
-    \item Single object vs. multiple instance detection
-    \item Part-based segmentation handling
+    \item SAM2 predictor wrapper
+    \item Prompted segmentation at intelligent points
+    \item Efficient batch processing
+    \item High-quality mask generation
 \end{itemize}
 
 \textbf{models/inpainting.py} - Generative Editing
@@ -129,45 +91,26 @@ The complete implementation is organized into modular components:
 
 \begin{itemize}
     \item \textbf{Backbone:} ViT-B/16 (Vision Transformer with 16×16 patch size)
-    \item \textbf{Feature layers:} 6, 12, 18, 24 (multi-scale extraction)
-    \item \textbf{Layer weights:} Equal weighting (0.25 each)
-    \item \textbf{Patch size:} 16 pixels
-    \item \textbf{Input resolution:} 224×224 for CLIP, upsampled to original
+    \item \textbf{CSA mechanism:} Applied to final transformer layer
+    \item \textbf{Patch size:} 16 pixels (14×14 grid for 224×224 input)
+    \item \textbf{Feature dimension:} 512 (ViT-B/16 output)
+    \item \textbf{Input resolution:} 224×224 for CLIP crops, processed at 2048px via sliding window
     \item \textbf{Text encoding:} Prompt ensembling with template variations
-    \item \textbf{Temperature scaling:} $T = 0.01$ (logit sharpening)
+    \item \textbf{Temperature scaling:} $T = 40.0$ (logit scaling)
     \item \textbf{Sliding window:} Crop size 224, stride 112 (50\% overlap)
 \end{itemize}
 
-\subsection{SAM2 Refinement Parameters}
+\subsection{CLIP-Guided Prompting Parameters}
 
-\textbf{Prompted Segmentation Mode (Our Contribution):}
+\textbf{Intelligent Prompt Extraction:}
 \begin{itemize}
-    \item \textbf{Model variant:} SAM2-base (optimized for 6GB VRAM)
+    \item \textbf{Model variant:} SAM2-hiera-large
     \item \textbf{Point extraction:} Connected component analysis on SCLIP predictions
-    \item \textbf{Points per class:} Adaptive (typically 5-15 based on region size)
-    \item \textbf{Minimum spatial separation:} 20 pixels between prompt points
-    \item \textbf{Masks per point:} 3 (tight, medium, loose granularities)
-    \item \textbf{Majority voting threshold:} 60\% coverage for mask retention
-    \item \textbf{Speedup:} 2× faster than automatic mode ($\sim$60 vs 2,304 points)
-\end{itemize}
-
-\textbf{Automatic Mode (Proposal-based Approach):}
-\begin{itemize}
-    \item \textbf{Model variant:} SAM2-hiera-base-plus
-    \item \textbf{Points per side:} 32 (32×32 grid = 1,024 points)
-    \item \textbf{Predicted IoU threshold:} 0.88
-    \item \textbf{Stability score threshold:} 0.95
-    \item \textbf{Typical output:} 100-300 mask candidates per image
-\end{itemize}
-
-\subsection{Multi-Scale CLIP Voting (Proposal-based)}
-
-\begin{itemize}
-    \item \textbf{Resolutions:} 224px, 336px, 512px
-    \item \textbf{Weights:} 0.2, 0.5, 0.3 respectively (336px prioritized)
-    \item \textbf{Background suppression:} $\alpha = 0.3$
-    \item \textbf{Score threshold:} 0.15-0.20 (adaptive based on mask size)
-    \item \textbf{IoU threshold for NMS:} 0.70 (avoid duplicate masks)
+    \item \textbf{Confidence threshold:} 0.3 (filter low-confidence regions)
+    \item \textbf{Minimum region size:} 100 pixels
+    \item \textbf{Typical prompts per image:} 50-300 (vs 4096 for blind grid)
+    \item \textbf{Efficiency gain:} 96\% reduction in prompts
+    \item \textbf{Class assignment:} Direct from CLIP prediction at prompt point
 \end{itemize}
 
 \subsection{Stable Diffusion Inpainting}
@@ -195,12 +138,15 @@ The complete implementation is organized into modular components:
 
 \subsection{COCO-Stuff 164K}
 
+\textit{Note: Dataset infrastructure is implemented and ready, but COCO-Stuff 164K evaluation was not completed in this thesis. Future work will extend evaluation to this challenging dataset with 171 categories.}
+
 \begin{itemize}
     \item \textbf{Classes:} 171 categories (80 things + 91 stuff)
     \item \textbf{Split:} Validation set (5,000 images)
     \item \textbf{Metric:} Mean Intersection-over-Union (mIoU)
     \item \textbf{Image resolution:} Variable, resized to max dimension 512px
     \item \textbf{Challenge:} High class count, diverse stuff classes
+    \item \textbf{Status:} \textit{Not evaluated in this thesis (planned future work)}
 \end{itemize}
 
 \section{Computational Performance}
@@ -214,30 +160,36 @@ Inference timing on NVIDIA GeForce GTX 1060 6GB Max-Q:
 \textbf{Method} & \textbf{Time per Image} & \textbf{GPU Memory} \\
 \hline
 Dense SCLIP only & $\sim$8-10s & 4.5 GB \\
-SCLIP + Prompted SAM2 (ours) & $\sim$25-35s & 5.8 GB \\
-Proposal-based (SAM2+CLIP) & $\sim$15-20s & 5.2 GB \\
+CLIP-Guided Prompting (ours) & $\sim$12-33s & 5.8 GB \\
 \hline
 \end{tabular}
-\caption{Inference performance comparison for 512×512 images on GTX 1060 6GB Max-Q. The mobile GPU shows 2-3× slower performance compared to datacenter GPUs due to lower compute capability and memory bandwidth.}
+\caption{Inference performance for 512×512 images on GTX 1060 6GB Max-Q. The mobile GPU shows 2-3× slower performance compared to datacenter GPUs due to lower compute capability and memory bandwidth.}
 \label{tab:performance}
 \end{table}
 
-\subsection{Performance Breakdown (Dense SCLIP + SAM2)}
+\subsection{Performance Breakdown (CLIP-Guided Prompting)}
 
 \begin{itemize}
-    \item \textbf{SCLIP CSA feature extraction:} $\sim$8-10s
+    \item \textbf{SCLIP dense prediction:} $\sim$1-2s
     \begin{itemize}
-        \item Multi-layer extraction (4 layers)
-        \item Sliding window inference
-        \item Similarity computation
+        \item CSA attention computation on final layer
+        \item Dense patch feature extraction
+        \item Pixel-wise similarity computation
     \end{itemize}
-    \item \textbf{Prompted SAM2 refinement:} $\sim$15-25s
+    \item \textbf{Intelligent prompt extraction:} $<$0.1s
     \begin{itemize}
-        \item Point extraction from SCLIP predictions
-        \item SAM2 mask generation ($\sim$60 prompts)
-        \item Majority voting and combination
+        \item Connected component analysis
+        \item Confidence and size filtering
+        \item Centroid computation
     \end{itemize}
-    \item \textbf{Total:} $\sim$25-35s per image
+    \item \textbf{SAM2 segmentation:} $\sim$10-30s
+    \begin{itemize}
+        \item Depends on number of prompts (50-300)
+        \item High-quality mask generation per prompt
+        \item Direct class assignment
+    \end{itemize}
+    \item \textbf{Overlap resolution:} $<$0.5s
+    \item \textbf{Total:} $\sim$12-33s per image
 \end{itemize}
 
 \subsection{Memory Optimization Strategies}
@@ -260,15 +212,13 @@ These optimizations enable full pipeline execution on consumer-grade hardware, m
 \subsection{Basic Segmentation}
 
 \begin{verbatim}
-# Dense SCLIP + SAM2 (IMPORTANT: Use --vocabulary for context)
-python main.py --image photo.jpg --prompt "car" \
-    --vocabulary background sky road building tree --mode segment -v
+# CLIP-guided prompting (provide full vocabulary for best results)
+python clip_guided_segmentation.py --image photo.jpg \
+    --vocabulary "car" "road" "sky" "building" "tree" "background"
 
-# Without vocabulary (may over-segment - forces binary classification)
-python main.py --image photo.jpg --prompt "car" --mode segment -v
-
-# Proposal-based (alternative, doesn't need vocabulary)
-python main.py --image photo.jpg --prompt "car" --use-proposals --mode segment -v
+# Segment specific object
+python clip_guided_segmentation.py --image photo.jpg \
+    --vocabulary "person" "background"
 \end{verbatim}
 
 \subsection{Generative Editing}
@@ -289,15 +239,12 @@ python main.py --image landscape.jpg --prompt "sky" --mode style \
 \subsection{Benchmark Evaluation}
 
 \begin{verbatim}
-# PASCAL VOC evaluation (dense SCLIP + SAM2)
+# PASCAL VOC evaluation (CLIP-Guided Prompting with SAM2)
 python run_benchmarks.py --dataset pascal-voc --num-samples 100
 
-# COCO-Stuff evaluation (dense SCLIP only, faster)
-python run_benchmarks.py --dataset coco-stuff --num-samples 50 \
-    --use-sam=False
-
-# Full COCO-Stuff with SAM refinement
-python run_benchmarks.py --dataset coco-stuff --use-sam
+# COCO-Stuff infrastructure (prepared for future evaluation)
+# Note: Not evaluated in this thesis
+# python run_benchmarks.py --dataset coco-stuff --num-samples 50
 \end{verbatim}
 
 \section{Reproducibility}

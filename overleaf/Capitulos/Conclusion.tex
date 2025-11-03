@@ -18,47 +18,47 @@ We developed a modular pipeline that integrates state-of-the-art foundation mode
 
 This integration demonstrates that combining complementary foundation models can achieve sophisticated visual understanding without task-specific fine-tuning.
 
-\subsection{Multi-Scale Vision-Language Feature Extraction}
+\subsection{CLIP-Guided Intelligent Prompting}
 
-Building upon recent advances in dense vision-language understanding, we developed an effective multi-scale CLIP voting strategy that evaluates masks at multiple resolutions (224px, 336px, 512px) with weighted averaging. Our experiments demonstrated that this approach significantly improves segmentation robustness across objects of varying sizes, contributing a +6.8\% mIoU improvement over single-scale CLIP scoring.
+Building upon recent advances in dense vision-language understanding through SCLIP (Self-attention CLIP), we developed an intelligent prompting strategy that extracts semantic information from dense CLIP predictions to guide SAM 2's mask generation. Rather than using blind grid sampling (4096 points), our approach identifies 50-300 high-confidence semantic regions from SCLIP's cross-layer self-attention features.
 
-The weighted combination (0.2 for 224px, 0.5 for 336px, 0.3 for 512px) balances fine-grained detail capture with semantic understanding. This finding validates the importance of multi-scale feature representations in open-vocabulary tasks and provides practical guidance for future work on dense vision-language models.
+This CLIP-guided prompting achieves 96\% prompt reduction while maintaining competitive segmentation accuracy. By focusing computational resources on semantically meaningful regions, the system efficiently processes images while avoiding the combinatorial explosion of exhaustive sampling strategies.
 
-\subsection{Multi-Instance Selection Strategy}
+\subsection{Mask Quality Filtering and Selection}
 
-We developed an adaptive selection strategy that handles variable numbers of object instances per query—from single objects (e.g., one car) to multiple discrete instances (e.g., four tires) to semantic parts (e.g., all helmet components). This strategy employs:
+We implemented a quality-aware mask selection pipeline that combines multiple filtering stages:
 
 \begin{itemize}
-    \item Size-based filtering to remove artifacts (masks < 0.1\% of image area)
-    \item Adaptive score thresholds (0.15 for large masks, 0.20 for small masks)
-    \item Non-maximum suppression with 70\% overlap threshold for same-class masks
-    \item Confidence-based pixel assignment for overlapping different-class masks
+    \item IoU-based quality filtering: Only keeps masks with predicted IoU above minimum threshold
+    \item Non-maximum suppression with 70\% overlap threshold to remove redundant masks
+    \item CLIP-based semantic scoring to rank masks by text-image alignment
 \end{itemize}
 
-This multi-instance approach enables the system to naturally handle diverse segmentation scenarios without requiring explicit specification of the expected number of instances.
+This filtering pipeline ensures that only high-quality, semantically relevant masks are retained for final segmentation, balancing coverage with precision.
 
 \subsection{Comprehensive Evaluation Framework}
 
 We established a thorough evaluation protocol on PASCAL VOC 2012, measuring segmentation quality through multiple metrics (mIoU, pixel accuracy, F1 score, precision, recall, boundary F1). Our experiments demonstrate:
 
 \begin{itemize}
-    \item Strong performance on PASCAL VOC, achieving 69.3\% mIoU with multi-scale CLIP voting and multi-instance selection
-    \item Significant improvement (+13.2 percentage points) over existing open-vocabulary methods like MaskCLIP (56.1\% mIoU)
-    \item The multi-scale CLIP voting contributes +6.8\% mIoU over baseline single-scale scoring
-    \item Robust handling of multiple instances, object parts, and varying object sizes through adaptive selection
+    \item Competitive open-vocabulary performance on PASCAL VOC 2012, achieving 59.78\% mIoU with CLIP-guided prompting
+    \item Strong class-specific results: Horse (80.87\%), Cat (80.43\%), Dog (69.55\%)
+    \item High recall (72.91\%) indicating effective prompt extraction and object detection
+    \item 96\% prompt reduction compared to blind grid sampling (50-300 vs 4096 points)
+    \item Comprehensive evaluation across 21 object categories demonstrating zero-shot generalization
 \end{itemize}
 
 \subsection{Practical System Design}
 
-We designed the system with real-world applicability in mind, demonstrating that the approach is viable even on consumer-grade hardware (NVIDIA GeForce GTX 1060 6GB Max-Q). Our primary dense SCLIP + SAM2 approach processes images in 25-35 seconds, while the proposal-based alternative achieves 15-20 seconds per image. This performance, while slower than real-time, remains practical for research applications and offline evaluation on limited hardware budgets.
+We designed the system with real-world applicability in mind, demonstrating that the approach is viable even on consumer-grade hardware (NVIDIA GeForce GTX 1060 6GB Max-Q). Our CLIP-guided prompting approach processes images in 12-33 seconds depending on the number of extracted prompts. This performance, while slower than real-time, remains practical for research applications and offline evaluation on limited hardware budgets.
 
 \section{Discussion and Implications}
 
 \subsection{Open-Vocabulary Paradigm Shift}
 
-Our results support the growing evidence that open-vocabulary approaches represent a fundamental shift in computer vision. Traditional closed-vocabulary methods achieve higher accuracy on their target classes (e.g., Mask2Former: 89.5\% on PASCAL VOC vs. our 69.3\%), but they completely fail on unseen objects. In contrast, our system gracefully handles arbitrary text prompts, making it far more versatile for real-world scenarios where the set of relevant objects cannot be predetermined.
+Our results support the growing evidence that open-vocabulary approaches represent a fundamental shift in computer vision. Traditional closed-vocabulary methods achieve higher accuracy on their target classes (e.g., Mask2Former: 89.5\% on PASCAL VOC vs. our 59.78\%), but they completely fail on unseen objects. In contrast, our system gracefully handles arbitrary text prompts, making it far more versatile for real-world scenarios where the set of relevant objects cannot be predetermined.
 
-The gap between open-vocabulary and closed-vocabulary performance (approximately 20 percentage points on PASCAL VOC) highlights an important research challenge: developing methods that achieve both flexibility and accuracy. However, our multi-scale voting and multi-instance selection strategies demonstrate that this gap is narrowing—improving from a baseline 62.5\% to 69.3\% mIoU represents significant progress toward closing this performance divide.
+The gap between open-vocabulary and closed-vocabulary performance (approximately 30 percentage points on PASCAL VOC) highlights an important research challenge: developing methods that achieve both flexibility and accuracy. However, our intelligent prompting strategy demonstrates progress toward this goal—achieving 59.78\% mIoU with 96\% fewer prompts than blind grid sampling represents significant efficiency gains while maintaining competitive accuracy.
 
 \subsection{Foundation Models as Building Blocks}
 
