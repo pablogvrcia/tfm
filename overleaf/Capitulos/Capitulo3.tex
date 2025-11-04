@@ -88,21 +88,7 @@ F1 = 2 \cdot \frac{\text{Precision} \cdot \text{Recall}}{\text{Precision} + \tex
 
 This metric is particularly useful for open-vocabulary settings where both missing objects (low recall) and false detections (low precision) are problematic.
 
-\subsection{Open-Vocabulary Specific Metrics}
-
-\subsubsection{Zero-Shot mIoU}
-
-We separately report mIoU on novel categories that the system has not been explicitly trained on. This metric directly measures open-vocabulary generalization capability.
-
-\subsubsection{Text-Image Retrieval Accuracy}
-
-For a given text prompt, we measure whether the top-K highest-scoring masks actually correspond to the queried object. This tests the vision-language alignment quality:
-
-\begin{equation}
-\text{Retrieval@K} = \frac{\text{\# correct retrievals in top-K}}{{\# total queries}}
-\end{equation}
-
-\subsection{Generation Quality Metrics}
+\subsection{Generation Quality Metrics (INCOMPLETE)}
 
 \subsubsection{Fréchet Inception Distance (FID)}
 
@@ -210,75 +196,6 @@ Train & 63.65 & Boat & 24.34 \\
     \item \textbf{Good performance}: Large vehicles (Car, Bus, Train) with clear boundaries and metallic appearances
     \item \textbf{Challenging}: Furniture (Chair, Table) shows high variance in design; Person class struggles with pose/clothing diversity
     \item \textbf{Small objects}: Bottle and Bird are difficult due to limited pixels for CLIP feature extraction
-\end{itemize}
-
-\subsection{Generative Editing Results}
-
-\subsubsection{Quantitative Evaluation}
-
-Table~\ref{tab:generation} shows generation quality metrics for inpainting tasks.
-
-\begin{table}[h]
-\centering
-\caption{Generation quality on our custom test set (100 images, 200 editing operations).}
-\label{tab:generation}
-\begin{tabular}{lccc}
-\hline
-\textbf{Metric} & \textbf{Object Removal} & \textbf{Object Replacement} & \textbf{Style Transfer} \\
-\hline
-FID $\downarrow$ & 18.3 & 22.1 & 25.7 \\
-CLIP Score $\uparrow$ & 0.82 & 0.79 & 0.76 \\
-User Rating $\uparrow$ & 4.2/5 & 4.0/5 & 3.8/5 \\
-\hline
-\end{tabular}
-\end{table}
-
-Results indicate:
-\begin{itemize}
-    \item Object removal achieves best quality (lowest FID), as it primarily fills with background
-    \item Object replacement maintains good prompt adherence (CLIP Score $>$ 0.79)
-    \item User ratings confirm perceived quality aligns with automatic metrics
-\end{itemize}
-
-\subsubsection{Qualitative Analysis}
-
-Figure~\ref{fig:qualitative_results} shows representative results across different editing scenarios.
-
-\begin{figure}[p]
-\centering
-\fbox{\parbox{0.95\textwidth}{\centering
-\vspace{1cm}
-\textbf{[PLACEHOLDER: Qualitative Results Grid]}\\[0.5cm]
-\textit{This figure should show a grid of example results with 6 rows and 4 columns:}\\[0.3cm]
-\begin{tabular}{l}
-\textbf{Columns:} Input Image | SAM 2 Masks | Selected Mask + Prompt | Final Result\\[0.2cm]
-\textbf{Row 1 - Object Removal:} Kitchen scene with prompt "wine glass on table"\\
-\quad → Shows mask selection → Glass removed, table filled naturally\\[0.1cm]
-\textbf{Row 2 - Object Replacement:} Living room with prompt "old TV"\\
-\quad → Shows mask selection → TV replaced with "modern flat screen"\\[0.1cm]
-\textbf{Row 3 - Fine-grained Segmentation:} Desk scene with prompt "computer mouse"\\
-\quad → Shows precise mouse segmentation → Successfully isolated\\[0.1cm]
-\textbf{Row 4 - Complex Scene:} Street with prompt "red car parked on left"\\
-\quad → Shows correct car among multiple → Car removed/replaced\\[0.1cm]
-\textbf{Row 5 - Rare Object:} Office with prompt "vintage typewriter"\\
-\quad → Shows zero-shot segmentation → Replaced with "laptop"\\[0.1cm]
-\textbf{Row 6 - Style Transfer:} Outdoor scene with prompt "wooden bench"\\
-\quad → Shows mask selection → Bench styled as "modern metal bench"\\[0.3cm]
-\end{tabular}
-\textit{Use green overlays for correct masks, include CLIP scores on each mask.}\\
-\textit{Ensure final results show seamless blending and realistic inpainting.}
-\vspace{1cm}
-}}
-\caption{Qualitative results demonstrating the system's capabilities across diverse scenarios. Each row shows the complete pipeline from input to final edited image, including intermediate mask selection guided by CLIP similarity scores.}
-\label{fig:qualitative_results}
-\end{figure}
-
-Our system successfully:
-\begin{itemize}
-    \item Segments fine-grained objects (e.g., wine glass, remote control)
-    \item Handles challenging prompts (e.g., ``vintage camera on desk'')
-    \item Generates realistic inpainting with proper lighting and texture
-    \item Maintains coherence between edited and original regions
 \end{itemize}
 
 \subsection{Performance Metrics Summary}
