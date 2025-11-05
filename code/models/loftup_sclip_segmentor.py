@@ -290,15 +290,18 @@ class LoftUpSCLIPSegmentor(SCLIPSegmentor):
         """
         H, W = image.shape[:2]
 
-        # For very large images, use sliding window with LoftUp on smaller crops
-        # This prevents OOM errors
-        # Note: 512px is safe for 15GB GPU, 768px for 24GB GPU
-        max_size = 512  # Maximum dimension for single LoftUp pass
+        # For very large images, disable LoftUp and use bilinear upsampling
+        # LoftUp's cross-attention is too memory-hungry for large images on consumer GPUs
+        # Note: 224px works, 512px causes OOM on 15GB GPU
+        max_size = 224  # Maximum dimension for LoftUp (standard CLIP input size)
 
         if max(H, W) > max_size:
             if self.verbose:
-                print(f"[LoftUp] Image too large ({H}x{W}), using sliding window approach...")
-            return self._forward_with_loftup_sliding(image, class_names, crop_size=max_size)
+                print(f"[LoftUp] Image too large ({H}x{W}) for GPU memory, falling back to bilinear upsampling")
+                print(f"  (LoftUp requires >40GB GPU for images >512px)")
+            # Disable LoftUp and use parent's standard SCLIP approach
+            self.use_loftup = False
+            return self._forward_standard_sclip(image, class_names)
 
         # Preprocess image to normalized tensor
         image_tensor = self.clip_extractor.preprocess_without_resize(image)
@@ -351,6 +354,21 @@ class LoftUpSCLIPSegmentor(SCLIPSegmentor):
         logits = logits_flat.permute(0, 2, 1).reshape(1, num_classes, H_up, W_up)
 
         return logits.squeeze(0), upsampled_features.squeeze(0)  # (num_classes, H, W), (D, H, W)
+
+    def _forward_standard_sclip(
+        self,
+        image: np.ndarray,
+        class_names: List[str]
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Fallback to standard SCLIP without LoftUp upsampling.
+        Uses bilinear upsampling instead of LoftUp.
+        """
+        # Use parent class's sliding window approach
+        logits = self._forward_slide(image, class_names)
+
+        # No upsampled features in standard mode
+        return logits, None
 
     def _forward_with_loftup_sliding(
         self,
