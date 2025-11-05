@@ -292,7 +292,8 @@ class LoftUpSCLIPSegmentor(SCLIPSegmentor):
 
         # For very large images, use sliding window with LoftUp on smaller crops
         # This prevents OOM errors
-        max_size = 1024  # Maximum dimension for single LoftUp pass
+        # Note: 512px is safe for 15GB GPU, 768px for 24GB GPU
+        max_size = 512  # Maximum dimension for single LoftUp pass
 
         if max(H, W) > max_size:
             if self.verbose:
@@ -355,8 +356,8 @@ class LoftUpSCLIPSegmentor(SCLIPSegmentor):
         self,
         image: np.ndarray,
         class_names: List[str],
-        crop_size: int = 1024,
-        stride: int = 768
+        crop_size: int = 512,
+        stride: int = 384
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Memory-efficient sliding window approach for large images.
@@ -372,15 +373,19 @@ class LoftUpSCLIPSegmentor(SCLIPSegmentor):
         features_sum = torch.zeros((D, H, W), dtype=torch.float32)
         count_mat = torch.zeros((H, W), dtype=torch.float32)
 
-        # Compute grid
+        # Compute grid with provided stride
         h_grids = max((H - crop_size) // stride + 1, 1)
         w_grids = max((W - crop_size) // stride + 1, 1)
 
         if self.verbose:
-            print(f"  Processing {h_grids}x{w_grids} = {h_grids*w_grids} crops...")
+            print(f"  Processing {h_grids}x{w_grids} = {h_grids*w_grids} crops (size={crop_size}px, stride={stride}px)...")
 
         for h_idx in range(h_grids):
             for w_idx in range(w_grids):
+                # Aggressive memory clearing before each crop
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+
                 # Calculate crop boundaries
                 y1 = h_idx * stride
                 x1 = w_idx * stride
@@ -392,22 +397,32 @@ class LoftUpSCLIPSegmentor(SCLIPSegmentor):
                 # Extract crop
                 crop = image[y1:y2, x1:x2]
 
-                # Process crop (recursively calls _forward_with_loftup, but crop is small)
-                crop_logits, crop_features = self._forward_with_loftup(crop, class_names)
+                try:
+                    # Process crop (recursively calls _forward_with_loftup, but crop is small)
+                    crop_logits, crop_features = self._forward_with_loftup(crop, class_names)
 
-                # Accumulate results (move to CPU to save GPU memory)
-                logits_sum[:, y1:y2, x1:x2] += crop_logits.cpu()
-                features_sum[:, y1:y2, x1:x2] += crop_features.cpu()
-                count_mat[y1:y2, x1:x2] += 1
+                    # Accumulate results (move to CPU to save GPU memory)
+                    logits_sum[:, y1:y2, x1:x2] += crop_logits.cpu()
+                    features_sum[:, y1:y2, x1:x2] += crop_features.cpu()
+                    count_mat[y1:y2, x1:x2] += 1
 
-                # Clear GPU memory
-                del crop_logits, crop_features
-                torch.cuda.empty_cache()
+                    # Clear GPU memory
+                    del crop_logits, crop_features
 
-                if (h_idx * w_grids + w_idx + 1) % 4 == 0:
+                except RuntimeError as e:
+                    if "out of memory" in str(e):
+                        print(f"\n  ⚠️  OOM on crop {h_idx*w_grids + w_idx + 1}, skipping...")
+                        torch.cuda.empty_cache()
+                        continue
+                    else:
+                        raise e
+
+                if (h_idx * w_grids + w_idx + 1) % 2 == 0 or (h_idx * w_grids + w_idx + 1) == h_grids * w_grids:
                     print(f"    Processed {h_idx * w_grids + w_idx + 1}/{h_grids * w_grids} crops...")
 
         # Average overlapping predictions
+        # Handle case where some crops were skipped
+        count_mat = torch.clamp(count_mat, min=1)  # Avoid division by zero
         logits = logits_sum / count_mat.unsqueeze(0)
         features = features_sum / count_mat.unsqueeze(0)
 
