@@ -290,6 +290,15 @@ class LoftUpSCLIPSegmentor(SCLIPSegmentor):
         """
         H, W = image.shape[:2]
 
+        # For very large images, use sliding window with LoftUp on smaller crops
+        # This prevents OOM errors
+        max_size = 1024  # Maximum dimension for single LoftUp pass
+
+        if max(H, W) > max_size:
+            if self.verbose:
+                print(f"[LoftUp] Image too large ({H}x{W}), using sliding window approach...")
+            return self._forward_with_loftup_sliding(image, class_names, crop_size=max_size)
+
         # Preprocess image to normalized tensor
         image_tensor = self.clip_extractor.preprocess_without_resize(image)
         image_tensor = image_tensor.unsqueeze(0).to(self.device)  # (1, 3, H, W)
@@ -341,6 +350,68 @@ class LoftUpSCLIPSegmentor(SCLIPSegmentor):
         logits = logits_flat.permute(0, 2, 1).reshape(1, num_classes, H_up, W_up)
 
         return logits.squeeze(0), upsampled_features.squeeze(0)  # (num_classes, H, W), (D, H, W)
+
+    def _forward_with_loftup_sliding(
+        self,
+        image: np.ndarray,
+        class_names: List[str],
+        crop_size: int = 1024,
+        stride: int = 768
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Memory-efficient sliding window approach for large images.
+
+        Processes image in overlapping crops to avoid OOM.
+        """
+        H, W = image.shape[:2]
+        num_classes = len(class_names)
+        D = 512  # CLIP embedding dimension
+
+        # Initialize accumulators on CPU to save GPU memory
+        logits_sum = torch.zeros((num_classes, H, W), dtype=torch.float32)
+        features_sum = torch.zeros((D, H, W), dtype=torch.float32)
+        count_mat = torch.zeros((H, W), dtype=torch.float32)
+
+        # Compute grid
+        h_grids = max((H - crop_size) // stride + 1, 1)
+        w_grids = max((W - crop_size) // stride + 1, 1)
+
+        if self.verbose:
+            print(f"  Processing {h_grids}x{w_grids} = {h_grids*w_grids} crops...")
+
+        for h_idx in range(h_grids):
+            for w_idx in range(w_grids):
+                # Calculate crop boundaries
+                y1 = h_idx * stride
+                x1 = w_idx * stride
+                y2 = min(y1 + crop_size, H)
+                x2 = min(x1 + crop_size, W)
+                y1 = max(y2 - crop_size, 0)
+                x1 = max(x2 - crop_size, 0)
+
+                # Extract crop
+                crop = image[y1:y2, x1:x2]
+
+                # Process crop (recursively calls _forward_with_loftup, but crop is small)
+                crop_logits, crop_features = self._forward_with_loftup(crop, class_names)
+
+                # Accumulate results (move to CPU to save GPU memory)
+                logits_sum[:, y1:y2, x1:x2] += crop_logits.cpu()
+                features_sum[:, y1:y2, x1:x2] += crop_features.cpu()
+                count_mat[y1:y2, x1:x2] += 1
+
+                # Clear GPU memory
+                del crop_logits, crop_features
+                torch.cuda.empty_cache()
+
+                if (h_idx * w_grids + w_idx + 1) % 4 == 0:
+                    print(f"    Processed {h_idx * w_grids + w_idx + 1}/{h_grids * w_grids} crops...")
+
+        # Average overlapping predictions
+        logits = logits_sum / count_mat.unsqueeze(0)
+        features = features_sum / count_mat.unsqueeze(0)
+
+        return logits.to(self.device), features.to(self.device)
 
 
 def extract_prompt_points_from_upsampled(
