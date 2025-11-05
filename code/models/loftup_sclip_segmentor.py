@@ -144,9 +144,18 @@ class LoftUpSCLIPSegmentor(SCLIPSegmentor):
             )
 
         with torch.no_grad():
+            # Convert to float32 for LoftUp (it expects float32, not float16)
+            original_dtype = low_res_features.dtype
+            low_res_features_fp32 = low_res_features.float()
+            image_tensor_fp32 = image_tensor.float()
+
             # LoftUp takes: (low_res_features, guidance_image)
             # Returns: (1, D, H, W) upsampled features
-            upsampled_features = self.loftup_upsampler(low_res_features, image_tensor)
+            upsampled_features = self.loftup_upsampler(low_res_features_fp32, image_tensor_fp32)
+
+            # Convert back to original dtype if needed
+            if original_dtype != torch.float32:
+                upsampled_features = upsampled_features.to(original_dtype)
 
         return upsampled_features
 
