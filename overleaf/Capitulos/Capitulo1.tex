@@ -22,36 +22,6 @@ These vision-language innovations laid the groundwork for open-vocabulary segmen
 \section{Open-Vocabulary Semantic Segmentation}
 Open-vocabulary semantic segmentation aims to move beyond fixed taxonomies, enabling the segmentation of arbitrary concepts specified by language prompts. Initial works like zero-shot semantic segmentation \cite{bucher2019zero} connected pixels to semantic embeddings from large language models, but often lacked the rich representation power of contemporary vision-language systems.
 
-\begin{figure}[h]
-\centering
-\fbox{\parbox{0.9\textwidth}{\centering
-\vspace{1cm}
-\textbf{[PLACEHOLDER: Evolution of Segmentation Approaches]}\\[0.5cm]
-\textit{This figure should show timeline/progression of segmentation paradigms:}\\[0.3cm]
-\begin{tabular}{l}
-\textbf{Three columns showing the evolution:}\\[0.2cm]
-\textbf{Column 1 - Closed-Vocabulary (2015-2020):}\\
-\quad Example: FCN, DeepLabV3+, PSPNet\\
-\quad Diagram: Fixed set of classes (20-150 categories)\\
-\quad Input: Image → Output: Segmentation with predefined labels\\
-\quad \textit{Limitation: Cannot segment unseen classes}\\[0.2cm]
-\textbf{Column 2 - Early Open-Vocabulary (2020-2022):}\\
-\quad Example: LSeg, GroupViT, CLIPSeg\\
-\quad Diagram: Image + Text prompt → Vision-Language Model → Segmentation\\
-\quad \textit{Advantage: Zero-shot capability, but lower accuracy}\\[0.2cm]
-\textbf{Column 3 - Modern Hybrid (2023-2024):}\\
-\quad Example: X-Decoder, ODISE, CAT-Seg, Ours\\
-\quad Diagram: Image + Text → Multiple Foundation Models → High-quality segmentation\\
-\quad \textit{Combines: Mask quality + Language flexibility}\\[0.3cm]
-\end{tabular}
-\textit{Use example images showing segmentation results for each paradigm.}\\
-\textit{Include arrows showing progression and key innovations at each stage.}
-\vspace{1cm}
-}}
-\caption{Evolution of semantic segmentation approaches from closed-vocabulary to open-vocabulary paradigms. Modern methods combine the accuracy of specialized models with the flexibility of vision-language understanding.}
-\label{fig:segmentation_evolution}
-\end{figure}
-
 With the advent of CLIP and related models, robust open-vocabulary segmentation became possible. LSeg \cite{li2022language} adapted CLIP embeddings to segmentation, allowing queries for arbitrary textual categories. GroupViT \cite{xu2022groupvit} demonstrated that semantic segmentation capabilities can emerge from text supervision alone, while OpenSeg \cite{ghiasi2022scaling} leveraged large-scale image-level labels to scale open-vocabulary segmentation.
 
 Building on CLIP's success, several methods focused on extracting dense predictions from vision-language models. CLIPSeg \cite{luddecke2022clipseg} enabled segmentation using both text and image prompts by extending CLIP with a transformer-based decoder. MaskCLIP \cite{zhou2022extract} showed that dense labels can be extracted from CLIP without additional training, achieving compelling zero-shot segmentation results. Its extension, MasQCLIP \cite{xu2023masqclip}, further improved performance on universal image segmentation tasks. ZegCLIP \cite{zhang2022zegclip} and OVSeg \cite{liang2023ovseg} explored different strategies for adapting frozen vision-language models to segmentation.

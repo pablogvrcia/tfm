@@ -150,37 +150,9 @@ Improvements could come from:
     \item Post-processing refinement stages that correct common artifacts
 \end{itemize}
 
-\subsection{Computational Requirements}
-
-Although our system achieves acceptable performance (10-20 seconds per image), this latency may still be prohibitive for some applications. The computational bottleneck lies primarily in:
-\begin{itemize}
-    \item SAM 2 mask generation (2-4 seconds)
-    \item Stable Diffusion inpainting (5-10 seconds per mask)
-\end{itemize}
-
-Optimization strategies include:
-\begin{itemize}
-    \item Model quantization and pruning
-    \item Distillation to smaller, faster models
-    \item Reduced diffusion sampling steps (trading quality for speed)
-    \item Hardware acceleration with model-specific optimizations
-\end{itemize}
-
 \section{Future Research Directions}
 
 Building on this work, we identify several promising research directions:
-
-\subsection{Video Segmentation and Editing}
-
-SAM 2's native video capabilities suggest a natural extension to temporal segmentation. Future work could develop a video editing system that:
-\begin{itemize}
-    \item Tracks objects across frames using SAM 2's memory mechanism
-    \item Ensures temporal consistency in edited content
-    \item Supports interactive refinement with minimal user input
-    \item Handles occlusions, disocclusions, and object interactions
-\end{itemize}
-
-Recent video diffusion models (e.g., Runway's Gen-2, Stability AI's Stable Video Diffusion) could replace Stable Diffusion for temporally coherent inpainting.
 
 \subsection{3D Scene Understanding and Manipulation}
 

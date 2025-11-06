@@ -292,7 +292,7 @@ Building on the Vision Transformer and CLIP foundations, this section explains h
 \begin{equation}
 I_{\text{norm}} = \frac{I / 255 - \mu}{\sigma}
 \end{equation}
-where $\mu = [0.48145466, 0.4578275, 0.40821073]$ and $\sigma = [0.26862954, 0.26130258, 0.27577711]$ are CLIP's standard normalization parameters.
+where $\mu$ and $\sigma$ are CLIP's standard ImageNet normalization parameters (mean and standard deviation per RGB channel).
 
 \textbf{Patch Embedding:} The normalized image is divided into non-overlapping patches of size $P \times P$ (ViT-B/16 uses $P=16$):
 \begin{equation}
@@ -498,65 +498,6 @@ P_{x,y,c} = \frac{\exp(L_{x,y,c})}{\sum_{c'=1}^{C} \exp(L_{x,y,c'})}
 
 This produces the final dense segmentation mask $\hat{c} \in \mathbb{R}^{H \times W}$ where each pixel is assigned a class index.
 
-\subsubsection{Visual Summary: SCLIP Dense Feature Extraction Flowchart}
-
-\begin{figure}[!h]
-\centering
-\fbox{\parbox{0.95\textwidth}{\centering
-\vspace{0.5cm}
-\textbf{SCLIP Dense Feature Extraction Pipeline}\\[0.4cm]
-
-\begin{tabular}{l}
-\textbf{[1] Input Image} \\
-\quad $I \in \mathbb{R}^{224 \times 224 \times 3}$ \\
-\quad $\downarrow$ \textit{Normalize, Divide into 16×16 patches} \\[0.2cm]
-
-\textbf{[2] Patch Embeddings + Positional Encoding} \\
-\quad $X_0 \in \mathbb{R}^{197 \times 512}$ \quad (196 patches + 1 CLS token) \\
-\quad $\downarrow$ \textit{Add learnable position embeddings} \\[0.2cm]
-
-\textbf{[3] Transformer Layers 1-11: Standard Attention} \\
-\quad For $\ell = 1, \ldots, 11$: \\
-\quad \quad $A_h = \text{softmax}(\frac{Q_h K_h^T}{\sqrt{d_h}})$ \quad \textit{(Standard attention)} \\
-\quad \quad $X_{\ell} = X_{\ell-1} + \text{MHSA}(X_{\ell-1}) + \text{MLP}(\cdots)$ \\
-\quad $\downarrow$ \\[0.2cm]
-
-\textbf{[4] Transformer Layer 12: Cross-layer Self-Attention (CSA)} \\
-\quad \colorbox{yellow!30}{$A_h^{\text{CSA}} = \text{softmax}(\frac{Q_h Q_h^T + K_h K_h^T}{\sqrt{d_h}})$} \quad \textit{\textbf{KEY INNOVATION}} \\
-\quad $X_{12} = X_{11} + \text{CSA}(X_{11}) + \text{MLP}(\cdots)$ \\
-\quad $\downarrow$ \\[0.2cm]
-
-\textbf{[5] Extract Dense Patch Features} \\
-\quad Remove CLS: $F_{\text{patch}} = X_{12}[1:, :] \in \mathbb{R}^{196 \times 512}$ \\
-\quad Reshape: $F_{\text{spatial}} \in \mathbb{R}^{14 \times 14 \times 512}$ \\
-\quad Normalize: $F_{\text{norm}}[i,j,:] = F[i,j,:] / \|F[i,j,:]\|_2$ \\
-\quad $\downarrow$ \\[0.2cm]
-
-\textbf{[6] Text Encoding (Parallel Branch)} \\
-\quad Classes: ["car", "road", "background"] \\
-\quad Prompt ensemble: "a photo of a car", "car in the scene", \ldots \\
-\quad $e_c \in \mathbb{R}^{512}$ \quad (normalized text embedding per class) \\
-\quad $\downarrow$ \\[0.2cm]
-
-\textbf{[7] Compute Similarity} \\
-\quad $S_{i,j,c} = F_{\text{norm}}[i,j,:] \cdot e_c$ \quad $\in \mathbb{R}^{14 \times 14 \times C}$ \\
-\quad $\downarrow$ \textit{Upsample to original resolution (bilinear)} \\[0.2cm]
-
-\textbf{[8] Dense Prediction} \\
-\quad Apply temperature: $L = S \times 40.0$ \\
-\quad Softmax: $P = \text{softmax}(L)$ \\
-\quad Argmax: $\hat{c}(x,y) = \arg\max_c P_{x,y,c}$ \\[0.2cm]
-
-\textbf{[Output] Dense Segmentation Mask} \\
-\quad $\hat{c} \in \mathbb{R}^{H \times W}$ \quad (class index per pixel) \\
-\end{tabular}
-
-\vspace{0.5cm}
-}}
-\caption{Complete flowchart of SCLIP's dense feature extraction pipeline. The key innovation is Cross-layer Self-Attention (CSA) in the final transformer layer (highlighted), which uses $Q_h Q_h^T + K_h K_h^T$ instead of standard $Q_h K_h^T$ to produce spatially coherent features for dense prediction.}
-\label{fig:sclip_flowchart}
-\end{figure}
-
 \subsubsection{Summary and Implementation Considerations}
 
 \begin{enumerate}
@@ -576,25 +517,150 @@ This produces the final dense segmentation mask $\hat{c} \in \mathbb{R}^{H \time
 
 \subsection{Intelligent Prompt Extraction}
 
-Our key contribution is intelligent prompt extraction that uses SCLIP's semantic understanding to guide SAM2 prompting, achieving massive efficiency gains without sacrificing accuracy.
+Our key contribution is intelligent prompt extraction that uses SCLIP's semantic understanding to guide SAM2 prompting, achieving massive efficiency gains without sacrificing accuracy. This section details the complete pipeline from SCLIP's dense predictions to semantically meaningful prompt points.
 
-\subsubsection{Prompt Extraction Strategy}
+\subsubsection{Motivation: From Dense Predictions to Sparse Prompts}
 
-Instead of blindly prompting SAM2 at thousands of grid points (e.g., 64×64 = 4096 points), we extract 50-300 semantically meaningful prompts from SCLIP's predictions:
+Naive approaches to combining CLIP with SAM often use exhaustive grid sampling: prompting SAM at every point in a dense grid (e.g., 64×64 = 4096 points) and using CLIP to classify the resulting masks. This has two major drawbacks:
 
-\begin{enumerate}
-    \item \textbf{Connected Components Analysis:} For each predicted class, identify connected regions in SCLIP's dense prediction using morphological operations
+\begin{itemize}
+    \item \textbf{Computational inefficiency:} Generating 4096 SAM masks per image is prohibitively expensive (minutes per image even on modern GPUs)
+    \item \textbf{Semantic blindness:} Grid points are placed uniformly without considering object locations, wasting computation on background regions
+\end{itemize}
 
-    \item \textbf{Confidence Filtering:} Filter regions by CLIP confidence threshold (default: 0.3) to focus on high-certainty predictions
+Our intelligent extraction inverts this paradigm: we first run SCLIP to identify \textit{where} objects are likely to exist, then prompt SAM2 only at those semantically meaningful locations. This achieves a 96\% reduction in prompts (50-300 vs 4096) while maintaining competitive accuracy.
 
-    \item \textbf{Size Filtering:} Remove regions smaller than minimum size threshold (default: 100 pixels) to avoid spurious detections
+\subsubsection{Complete Prompt Extraction Pipeline}
 
-    \item \textbf{Centroid Extraction:} Extract centroids from each valid connected component as prompt points with associated class labels
+Given SCLIP's dense prediction outputs from the previous stage:
+\begin{itemize}
+    \item Segmentation map: $\hat{c} \in \mathbb{R}^{H \times W}$ (predicted class per pixel)
+    \item Probability map: $P \in \mathbb{R}^{H \times W \times C}$ (confidence scores for $C$ classes)
+\end{itemize}
 
-    \item \textbf{Metadata Storage:} Store confidence score, region size, and class label for each prompt point
-\end{enumerate}
+We extract semantically meaningful prompt points through the following five-stage pipeline:
 
-This intelligent extraction achieves 96\% reduction in prompts (from 4096 to 50-300) while maintaining competitive accuracy by focusing SAM2 on semantically meaningful locations.
+\paragraph{Stage 1: Per-Class Confidence Masking}
+
+For each class $c \in \{1, \ldots, C\}$, we create a binary confidence mask identifying high-certainty regions:
+
+\begin{equation}
+M_c^{\text{conf}}(x,y) = \begin{cases}
+1 & \text{if } \hat{c}(x,y) = c \text{ and } P_{x,y,c} > \tau_{\text{conf}} \\
+0 & \text{otherwise}
+\end{cases}
+\end{equation}
+
+where $\tau_{\text{conf}}$ is the confidence threshold (typically 0.7). This filters out low-confidence predictions that may be noise or ambiguous regions. The threshold is deliberately set high to ensure SAM2 prompts are placed only at locations where CLIP has strong semantic evidence.
+
+\paragraph{Stage 2: Connected Component Analysis}
+
+For each class's confidence mask $M_c^{\text{conf}}$, we apply connected component labeling to identify spatially disjoint object instances. This clustering step groups adjacent pixels belonging to the same semantic class into discrete regions:
+
+\begin{equation}
+\text{CC}(M_c^{\text{conf}}) \rightarrow \{R_c^1, R_c^2, \ldots, R_c^{N_c}\}
+\end{equation}
+
+where $R_c^i \subseteq \{(x,y) : M_c^{\text{conf}}(x,y) = 1\}$ represents the $i$-th connected region for class $c$.
+
+We use 8-connectivity (considering diagonal neighbors) to ensure that objects touching at corners are grouped together. This connected component analysis efficiently identifies disjoint regions using standard graph-based labeling algorithms.
+
+\textbf{Why clustering matters:} Without clustering, all pixels of class "car" would be treated as a single object. Clustering separates individual car instances, allowing SAM2 to generate distinct masks for each vehicle. For example, a street scene with 5 cars produces 5 separate connected components, each receiving its own prompt point.
+
+\paragraph{Stage 3: Region Filtering by Size}
+
+Many connected components are spurious detections (noise, texture patterns, shadows) that happen to exceed the confidence threshold locally. We filter these using a minimum region size criterion:
+
+\begin{equation}
+\text{Keep } R_c^i \text{ if } |R_c^i| > \tau_{\text{area}}
+\end{equation}
+
+where $|R_c^i|$ denotes the number of pixels in region $R_c^i$, and $\tau_{\text{area}}$ is the minimum area threshold (typically 100 pixels).
+
+This size filtering serves multiple purposes:
+\begin{itemize}
+    \item Removes noise and artifacts from SCLIP predictions
+    \item Focuses computation on salient objects rather than tiny regions
+    \item Prevents SAM2 from being distracted by spurious high-confidence pixels
+\end{itemize}
+
+For a 224×224 image (50,176 pixels), a threshold of 100 pixels means we ignore regions smaller than 0.2\% of the image area, which is reasonable for most semantic segmentation tasks.
+
+\paragraph{Stage 4: Centroid Computation}
+
+For each valid connected component $R_c^i$, we extract a representative prompt point by computing the spatial centroid:
+
+\begin{equation}
+\mathbf{p}_c^i = (\bar{x}_c^i, \bar{y}_c^i) = \left( \frac{1}{|R_c^i|} \sum_{(x,y) \in R_c^i} x, \frac{1}{|R_c^i|} \sum_{(x,y) \in R_c^i} y \right)
+\end{equation}
+
+The centroid represents the geometric center of the region and typically falls near the object's interior, making it an ideal point prompt for SAM2. Unlike random sampling or boundary-based selection, centroids are:
+\begin{itemize}
+    \item \textbf{Stable:} Robust to minor segmentation boundary variations
+    \item \textbf{Interior:} Likely to fall inside the object rather than on edges
+    \item \textbf{Representative:} Capture the region's spatial extent
+\end{itemize}
+
+We round centroid coordinates to the nearest integer pixel location: $\mathbf{p}_c^i = (\text{round}(\bar{x}_c^i), \text{round}(\bar{y}_c^i))$.
+
+\paragraph{Stage 5: Prompt Metadata Aggregation}
+
+For each extracted prompt point $\mathbf{p}_c^i$, we aggregate metadata to inform downstream processing:
+
+\begin{equation}
+\text{Prompt}_c^i = \{
+\mathbf{p}_c^i, \quad c, \quad \text{conf}_c^i, \quad |R_c^i|
+\}
+\end{equation}
+
+where:
+\begin{itemize}
+    \item $\mathbf{p}_c^i \in \mathbb{R}^2$: Centroid coordinates $(x, y)$
+    \item $c \in \{1, \ldots, C\}$: Class index (e.g., 1="car", 2="person")
+    \item $\text{conf}_c^i = P_{\bar{x}_c^i, \bar{y}_c^i, c}$: CLIP confidence at centroid
+    \item $|R_c^i| \in \mathbb{N}$: Region area in pixels
+\end{itemize}
+
+This metadata serves multiple purposes:
+\begin{itemize}
+    \item Class index $c$ enables direct class assignment to SAM2 masks (explained in next section)
+    \item Confidence score allows prioritizing high-certainty prompts during processing
+    \item Region size can be used for overlap resolution (larger regions take precedence)
+\end{itemize}
+
+\subsubsection{Algorithm Summary and Efficiency Analysis}
+
+The complete prompt extraction algorithm processes all classes in parallel:
+
+\begin{equation}
+\text{Prompts} = \bigcup_{c=1}^{C} \left\{ \text{Prompt}_c^i : R_c^i \text{ valid after filtering} \right\}
+\end{equation}
+
+\textbf{Typical prompt counts:} For Pascal VOC 2012 images with 21 classes (20 objects + background), we extract:
+\begin{itemize}
+    \item \textbf{Simple scenes:} 50-100 prompts (sparse objects, large background regions)
+    \item \textbf{Complex scenes:} 200-300 prompts (multiple object instances per class)
+    \item \textbf{Average:} $\sim$150 prompts per image
+\end{itemize}
+
+\textbf{Efficiency gains:} Compared to 64×64 grid sampling (4096 prompts):
+\begin{equation}
+\text{Reduction} = 1 - \frac{150}{4096} = 96.3\%
+\end{equation}
+
+This 27× reduction in SAM2 queries translates directly to 27× speedup in mask generation, enabling practical deployment on consumer hardware.
+
+\subsubsection{Hyperparameter Selection}
+
+Two key hyperparameters control the prompt extraction process:
+
+\begin{itemize}
+    \item \textbf{Confidence threshold $\tau_{\text{conf}}$:} Higher values (0.7-0.9) produce fewer but higher-quality prompts by requiring strong CLIP evidence. Lower values (0.3-0.5) increase recall at the cost of more false positives. We use 0.7 as default, balancing precision and recall.
+
+    \item \textbf{Minimum area $\tau_{\text{area}}$:} Larger values (200-500) filter more aggressively, reducing noise but potentially missing small objects. Smaller values (50-100) retain more detections but include spurious regions. We use 100 pixels as default, appropriate for objects of interest in most semantic segmentation benchmarks.
+\end{itemize}
+
+These thresholds can be adjusted based on application requirements: surveillance systems may prefer high recall (lower thresholds), while precision-critical applications (medical imaging) may demand higher thresholds.
 
 \subsubsection{Direct Class Assignment}
 
@@ -616,31 +682,180 @@ SAM2 generates a high-quality instance mask $M_i$ at prompt $p_i$, and we direct
 
 \subsection{Extension to Video Segmentation}
 
-While our primary focus is on image segmentation evaluated on Pascal VOC 2012, our CLIP-guided prompting approach naturally extends to video segmentation by leveraging SAM2's native video tracking capabilities.
+While our primary focus is on image segmentation evaluated on Pascal VOC 2012, our CLIP-guided prompting approach naturally extends to video segmentation by leveraging SAM2's native video tracking capabilities. This extension demonstrates that intelligent semantic guidance can be applied to temporal data while maintaining efficiency and requiring only first-frame analysis.
 
-\subsubsection{Video Segmentation Pipeline}
+\subsubsection{SAM2 Video Architecture}
 
-SAM2 includes a video predictor with temporal propagation that tracks objects across frames using a memory-based architecture. Our extension to video follows this workflow:
+SAM2 \cite{ravi2024sam2} extends the original Segment Anything Model to video by introducing a memory-based architecture for temporal consistency. The key innovation is a streaming memory mechanism that maintains object identity across frames without requiring per-frame segmentation.
+
+The video predictor operates through three main components:
 
 \begin{enumerate}
-    \item \textbf{First frame analysis:} Run SCLIP dense prediction on frame 0 to identify objects and their locations
-    \item \textbf{Prompt extraction:} Extract 50-300 semantic prompt points from high-confidence CLIP regions (same as image pipeline)
-    \item \textbf{SAM2 video initialization:} Initialize SAM2 video predictor with prompts on frame 0
-    \item \textbf{Temporal propagation:} SAM2 automatically tracks objects across all frames using its memory mechanism
-    \item \textbf{Video generation:} Render segmented video with colored mask overlays
+    \item \textbf{Image encoder:} Processes individual frames to extract visual features (inherited from SAM)
+    \item \textbf{Memory attention:} Maintains a memory bank of object features from previous frames
+    \item \textbf{Mask decoder:} Generates segmentation masks using current frame features and memory context
 \end{enumerate}
+
+This architecture enables SAM2 to propagate segmentation masks across video frames by:
+\begin{itemize}
+    \item Storing high-confidence predictions in memory banks
+    \item Retrieving relevant memories when processing subsequent frames
+    \item Adapting to object appearance changes through continuous memory updates
+    \item Handling temporary occlusions by relying on memory-based predictions
+\end{itemize}
+
+\subsubsection{CLIP-Guided Video Segmentation Pipeline}
+
+Our video segmentation approach combines CLIP's semantic understanding for initial object detection with SAM2's temporal tracking for frame-to-frame propagation. The complete pipeline consists of five stages:
+
+\paragraph{Stage 1: First Frame Extraction and CLIP Analysis}
+
+We begin by extracting the first frame (frame 0) from the input video. This frame is converted to RGB color space to match CLIP's expected input format.
+
+SCLIP dense prediction is then applied to frame 0 with the user-provided vocabulary (e.g., ["horse", "rider", "motorcycle", "person"]). This produces:
+\begin{itemize}
+    \item Segmentation map: $(H \times W)$ pixel-wise class predictions
+    \item Probability map: $(H \times W \times C)$ confidence scores for each of $C$ classes
+\end{itemize}
+
+This first-frame analysis is the \textit{only} time CLIP processes the video, making the approach computationally efficient compared to per-frame dense prediction.
+
+\paragraph{Stage 2: Semantic Prompt Extraction}
+
+Using the same intelligent prompting strategy as our image pipeline, we extract 50-300 semantic prompt points from high-confidence CLIP regions on frame 0. For each detected object class:
+
+\begin{enumerate}
+    \item Identify high-confidence regions: pixels where $p(c|x) > \tau_{\text{conf}}$ (typically $\tau_{\text{conf}} = 0.7$)
+    \item Find connected components using binary morphological operations
+    \item Filter regions by minimum size: $\text{area}(R) > \tau_{\text{area}}$ (typically $\tau_{\text{area}} = 100$ pixels)
+    \item Extract centroid coordinates as prompt points: $\mathbf{p}_i = (\bar{x}_i, \bar{y}_i)$
+    \item Associate each prompt with its class index and confidence score
+\end{enumerate}
+
+Each extracted prompt contains:
+\begin{itemize}
+    \item Spatial coordinates: $(x, y)$ pixel location
+    \item Class identifier: Integer index (used as SAM2 object ID)
+    \item Class label: Human-readable semantic label
+    \item Confidence score: CLIP confidence at the centroid
+    \item Region size: Pixel area of the detected region
+\end{itemize}
+
+\paragraph{Stage 3: SAM2 Video Predictor Initialization}
+
+We initialize SAM2's video predictor with the following configuration:
+
+\begin{itemize}
+    \item \textbf{Model:} SAM2 Hiera-Large architecture
+    \item \textbf{Video loading:} Video frames offloaded to CPU RAM to conserve GPU memory
+    \item \textbf{State management:} Intermediate states maintained on CPU between frame processing
+\end{itemize}
+
+The predictor initializes an inference state containing:
+\begin{itemize}
+    \item Video metadata: number of frames, resolution, frame rate
+    \item Memory banks: initially empty, populated during propagation
+    \item Object registry: maps object IDs to their tracking states
+\end{itemize}
+
+For each extracted prompt point $\mathbf{p}_i$ with class index $c_i$, we register it as a foreground point on frame 0. This associates the spatial location with the object class, using the class index as the unique object identifier for temporal tracking across the video.
+
+\paragraph{Stage 4: Temporal Mask Propagation}
+
+Once all prompts are registered on frame 0, SAM2 propagates masks across the entire video using its memory-based tracking mechanism. The propagation proceeds as follows:
+
+\begin{enumerate}
+    \item \textbf{Frame encoding:} Each frame $I_t$ is processed by the image encoder to produce visual features $\mathbf{f}_t$
+
+    \item \textbf{Memory retrieval:} For each tracked object, SAM2 retrieves relevant memories from previous frames using cross-attention:
+    \[
+    \mathbf{m}_t = \text{Attention}(\mathbf{q}_t, \{\mathbf{k}_1, \ldots, \mathbf{k}_{t-1}\}, \{\mathbf{v}_1, \ldots, \mathbf{v}_{t-1}\})
+    \]
+    where $\mathbf{q}_t$ is the current frame query, and $\{\mathbf{k}_i, \mathbf{v}_i\}$ are memory key-value pairs from previous frames.
+
+    \item \textbf{Mask prediction:} The mask decoder combines current features $\mathbf{f}_t$ and retrieved memories $\mathbf{m}_t$ to predict object masks:
+    \[
+    M_t^{(i)} = \text{Decoder}(\mathbf{f}_t, \mathbf{m}_t^{(i)})
+    \]
+
+    \item \textbf{Memory update:} High-confidence predictions are stored in the memory bank for future reference
+\end{enumerate}
+
+The propagation iterates through all video frames, applying this process sequentially. For each frame, binary masks are obtained by thresholding the mask logits at zero, yielding segmentation masks for all tracked objects across the entire video.
+
+\paragraph{Stage 5: Video Rendering and Output}
+
+The final stage generates a visualization video by overlaying colored segmentation masks on the original frames:
+
+\begin{enumerate}
+    \item \textbf{Frame reading:} Original video frames are read sequentially
+
+    \item \textbf{Mask overlay:} For each frame $t$ and object $i$, we blend the mask with a distinct color:
+    \[
+    I'_t(x,y) = \begin{cases}
+    0.5 \cdot I_t(x,y) + 0.5 \cdot \mathbf{c}_i & \text{if } M_t^{(i)}(x,y) = 1 \\
+    I_t(x,y) & \text{otherwise}
+    \end{cases}
+    \]
+    where $\mathbf{c}_i$ is a distinct RGB color assigned to class $i$ using a curated color palette with visually distinguishable hues.
+
+    \item \textbf{Label rendering:} Class names are rendered at object centroids with high-contrast text for visibility across different backgrounds
+
+    \item \textbf{Video encoding:} Frames are encoded using H.264 codec with standard YUV420p pixel format for universal compatibility. We use perceptually lossless quality settings with optimized file structure for streaming playback across web browsers and media players.
+\end{enumerate}
+
+\subsubsection{Memory Efficiency Optimizations}
+
+Video processing presents significant memory challenges, especially on consumer GPUs with limited VRAM (e.g., GTX 1060 6GB). We implement several optimizations to enable video segmentation within these constraints:
+
+\paragraph{CPU Offloading}
+
+SAM2's video predictor supports offloading video frames and intermediate states to CPU RAM rather than keeping everything in GPU VRAM. Specifically:
+
+\begin{itemize}
+    \item \textbf{Video frame offloading:} Raw video frames are stored on CPU and loaded to GPU only when needed for processing. This prevents VRAM saturation when processing long videos.
+
+    \item \textbf{State offloading:} Intermediate computation states (attention maps, memory banks) are maintained on CPU between frames, with only active states loaded to GPU during processing.
+\end{itemize}
+
+While this strategy increases CPU-GPU data transfer overhead, it enables processing videos that would otherwise exceed the 6GB VRAM capacity of our consumer-grade hardware.
+
+\paragraph{Temporary Frame Storage}
+
+During video rendering, segmented frames are saved as temporary PNG files in a dedicated directory rather than kept in memory. This prevents RAM exhaustion on long videos. After FFmpeg encoding completes, the temporary directory is automatically cleaned up to free disk space.
+
+\paragraph{Single-Pass Processing}
+
+Unlike approaches that require multiple passes over the video (e.g., optical flow initialization + refinement), our pipeline processes each frame exactly once during the propagation stage, minimizing I/O and memory overhead.
 
 \subsubsection{Implementation Considerations}
 
-\textbf{Memory efficiency:} Video processing uses CPU offloading to handle GPU memory constraints. SAM2's video predictor supports \texttt{offload\_video\_to\_cpu=True} and \texttt{offload\_state\_to\_cpu=True} flags to keep video frames and intermediate states on CPU, enabling processing on consumer-grade GPUs (e.g., GTX 1060 6GB).
+\textbf{One-time CLIP analysis:} Unlike per-frame dense prediction methods that run CLIP on every frame, our approach performs semantic analysis only on frame 0. SAM2's memory-based tracking handles temporal propagation, making video segmentation as efficient as image segmentation (plus video encoding overhead).
 
-\textbf{One-time CLIP analysis:} Unlike per-frame dense prediction, CLIP analysis is performed only on the first frame. SAM2's temporal tracking propagates the identified objects across all subsequent frames, making video segmentation efficient.
+\textbf{Object ID assignment:} We use CLIP class indices as SAM2 object IDs. This creates a direct mapping between semantic classes and tracked objects. All instances of the same class (e.g., multiple "person" objects) are tracked under the same ID, which is suitable for class-level segmentation but does not distinguish individual instances.
 
-\textbf{Limitation - No video inpainting:} While mask generation works for videos, we do not implement video inpainting due to computational resource constraints. Video diffusion models (e.g., Stable Video Diffusion) require significantly more GPU memory and processing time than single-frame inpainting, making them impractical on our hardware setup (GTX 1060 6GB).
+\textbf{Limitation - No video inpainting:} While mask generation works for videos, we do not implement video inpainting due to computational resource constraints. Video diffusion models (e.g., Stable Video Diffusion) require significantly more GPU memory (typically 12-24GB VRAM) and processing time (minutes per frame) than single-frame inpainting, making them impractical on our hardware setup (GTX 1060 6GB with only 6GB VRAM).
 
-\subsubsection{Video Examples}
+\textbf{Encoding compatibility:} We deliberately choose H.264 codec with YUV420p pixel format and faststart flag to ensure output videos are universally playable across platforms (web browsers, mobile devices, media players) and support efficient streaming playback.
 
-We demonstrate video segmentation on sports footage (MotoGP racing, NBA basketball) where CLIP identifies specific riders/players by name (e.g., "Valentino Rossi", "Stephen Curry") and SAM2 tracks them consistently across frames. Video outputs are encoded with H.264 codec and faststart flag for universal compatibility and streaming.
+\subsubsection{Video Examples and Applications}
+
+We demonstrate video segmentation on sports footage (MotoGP racing, NBA basketball) where CLIP identifies specific riders/players by name (e.g., "Valentino Rossi", "Stephen Curry") and SAM2 tracks them consistently across frames. Example vocabularies include:
+
+\begin{itemize}
+    \item \textbf{MotoGP:} ["motorcycle", "rider", "track", "tire barrier", "Valentino Rossi"]
+    \item \textbf{NBA:} ["basketball player", "basketball", "court", "hoop", "Stephen Curry", "LeBron James"]
+\end{itemize}
+
+The system successfully tracks these objects through camera motion, pose changes, and partial occlusions, demonstrating the robustness of SAM2's memory-based approach when initialized with semantically meaningful CLIP-guided prompts.
+
+This video extension enables applications such as:
+\begin{itemize}
+    \item Automated sports highlights generation (tracking specific players/teams)
+    \item Video surveillance (detecting and tracking people/vehicles by description)
+    \item Content-based video retrieval (finding frames containing described objects)
+    \item Video dataset annotation (semi-automated labeling with human verification)
+\end{itemize}
 
 \subsection{Generative Editing Integration}
 
