@@ -556,13 +556,17 @@ def main():
     if is_video:
         print(f"Detected video input: {args.image}")
 
-        # Check for unsupported features
+        # Check for mask generation modes
         if args.edit in ["replace", "remove"] or args.use_inpainting:
-            print("\nWARNING: Video inpainting/editing is not yet supported!")
-            print("Only segmentation visualization is available for videos.")
-            print("Use --edit segment (default) for video segmentation.\n")
-            if args.edit != "segment":
+            # For these modes, we'll generate a B/W mask based on --edit-prompt
+            if not args.prompt:
+                print("\nERROR: --prompt is required for replace/remove/inpainting modes")
+                print("Specify which object to mask using --prompt <class_name>")
                 return
+
+            print(f"\nGenerating B/W mask for '{args.prompt}' in video mode...")
+            print("Note: Full video inpainting/editing is not yet supported.")
+            print("This will generate a mask for the first frame.\n")
 
         # Extract first frame for CLIP analysis
         print("Extracting first frame for CLIP analysis...")
@@ -612,38 +616,104 @@ def main():
 
     # Handle video vs image differently
     if is_video:
-        print("\n" + "="*50)
-        print("STEP 3: SAM2 Video Segmentation")
-        print("="*50)
+        # Check if we're in mask generation mode
+        if args.edit in ["replace", "remove"] or args.use_inpainting:
+            print("\n" + "="*50)
+            print("STEP 3: Generate B/W Mask Video")
+            print("="*50)
 
-        # Initialize video segmentor
-        video_segmentor = CLIPGuidedVideoSegmentor(
-            checkpoint_path=args.checkpoint,
-            model_cfg=args.model_cfg,
-            device=args.device
-        )
+            # Initialize video segmentor to track object across all frames
+            video_segmentor = CLIPGuidedVideoSegmentor(
+                checkpoint_path=args.checkpoint,
+                model_cfg=args.model_cfg,
+                device=args.device
+            )
 
-        # Determine output path (change extension to .mp4)
-        output_path = args.output
-        if not output_path.endswith('.mp4'):
-            output_path = output_path.rsplit('.', 1)[0] + '.mp4'
+            # Filter prompts to only track the target class
+            filtered_prompts = [p for p in prompts if p['class_name'] == args.prompt]
 
-        # Segment video
-        video_segments = video_segmentor.segment_video(
-            video_path=args.image,
-            prompts=prompts,
-            output_path=output_path,
-            visualize=True
-        )
+            if len(filtered_prompts) == 0:
+                print(f"\nWARNING: No prompts found for target class '{args.prompt}'")
+                return
 
-        print(f"\n{'='*50}")
-        print("VIDEO SEGMENTATION COMPLETE!")
-        print(f"{'='*50}")
-        print(f"Output saved to: {output_path}")
-        print(f"Tracked {len(prompts)} objects across video")
+            print(f"\nTracking {len(filtered_prompts)} instances of '{args.prompt}' across video")
 
-        # Statistics
-        print_statistics_video(video_segments, prompts)
+            # Generate output filename for mask video
+            base_name = args.output.rsplit('.', 1)[0]
+            mask_output = f"{base_name}_mask_{args.prompt}.mp4"
+
+            # Segment video and generate mask video
+            video_segments = video_segmentor.segment_video(
+                video_path=args.image,
+                prompts=filtered_prompts,
+                output_path=mask_output,
+                visualize=False  # We'll create custom mask visualization
+            )
+
+            # Create B/W mask video from segmentation results
+            print("\nGenerating B/W mask video...")
+            cap = cv2.VideoCapture(args.image)
+            fps = cap.get(cv2.CAP_PROP_FPS)
+            width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+            height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+            cap.release()
+
+            # Create video writer for mask
+            fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+            mask_writer = cv2.VideoWriter(mask_output, fourcc, fps, (width, height), isColor=False)
+
+            # Generate mask frames
+            for frame_idx in sorted(video_segments.keys()):
+                masks = video_segments[frame_idx]
+
+                # Combine all masks for this frame
+                combined_mask = np.zeros((height, width), dtype=np.uint8)
+                for obj_id, mask in masks.items():
+                    if mask.sum() > 0:  # Only if mask has content
+                        combined_mask = np.maximum(combined_mask, (mask.astype(np.uint8) * 255))
+
+                mask_writer.write(combined_mask)
+
+            mask_writer.release()
+            print(f"\nSaved B/W mask video to {mask_output}")
+
+            # Statistics
+            print_statistics_video(video_segments, filtered_prompts)
+
+        else:
+            # Normal video segmentation mode
+            print("\n" + "="*50)
+            print("STEP 3: SAM2 Video Segmentation")
+            print("="*50)
+
+            # Initialize video segmentor
+            video_segmentor = CLIPGuidedVideoSegmentor(
+                checkpoint_path=args.checkpoint,
+                model_cfg=args.model_cfg,
+                device=args.device
+            )
+
+            # Determine output path (change extension to .mp4)
+            output_path = args.output
+            if not output_path.endswith('.mp4'):
+                output_path = output_path.rsplit('.', 1)[0] + '.mp4'
+
+            # Segment video
+            video_segments = video_segmentor.segment_video(
+                video_path=args.image,
+                prompts=prompts,
+                output_path=output_path,
+                visualize=True
+            )
+
+            print(f"\n{'='*50}")
+            print("VIDEO SEGMENTATION COMPLETE!")
+            print(f"{'='*50}")
+            print(f"Output saved to: {output_path}")
+            print(f"Tracked {len(prompts)} objects across video")
+
+            # Statistics
+            print_statistics_video(video_segments, prompts)
 
     else:
         # Image segmentation (original workflow)
