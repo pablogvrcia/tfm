@@ -668,18 +668,31 @@ def main():
 
             try:
                 # Generate mask frames and save as images
-                for frame_idx in sorted(video_segments.keys()):
+                # Use sequential numbering starting from 0 for ffmpeg
+                for seq_idx, frame_idx in enumerate(sorted(video_segments.keys())):
                     masks = video_segments[frame_idx]
 
                     # Combine all masks for this frame
                     combined_mask = np.zeros((height, width), dtype=np.uint8)
                     for obj_id, mask in masks.items():
                         if mask.sum() > 0:  # Only if mask has content
-                            combined_mask = np.maximum(combined_mask, (mask.astype(np.uint8) * 255))
+                            # Ensure mask is the right size and type
+                            mask_resized = mask.astype(bool)
+                            if mask_resized.shape != (height, width):
+                                print(f"Warning: mask shape {mask_resized.shape} doesn't match video dimensions ({height}, {width})")
+                                continue
+                            combined_mask = np.maximum(combined_mask, (mask_resized.astype(np.uint8) * 255))
 
-                    # Save as PNG
-                    frame_path = f"{temp_dir}/frame_{frame_idx:06d}.png"
-                    cv2.imwrite(frame_path, combined_mask)
+                    # Verify combined_mask shape before saving
+                    if combined_mask.shape != (height, width):
+                        print(f"Error: combined_mask shape {combined_mask.shape} doesn't match expected ({height}, {width})")
+                        continue
+
+                    # Save as PNG with sequential numbering starting from 0
+                    frame_path = f"{temp_dir}/frame_{seq_idx:06d}.png"
+                    success = cv2.imwrite(frame_path, combined_mask)
+                    if not success:
+                        print(f"Warning: Failed to write frame {seq_idx}")
 
                 print(f"Saved {len(video_segments)} mask frames")
 
@@ -712,10 +725,11 @@ def main():
                     fourcc = cv2.VideoWriter_fourcc(*'mp4v')
                     mask_writer = cv2.VideoWriter(mask_output, fourcc, fps, (width, height), isColor=False)
 
-                    for frame_idx in sorted(video_segments.keys()):
-                        frame_path = f"{temp_dir}/frame_{frame_idx:06d}.png"
+                    for seq_idx in range(len(video_segments)):
+                        frame_path = f"{temp_dir}/frame_{seq_idx:06d}.png"
                         frame = cv2.imread(frame_path, cv2.IMREAD_GRAYSCALE)
-                        mask_writer.write(frame)
+                        if frame is not None:
+                            mask_writer.write(frame)
 
                     mask_writer.release()
                     print(f"\nSaved B/W mask video to {mask_output} (using OpenCV fallback)")
