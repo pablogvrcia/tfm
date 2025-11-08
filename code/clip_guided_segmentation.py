@@ -658,9 +658,17 @@ def main():
             height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
             cap.release()
 
-            # Create video writer for mask
-            fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-            mask_writer = cv2.VideoWriter(mask_output, fourcc, fps, (width, height), isColor=False)
+            # Use a more compatible codec (H.264)
+            fourcc = cv2.VideoWriter_fourcc(*'avc1')
+            # Note: For grayscale mask, we write as 3-channel but all channels are the same
+            mask_writer = cv2.VideoWriter(mask_output, fourcc, fps, (width, height), isColor=True)
+
+            if not mask_writer.isOpened():
+                print("Warning: Could not open video writer with avc1 codec, trying XVID...")
+                fourcc = cv2.VideoWriter_fourcc(*'XVID')
+                mask_output_avi = mask_output.replace('.mp4', '.avi')
+                mask_writer = cv2.VideoWriter(mask_output_avi, fourcc, fps, (width, height), isColor=True)
+                mask_output = mask_output_avi
 
             # Generate mask frames
             for frame_idx in sorted(video_segments.keys()):
@@ -672,7 +680,9 @@ def main():
                     if mask.sum() > 0:  # Only if mask has content
                         combined_mask = np.maximum(combined_mask, (mask.astype(np.uint8) * 255))
 
-                mask_writer.write(combined_mask)
+                # Convert grayscale to 3-channel for video writer
+                mask_frame_3ch = cv2.cvtColor(combined_mask, cv2.COLOR_GRAY2BGR)
+                mask_writer.write(mask_frame_3ch)
 
             mask_writer.release()
             print(f"\nSaved B/W mask video to {mask_output}")
