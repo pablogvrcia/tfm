@@ -685,17 +685,23 @@ def main():
                         if mask.sum() > 0:  # Only if mask has content
                             # Ensure mask is the right size and type
                             if mask.shape != (height, width):
-                                print(f"Warning: mask shape {mask.shape} doesn't match expected ({height}, {width})")
                                 # Try to handle common dimension issues
                                 if len(mask.shape) == 3:
-                                    # If mask has extra channel dimension, take first channel
-                                    mask = mask[:, :, 0] if mask.shape[2] == 1 else mask
+                                    # If mask has shape (1, H, W) or (H, W, 1), squeeze it
+                                    if mask.shape[0] == 1:
+                                        mask = mask[0]  # Remove leading dimension
+                                    elif mask.shape[2] == 1:
+                                        mask = mask[:, :, 0]  # Remove trailing dimension
+                                    else:
+                                        print(f"Warning: 3D mask with shape {mask.shape}, cannot handle")
+                                        continue
+
+                                # After squeezing, check if dimensions match
                                 if mask.shape == (width, height):
                                     # If dimensions are swapped, transpose
-                                    print(f"Transposing mask from {mask.shape} to {(height, width)}")
                                     mask = mask.T
                                 elif mask.shape != (height, width):
-                                    print(f"Cannot fix mask shape, skipping")
+                                    print(f"Warning: mask shape {mask.shape} doesn't match expected ({height}, {width}), skipping")
                                     continue
 
                             mask_binary = (mask.astype(bool).astype(np.uint8) * 255)
