@@ -674,25 +674,40 @@ def main():
 
                     # Combine all masks for this frame
                     combined_mask = np.zeros((height, width), dtype=np.uint8)
+
+                    # Debug: print first mask shape
+                    if seq_idx == 0 and masks:
+                        first_mask = next(iter(masks.values()))
+                        print(f"Debug: First mask shape: {first_mask.shape}, dtype: {first_mask.dtype}")
+                        print(f"Debug: Expected shape: (height={height}, width={width})")
+
                     for obj_id, mask in masks.items():
                         if mask.sum() > 0:  # Only if mask has content
                             # Ensure mask is the right size and type
-                            mask_resized = mask.astype(bool)
-                            if mask_resized.shape != (height, width):
-                                print(f"Warning: mask shape {mask_resized.shape} doesn't match video dimensions ({height}, {width})")
-                                continue
-                            combined_mask = np.maximum(combined_mask, (mask_resized.astype(np.uint8) * 255))
+                            if mask.shape != (height, width):
+                                print(f"Warning: mask shape {mask.shape} doesn't match expected ({height}, {width})")
+                                # Try to handle common dimension issues
+                                if len(mask.shape) == 3:
+                                    # If mask has extra channel dimension, take first channel
+                                    mask = mask[:, :, 0] if mask.shape[2] == 1 else mask
+                                if mask.shape == (width, height):
+                                    # If dimensions are swapped, transpose
+                                    print(f"Transposing mask from {mask.shape} to {(height, width)}")
+                                    mask = mask.T
+                                elif mask.shape != (height, width):
+                                    print(f"Cannot fix mask shape, skipping")
+                                    continue
 
-                    # Verify combined_mask shape before saving
-                    if combined_mask.shape != (height, width):
-                        print(f"Error: combined_mask shape {combined_mask.shape} doesn't match expected ({height}, {width})")
-                        continue
+                            mask_binary = (mask.astype(bool).astype(np.uint8) * 255)
+                            combined_mask = np.maximum(combined_mask, mask_binary)
 
                     # Save as PNG with sequential numbering starting from 0
                     frame_path = f"{temp_dir}/frame_{seq_idx:06d}.png"
                     success = cv2.imwrite(frame_path, combined_mask)
                     if not success:
-                        print(f"Warning: Failed to write frame {seq_idx}")
+                        print(f"Warning: Failed to write frame {seq_idx} to {frame_path}")
+                    elif seq_idx == 0:
+                        print(f"Debug: Successfully wrote first frame, shape: {combined_mask.shape}")
 
                 print(f"Saved {len(video_segments)} mask frames")
 
