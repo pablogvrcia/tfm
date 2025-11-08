@@ -658,34 +658,72 @@ def main():
             height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
             cap.release()
 
-            # Use a more compatible codec (H.264)
-            fourcc = cv2.VideoWriter_fourcc(*'avc1')
-            # Note: For grayscale mask, we write as 3-channel but all channels are the same
-            mask_writer = cv2.VideoWriter(mask_output, fourcc, fps, (width, height), isColor=True)
+            # First, save frames as temporary images, then use ffmpeg to create video
+            import tempfile
+            import shutil
+            import subprocess
 
-            if not mask_writer.isOpened():
-                print("Warning: Could not open video writer with avc1 codec, trying XVID...")
-                fourcc = cv2.VideoWriter_fourcc(*'XVID')
-                mask_output_avi = mask_output.replace('.mp4', '.avi')
-                mask_writer = cv2.VideoWriter(mask_output_avi, fourcc, fps, (width, height), isColor=True)
-                mask_output = mask_output_avi
+            temp_dir = tempfile.mkdtemp()
+            print(f"Saving mask frames to temporary directory: {temp_dir}")
 
-            # Generate mask frames
-            for frame_idx in sorted(video_segments.keys()):
-                masks = video_segments[frame_idx]
+            try:
+                # Generate mask frames and save as images
+                for frame_idx in sorted(video_segments.keys()):
+                    masks = video_segments[frame_idx]
 
-                # Combine all masks for this frame
-                combined_mask = np.zeros((height, width), dtype=np.uint8)
-                for obj_id, mask in masks.items():
-                    if mask.sum() > 0:  # Only if mask has content
-                        combined_mask = np.maximum(combined_mask, (mask.astype(np.uint8) * 255))
+                    # Combine all masks for this frame
+                    combined_mask = np.zeros((height, width), dtype=np.uint8)
+                    for obj_id, mask in masks.items():
+                        if mask.sum() > 0:  # Only if mask has content
+                            combined_mask = np.maximum(combined_mask, (mask.astype(np.uint8) * 255))
 
-                # Convert grayscale to 3-channel for video writer
-                mask_frame_3ch = cv2.cvtColor(combined_mask, cv2.COLOR_GRAY2BGR)
-                mask_writer.write(mask_frame_3ch)
+                    # Save as PNG
+                    frame_path = f"{temp_dir}/frame_{frame_idx:06d}.png"
+                    cv2.imwrite(frame_path, combined_mask)
 
-            mask_writer.release()
-            print(f"\nSaved B/W mask video to {mask_output}")
+                print(f"Saved {len(video_segments)} mask frames")
+
+                # Use ffmpeg to create video from frames
+                print("Creating video from frames using ffmpeg...")
+                ffmpeg_cmd = [
+                    'ffmpeg',
+                    '-y',  # Overwrite output file
+                    '-framerate', str(fps),
+                    '-i', f'{temp_dir}/frame_%06d.png',
+                    '-c:v', 'libx264',
+                    '-pix_fmt', 'yuv420p',
+                    '-crf', '23',
+                    mask_output
+                ]
+
+                result = subprocess.run(
+                    ffmpeg_cmd,
+                    capture_output=True,
+                    text=True
+                )
+
+                if result.returncode == 0:
+                    print(f"\nSaved B/W mask video to {mask_output}")
+                else:
+                    print(f"Error creating video with ffmpeg: {result.stderr}")
+                    print("Trying alternative method with OpenCV...")
+
+                    # Fallback: try OpenCV with mp4v codec
+                    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+                    mask_writer = cv2.VideoWriter(mask_output, fourcc, fps, (width, height), isColor=False)
+
+                    for frame_idx in sorted(video_segments.keys()):
+                        frame_path = f"{temp_dir}/frame_{frame_idx:06d}.png"
+                        frame = cv2.imread(frame_path, cv2.IMREAD_GRAYSCALE)
+                        mask_writer.write(frame)
+
+                    mask_writer.release()
+                    print(f"\nSaved B/W mask video to {mask_output} (using OpenCV fallback)")
+
+            finally:
+                # Clean up temporary directory
+                shutil.rmtree(temp_dir)
+                print(f"Cleaned up temporary files")
 
             # Statistics
             print_statistics_video(video_segments, filtered_prompts)
