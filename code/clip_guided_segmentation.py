@@ -683,26 +683,24 @@ def main():
 
                     for obj_id, mask in masks.items():
                         if mask.sum() > 0:  # Only if mask has content
-                            # Ensure mask is the right size and type
-                            if mask.shape != (height, width):
-                                # Try to handle common dimension issues
-                                if len(mask.shape) == 3:
-                                    # If mask has shape (1, H, W) or (H, W, 1), squeeze it
-                                    if mask.shape[0] == 1:
-                                        mask = mask[0]  # Remove leading dimension
-                                    elif mask.shape[2] == 1:
-                                        mask = mask[:, :, 0]  # Remove trailing dimension
-                                    else:
-                                        print(f"Warning: 3D mask with shape {mask.shape}, cannot handle")
-                                        continue
-
-                                # After squeezing, check if dimensions match
-                                if mask.shape == (width, height):
-                                    # If dimensions are swapped, transpose
-                                    mask = mask.T
-                                elif mask.shape != (height, width):
-                                    print(f"Warning: mask shape {mask.shape} doesn't match expected ({height}, {width}), skipping")
+                            # Handle dimension issues first
+                            if len(mask.shape) == 3:
+                                # If mask has shape (1, H, W) or (H, W, 1), squeeze it
+                                if mask.shape[0] == 1:
+                                    mask = mask[0]  # Remove leading dimension
+                                elif mask.shape[2] == 1:
+                                    mask = mask[:, :, 0]  # Remove trailing dimension
+                                else:
+                                    print(f"Warning: 3D mask with shape {mask.shape}, cannot handle")
                                     continue
+
+                            # After squeezing, check if dimensions need transposing
+                            if mask.shape == (width, height):
+                                # If dimensions are swapped, transpose
+                                mask = mask.T
+                            elif mask.shape != (height, width):
+                                print(f"Warning: mask shape {mask.shape} doesn't match expected ({height}, {width}), skipping")
+                                continue
 
                             mask_binary = (mask.astype(bool).astype(np.uint8) * 255)
                             combined_mask = np.maximum(combined_mask, mask_binary)
@@ -717,8 +715,73 @@ def main():
 
                 print(f"Saved {len(video_segments)} mask frames")
 
+                # Also create a preview video with original frames + gray overlay on tracked area
+                print("\nGenerating preview video with gray overlay on tracked area...")
+                preview_output = f"{base_name}_preview_{args.prompt}.mp4"
+                preview_dir = tempfile.mkdtemp()
+
+                # Read original video and apply gray overlay
+                cap = cv2.VideoCapture(args.image)
+                frame_count = 0
+
+                while True:
+                    ret, frame = cap.read()
+                    if not ret:
+                        break
+
+                    if frame_count in video_segments:
+                        masks = video_segments[frame_count]
+
+                        # Combine all masks for this frame
+                        combined_mask = np.zeros((frame.shape[0], frame.shape[1]), dtype=bool)
+                        for obj_id, mask in masks.items():
+                            # Handle 3D masks
+                            if len(mask.shape) == 3 and mask.shape[0] == 1:
+                                mask = mask[0]
+
+                            if mask.sum() > 0:
+                                combined_mask |= mask.astype(bool)
+
+                        # Apply gray overlay (128, 128, 128) to tracked areas
+                        frame_preview = frame.copy()
+                        frame_preview[combined_mask] = [128, 128, 128]
+
+                        # Save preview frame
+                        preview_frame_path = f"{preview_dir}/frame_{frame_count:06d}.png"
+                        cv2.imwrite(preview_frame_path, frame_preview)
+                    else:
+                        # No mask for this frame, save original
+                        preview_frame_path = f"{preview_dir}/frame_{frame_count:06d}.png"
+                        cv2.imwrite(preview_frame_path, frame)
+
+                    frame_count += 1
+
+                cap.release()
+                print(f"Generated {frame_count} preview frames")
+
+                # Create preview video using ffmpeg
+                preview_cmd = [
+                    'ffmpeg',
+                    '-y',
+                    '-framerate', str(fps),
+                    '-i', f'{preview_dir}/frame_%06d.png',
+                    '-c:v', 'libx264',
+                    '-pix_fmt', 'yuv420p',
+                    '-crf', '23',
+                    preview_output
+                ]
+
+                result_preview = subprocess.run(preview_cmd, capture_output=True, text=True)
+                if result_preview.returncode == 0:
+                    print(f"Saved preview video to {preview_output}")
+                else:
+                    print(f"Warning: Failed to create preview video: {result_preview.stderr}")
+
+                # Clean up preview frames
+                shutil.rmtree(preview_dir)
+
                 # Use ffmpeg to create video from frames
-                print("Creating video from frames using ffmpeg...")
+                print("\nCreating B/W mask video from frames using ffmpeg...")
                 ffmpeg_cmd = [
                     'ffmpeg',
                     '-y',  # Overwrite output file
