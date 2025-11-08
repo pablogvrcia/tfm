@@ -5,6 +5,11 @@ This module uses SCLIP's modified CLIP with Cross-layer Self-Attention (CSA)
 for superior dense prediction performance.
 
 SCLIP achieves 22.77% mIoU on COCO-Stuff164k (vs ~7% for standard approaches).
+
+Enhancement: LoFTup Integration
+    - LoFTup (Coordinate-Based Feature Upsampling) improves feature resolution
+    - Applied after CLIP feature extraction, before similarity computation
+    - Better spatial resolution → improved dense prediction quality
 """
 
 import numpy as np
@@ -16,6 +21,7 @@ import sys
 
 from models.clip import clip
 from prompts.imagenet_template import openai_imagenet_template
+from models.loftup_wrapper import LoFTupWrapper, AdaptiveLoFTup
 
 
 class SCLIPFeatureExtractor:
@@ -32,6 +38,10 @@ class SCLIPFeatureExtractor:
         self,
         model_name: str = "ViT-B/16",  # SCLIP paper uses ViT-B/16, not ViT-L/14
         device: str = "cuda" if torch.cuda.is_available() else "cpu",
+        use_loftup: bool = False,
+        loftup_adaptive: bool = True,
+        loftup_upsample_factor: float = 2.0,
+        verbose: bool = True
     ):
         """
         Initialize SCLIP feature extractor.
@@ -39,11 +49,19 @@ class SCLIPFeatureExtractor:
         Args:
             model_name: CLIP model variant (ViT-L/14@336px recommended by SCLIP)
             device: Computation device
+            use_loftup: Enable LoFTup feature upsampling (improves dense features)
+            loftup_adaptive: Use adaptive upsampling (adjusts factor based on feature size)
+            loftup_upsample_factor: Upsampling factor for LoFTup (if not adaptive)
+            verbose: Print initialization messages
         """
         self.device = device
         self.model_name = model_name
+        self.use_loftup = use_loftup
+        self.verbose = verbose
 
-        print(f"[SCLIP] Loading CLIP model with CSA: {model_name}")
+        if verbose:
+            print(f"[SCLIP] Loading CLIP model with CSA: {model_name}")
+
         # Load SCLIP's modified CLIP (with CSA)
         self.model, self.preprocess = clip.load(model_name, device=device, jit=False)
         self.model.eval()
@@ -52,8 +70,46 @@ class SCLIPFeatureExtractor:
         self.patch_size = self.model.visual.patch_size
         self.embed_dim = self.model.visual.output_dim
 
-        print(f"[SCLIP] Model loaded successfully")
-        print(f"[SCLIP] Patch size: {self.patch_size}, Embedding dim: {self.embed_dim}")
+        if verbose:
+            print(f"[SCLIP] Model loaded successfully")
+            print(f"[SCLIP] Patch size: {self.patch_size}, Embedding dim: {self.embed_dim}")
+
+        # Initialize LoFTup if enabled
+        self.loftup = None
+        if use_loftup:
+            if verbose:
+                print(f"[SCLIP] Initializing LoFTup feature upsampler...")
+
+            try:
+                if loftup_adaptive:
+                    self.loftup = AdaptiveLoFTup(
+                        model_name="clip",
+                        device=device,
+                        verbose=verbose
+                    )
+                else:
+                    self.loftup = LoFTupWrapper(
+                        model_name="clip",
+                        device=device,
+                        upsample_factor=loftup_upsample_factor,
+                        verbose=verbose
+                    )
+
+                if self.loftup.is_available():
+                    if verbose:
+                        print(f"[SCLIP] LoFTup initialized successfully")
+                        print(f"[SCLIP] Mode: {'Adaptive' if loftup_adaptive else f'{loftup_upsample_factor}x fixed'}")
+                else:
+                    if verbose:
+                        print(f"[SCLIP] LoFTup unavailable, falling back to standard features")
+                    self.loftup = None
+                    self.use_loftup = False
+            except Exception as e:
+                if verbose:
+                    print(f"[SCLIP] Failed to initialize LoFTup: {e}")
+                    print(f"[SCLIP] Continuing without LoFTup enhancement")
+                self.loftup = None
+                self.use_loftup = False
 
         # Text embedding cache
         self.text_embedding_cache = {}
@@ -94,7 +150,10 @@ class SCLIPFeatureExtractor:
         preserve_resolution: bool = False
     ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
         """
-        Extract image features using SCLIP's CSA.
+        Extract image features using SCLIP's CSA with optional LoFTup enhancement.
+
+        Pipeline:
+            Image → CLIP Encoder (CSA) → Features → [LoFTup Upsample] → Enhanced Features
 
         Args:
             image: Input image (RGB numpy array)
@@ -135,6 +194,20 @@ class SCLIPFeatureExtractor:
 
             # Reshape to (1, H, W, D)
             patch_features = patch_features.reshape(1, grid_size, grid_size, self.embed_dim)
+
+            # Apply LoFTup upsampling if enabled
+            if self.use_loftup and self.loftup is not None:
+                # Upsample features for better spatial resolution
+                patch_features = self.loftup.upsample_features(
+                    patch_features,
+                    target_size=None,  # Let adaptive mode decide, or use default factor
+                    use_bilinear_fallback=True
+                )
+
+                # Re-normalize after upsampling if needed
+                if normalize:
+                    # Normalize along feature dimension (last dim)
+                    patch_features = F.normalize(patch_features, dim=-1)
 
             # Return as (H, W, D)
             return None, patch_features.squeeze(0)

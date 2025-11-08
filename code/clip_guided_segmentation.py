@@ -513,7 +513,7 @@ def print_statistics_video(video_segments, prompts):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="CLIP-guided SAM segmentation (optimized)"
+        description="CLIP-guided SAM segmentation with LoFTup enhancement"
     )
     parser.add_argument("--image", required=True, help="Path to input image or video")
     parser.add_argument("--vocabulary", nargs='+', required=True,
@@ -539,6 +539,12 @@ def main():
                        help="Minimum region size (pixels) for prompts")
     parser.add_argument("--iou-threshold", type=float, default=0.8,
                        help="IoU threshold for merging overlapping masks")
+    parser.add_argument("--use-loftup", action="store_true", default=True,
+                       help="Enable LoFTup feature upsampling (default: True)")
+    parser.add_argument("--no-loftup", action="store_false", dest="use_loftup",
+                       help="Disable LoFTup feature upsampling")
+    parser.add_argument("--loftup-factor", type=float, default=2.0,
+                       help="LoFTup upsampling factor (if not adaptive, default: 2.0)")
     parser.add_argument("--device", default=None, help="Device (cuda/cpu)")
 
     args = parser.parse_args()
@@ -577,10 +583,14 @@ def main():
     print("STEP 1: CLIP Dense Prediction")
     print("="*50)
 
+    # Initialize segmentor with LoFTup support if available
     segmentor = SCLIPSegmentor(
         device=args.device or ("cuda" if torch.cuda.is_available() else "cpu"),
         use_sam=False,
         use_pamr=False,
+        use_loftup=args.use_loftup,  # Enable LoFTup based on CLI arg
+        loftup_adaptive=True,  # Use adaptive upsampling
+        loftup_upsample_factor=args.loftup_factor,  # Use CLI arg for factor
         verbose=True
     )
 

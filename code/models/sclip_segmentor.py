@@ -8,6 +8,11 @@ This module implements dense semantic segmentation using SCLIP's approach:
 - Optional SAM integration for region-based predictions
 
 Performance: SCLIP achieves 22.77% mIoU on COCO-Stuff164k
+
+Enhancement: LoFTup Integration
+    - Optional LoFTup feature upsampling for improved spatial resolution
+    - Better feature quality → improved segmentation accuracy
+    - Especially beneficial for small objects and fine boundaries
 """
 
 import numpy as np
@@ -44,6 +49,9 @@ class SCLIPSegmentor:
         slide_inference: bool = True,  # SCLIP uses sliding window by default
         slide_crop: int = 224,  # SCLIP paper: crop=224
         slide_stride: int = 112,  # SCLIP paper: stride=112
+        use_loftup: bool = False,  # Enable LoFTup feature upsampling
+        loftup_adaptive: bool = True,  # Use adaptive upsampling factor
+        loftup_upsample_factor: float = 2.0,  # Fixed upsampling factor (if not adaptive)
         verbose: bool = True,
     ):
         """
@@ -61,6 +69,9 @@ class SCLIPSegmentor:
             slide_inference: Use sliding window inference (slower but better)
             slide_crop: Crop size for sliding window
             slide_stride: Stride for sliding window
+            use_loftup: Enable LoFTup feature upsampling (improves feature quality)
+            loftup_adaptive: Use adaptive upsampling (adjusts based on feature size)
+            loftup_upsample_factor: Fixed upsampling factor (if not adaptive)
             verbose: Print progress
         """
         self.device = device
@@ -71,6 +82,7 @@ class SCLIPSegmentor:
         self.slide_inference = slide_inference
         self.slide_crop = slide_crop
         self.slide_stride = slide_stride
+        self.use_loftup = use_loftup
         self.verbose = verbose
 
         # Text feature cache to avoid recomputing for same classes
@@ -81,11 +93,16 @@ class SCLIPSegmentor:
             print(f"  Mode: {'Hybrid (SAM + SCLIP)' if use_sam else 'Dense (SCLIP only)'}")
             print(f"  PAMR: {'Enabled' if use_pamr else 'Disabled'}")
             print(f"  Slide inference: {'Enabled' if slide_inference else 'Disabled'}")
+            print(f"  LoFTup: {'Enabled' if use_loftup else 'Disabled'}")
 
         # Initialize SCLIP feature extractor
         self.clip_extractor = SCLIPFeatureExtractor(
             model_name=model_name,
-            device=device
+            device=device,
+            use_loftup=use_loftup,
+            loftup_adaptive=loftup_adaptive,
+            loftup_upsample_factor=loftup_upsample_factor,
+            verbose=verbose
         )
 
         # Initialize PAMR if enabled
