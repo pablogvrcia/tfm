@@ -835,22 +835,34 @@ def main():
                 print(f"Running VACE inference with prompt: '{args.edit_prompt}'")
 
                 try:
-                    # Import VACE inference
+                    # Save current directory
+                    original_dir = os.getcwd()
+
+                    # Change to VACE directory for imports to work correctly
+                    vace_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'VACE')
+                    os.chdir(vace_path)
+
+                    # Add VACE to path
                     import sys
-                    vace_path = os.path.join(os.path.dirname(__file__), 'VACE')
                     if vace_path not in sys.path:
                         sys.path.insert(0, vace_path)
 
                     from vace.vace_wan_inference import main as vace_main
+
+                    # Convert paths to absolute paths since we're changing directories
+                    abs_preview_output = os.path.abspath(os.path.join(original_dir, preview_output))
+                    abs_mask_output = os.path.abspath(os.path.join(original_dir, mask_output))
+                    abs_save_dir = os.path.abspath(os.path.join(original_dir, os.path.dirname(mask_output)))
+                    abs_save_file = os.path.abspath(os.path.join(original_dir, f"{base_name}_inpainted_{args.prompt}.mp4"))
 
                     # Prepare VACE arguments
                     vace_args = {
                         'model_name': 'vace-1.3B',
                         'size': '480p',
                         'frame_num': min(81, len(video_segments)),  # VACE expects 4n+1 frames
-                        'ckpt_dir': os.path.join(vace_path, 'models/Wan2.1-VACE-1.3B/'),
-                        'src_video': preview_output,  # Use the preview video as source
-                        'src_mask': mask_output,  # Use the generated mask
+                        'ckpt_dir': 'models/Wan2.1-VACE-1.3B/',  # Relative to VACE directory
+                        'src_video': abs_preview_output,  # Use absolute path
+                        'src_mask': abs_mask_output,  # Use absolute path
                         'prompt': args.edit_prompt,
                         'use_prompt_extend': 'plain',
                         'base_seed': 2025,
@@ -858,8 +870,8 @@ def main():
                         'sample_steps': None,  # Will default to 50
                         'sample_shift': None,  # Will default to 16
                         'sample_guide_scale': 5.0,
-                        'save_dir': os.path.dirname(mask_output),
-                        'save_file': f"{base_name}_inpainted_{args.prompt}.mp4",
+                        'save_dir': abs_save_dir,  # Use absolute path
+                        'save_file': abs_save_file,  # Use absolute path
                         'offload_model': None,
                         'ulysses_size': 1,
                         'ring_size': 1,
@@ -869,11 +881,14 @@ def main():
                         'src_ref_images': None,
                     }
 
-                    print(f"VACE output will be saved to: {vace_args['save_file']}")
+                    print(f"VACE output will be saved to: {abs_save_file}")
                     print("This may take several minutes depending on your hardware...")
 
                     # Run VACE inference
                     result = vace_main(vace_args)
+
+                    # Change back to original directory
+                    os.chdir(original_dir)
 
                     if result and 'out_video' in result:
                         print(f"\nVACE inpainting complete!")
@@ -882,9 +897,11 @@ def main():
                         print("\nVACE inpainting completed (check output directory)")
 
                 except ImportError as e:
+                    os.chdir(original_dir)  # Make sure to change back
                     print(f"\nError: Could not import VACE inference module: {e}")
                     print("Make sure VACE is installed in the VACE/ directory")
                 except Exception as e:
+                    os.chdir(original_dir)  # Make sure to change back
                     print(f"\nError during VACE inference: {e}")
                     import traceback
                     traceback.print_exc()
