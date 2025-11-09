@@ -27,6 +27,7 @@ from models.sclip_segmentor import SCLIPSegmentor
 from models.video_segmentation import CLIPGuidedVideoSegmentor
 from scipy.ndimage import label, center_of_mass
 import cv2
+import os
 
 
 def generate_distinct_colors(n):
@@ -825,6 +826,71 @@ def main():
 
             # Statistics
             print_statistics_video(video_segments, filtered_prompts)
+
+            # Run VACE inference if edit_prompt is provided
+            if args.edit_prompt:
+                print("\n" + "="*50)
+                print("STEP 4: VACE Video Inpainting")
+                print("="*50)
+                print(f"Running VACE inference with prompt: '{args.edit_prompt}'")
+
+                try:
+                    # Import VACE inference
+                    import sys
+                    vace_path = os.path.join(os.path.dirname(__file__), 'VACE')
+                    if vace_path not in sys.path:
+                        sys.path.insert(0, vace_path)
+
+                    from vace.vace_wan_inference import main as vace_main
+
+                    # Prepare VACE arguments
+                    vace_args = {
+                        'model_name': 'vace-1.3B',
+                        'size': '480p',
+                        'frame_num': min(81, len(video_segments)),  # VACE expects 4n+1 frames
+                        'ckpt_dir': os.path.join(vace_path, 'models/Wan2.1-VACE-1.3B/'),
+                        'src_video': preview_output,  # Use the preview video as source
+                        'src_mask': mask_output,  # Use the generated mask
+                        'prompt': args.edit_prompt,
+                        'use_prompt_extend': 'plain',
+                        'base_seed': 2025,
+                        'sample_solver': 'unipc',
+                        'sample_steps': None,  # Will default to 50
+                        'sample_shift': None,  # Will default to 16
+                        'sample_guide_scale': 5.0,
+                        'save_dir': os.path.dirname(mask_output),
+                        'save_file': f"{base_name}_inpainted_{args.prompt}.mp4",
+                        'offload_model': None,
+                        'ulysses_size': 1,
+                        'ring_size': 1,
+                        't5_fsdp': False,
+                        't5_cpu': False,
+                        'dit_fsdp': False,
+                        'src_ref_images': None,
+                    }
+
+                    print(f"VACE output will be saved to: {vace_args['save_file']}")
+                    print("This may take several minutes depending on your hardware...")
+
+                    # Run VACE inference
+                    result = vace_main(vace_args)
+
+                    if result and 'out_video' in result:
+                        print(f"\nVACE inpainting complete!")
+                        print(f"Output video: {result['out_video']}")
+                    else:
+                        print("\nVACE inpainting completed (check output directory)")
+
+                except ImportError as e:
+                    print(f"\nError: Could not import VACE inference module: {e}")
+                    print("Make sure VACE is installed in the VACE/ directory")
+                except Exception as e:
+                    print(f"\nError during VACE inference: {e}")
+                    import traceback
+                    traceback.print_exc()
+            else:
+                print("\nSkipping VACE inference (no --edit-prompt provided)")
+                print("To run inpainting, add --edit-prompt 'your description here'")
 
         else:
             # Normal video segmentation mode
