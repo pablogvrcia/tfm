@@ -191,6 +191,14 @@ def parse_args():
     parser.add_argument('--use-all-phase1', action='store_true', default=False,
                         help='Enable all Phase 1 improvements (LoftUp + ResCLIP + DenseCRF)')
 
+    # Phase 2A improvements (2025 - training-free for human parsing)
+    parser.add_argument('--use-cliptrase', action='store_true', default=False,
+                        help='Enable CLIPtrase self-correlation recalibration (+5-10%% mIoU person, ECCV 2024)')
+    parser.add_argument('--use-clip-rc', action='store_true', default=False,
+                        help='Enable CLIP-RC regional clues extraction (+8-12%% mIoU person, CVPR 2024)')
+    parser.add_argument('--use-all-phase2a', action='store_true', default=False,
+                        help='Enable all Phase 2A improvements (CLIPtrase + CLIP-RC)')
+
     return parser.parse_args()
 
 
@@ -332,6 +340,10 @@ def main():
     use_resclip = args.use_resclip or args.use_all_phase1
     use_densecrf = args.use_densecrf or args.use_all_phase1
 
+    # Handle --use-all-phase2a flag
+    use_cliptrase = args.use_cliptrase or args.use_all_phase2a
+    use_clip_rc = args.use_clip_rc or args.use_all_phase2a
+
     # Print Phase 1 status
     if use_loftup or use_resclip or use_densecrf:
         print("\n Phase 1 Improvements (ICCV/CVPR 2025 for mIoU):")
@@ -347,6 +359,19 @@ def main():
             1.5 if use_densecrf else 0
         ])
         print(f"  → Total expected improvement: +{total_expected:.1f}% mIoU")
+
+    # Print Phase 2A status (training-free human parsing)
+    if use_cliptrase or use_clip_rc:
+        print("\n Phase 2A Improvements (Training-Free Human Parsing):")
+        if use_cliptrase:
+            print("  ✓ CLIPtrase self-correlation recalibration (+5-10% mIoU person expected)")
+        if use_clip_rc:
+            print("  ✓ CLIP-RC regional clues extraction (+8-12% mIoU person expected)")
+        total_expected_person = sum([
+            7.5 if use_cliptrase else 0,
+            10 if use_clip_rc else 0
+        ])
+        print(f"  → Total expected improvement for person class: +{total_expected_person:.1f}% mIoU")
 
     segmentor = SCLIPSegmentor(
         model_name=args.model,
@@ -367,6 +392,9 @@ def main():
         use_loftup=use_loftup,
         use_resclip=use_resclip,
         use_densecrf=use_densecrf,
+        # Phase 2A improvements (2025 - training-free human parsing)
+        use_cliptrase=use_cliptrase,
+        use_clip_rc=use_clip_rc,
     )
     print()
 

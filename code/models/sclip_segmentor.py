@@ -34,6 +34,19 @@ try:
 except ImportError:
     DENSECRF_AVAILABLE = False
 
+# Phase 2A improvements (2025 - training-free human parsing)
+try:
+    from models.cliptrase import CLIPtraseRecalibration
+    CLIPTRASE_AVAILABLE = True
+except ImportError:
+    CLIPTRASE_AVAILABLE = False
+
+try:
+    from models.clip_rc import RegionalCluesExtractor
+    CLIP_RC_AVAILABLE = True
+except ImportError:
+    CLIP_RC_AVAILABLE = False
+
 
 class SCLIPSegmentor:
     """
@@ -66,6 +79,9 @@ class SCLIPSegmentor:
         use_loftup: bool = False,  # LoftUp feature upsampling (+2-4% mIoU)
         use_resclip: bool = False,  # ResCLIP residual attention (+8-13% mIoU)
         use_densecrf: bool = False,  # DenseCRF boundary refinement (+1-2% mIoU, +3-5% boundary F1)
+        # Phase 2A improvements (2025 - training-free for human parsing)
+        use_cliptrase: bool = False,  # CLIPtrase self-correlation recalibration (+5-10% mIoU person)
+        use_clip_rc: bool = False,  # CLIP-RC regional clues extraction (+8-12% mIoU person)
     ):
         """
         Initialize SCLIP segmentor with 2025 performance optimizations.
@@ -89,6 +105,8 @@ class SCLIPSegmentor:
             use_loftup: Enable LoftUp feature upsampling (Phase 1)
             use_resclip: Enable ResCLIP residual attention (Phase 1)
             use_densecrf: Enable DenseCRF boundary refinement (Phase 1)
+            use_cliptrase: Enable CLIPtrase self-correlation recalibration (Phase 2A)
+            use_clip_rc: Enable CLIP-RC regional clues extraction (Phase 2A)
         """
         self.device = device
         self.use_sam = use_sam
@@ -105,6 +123,8 @@ class SCLIPSegmentor:
         self.use_loftup = use_loftup
         self.use_resclip = use_resclip
         self.use_densecrf = use_densecrf
+        self.use_cliptrase = use_cliptrase
+        self.use_clip_rc = use_clip_rc
 
         # Text feature cache to avoid recomputing for same classes
         self._text_feature_cache = {}
@@ -117,6 +137,9 @@ class SCLIPSegmentor:
             print(f"  Phase 1: LoftUp={'Enabled' if use_loftup else 'Disabled'}, "
                   f"ResCLIP={'Enabled' if use_resclip else 'Disabled'}, "
                   f"DenseCRF={'Enabled' if use_densecrf else 'Disabled'}")
+            if use_cliptrase or use_clip_rc:
+                print(f"  Phase 2A: CLIPtrase={'Enabled' if use_cliptrase else 'Disabled'}, "
+                      f"CLIP-RC={'Enabled' if use_clip_rc else 'Disabled'}")
 
         # Initialize SCLIP feature extractor with optimizations
         self.clip_extractor = SCLIPFeatureExtractor(
@@ -192,6 +215,52 @@ class SCLIPSegmentor:
                         print(f"  WARNING: DenseCRF initialization failed: {e}")
                     self.use_densecrf = False
                     self.densecrf_refiner = None
+
+        # Initialize CLIPtrase if enabled (Phase 2A - training-free human parsing)
+        self.cliptrase_module = None
+        if use_cliptrase:
+            if not CLIPTRASE_AVAILABLE:
+                if verbose:
+                    print("  WARNING: CLIPtrase requested but not available. Disabling.")
+                self.use_cliptrase = False
+            else:
+                try:
+                    self.cliptrase_module = CLIPtraseRecalibration(
+                        correlation_temperature=0.05,
+                        recalibration_strength=0.5,
+                        use_fp16=use_fp16,
+                        device=device
+                    )
+                    if verbose:
+                        print(f"  CLIPtrase: Enabled (self-correlation recalibration, +5-10% mIoU person expected)")
+                except Exception as e:
+                    if verbose:
+                        print(f"  WARNING: CLIPtrase initialization failed: {e}")
+                    self.use_cliptrase = False
+                    self.cliptrase_module = None
+
+        # Initialize CLIP-RC if enabled (Phase 2A - training-free human parsing)
+        self.clip_rc_module = None
+        if use_clip_rc:
+            if not CLIP_RC_AVAILABLE:
+                if verbose:
+                    print("  WARNING: CLIP-RC requested but not available. Disabling.")
+                self.use_clip_rc = False
+            else:
+                try:
+                    self.clip_rc_module = RegionalCluesExtractor(
+                        num_regions=4,
+                        regional_weight=0.6,
+                        use_fp16=use_fp16,
+                        device=device
+                    )
+                    if verbose:
+                        print(f"  CLIP-RC: Enabled (regional clues extraction, +8-12% mIoU person expected)")
+                except Exception as e:
+                    if verbose:
+                        print(f"  WARNING: CLIP-RC initialization failed: {e}")
+                    self.use_clip_rc = False
+                    self.clip_rc_module = None
 
         if verbose:
             print("[SCLIP Segmentor] Ready!\n")
@@ -839,14 +908,25 @@ class SCLIPSegmentor:
         class_names: List[str]
     ) -> torch.Tensor:
         """
-        Single forward pass to get dense logits with Phase 1 enhancements.
+        Single forward pass to get dense logits with Phase 1 & Phase 2A enhancements.
+
+        Pipeline:
+        1. Extract CLIP features (with CSA from SCLIP)
+        2. Apply Phase 2A: CLIPtrase (self-correlation recalibration)
+        3. Apply Phase 2A: CLIP-RC (regional clues extraction)
+        4. Apply Phase 1: ResCLIP (RCS + SFR)
+        5. Compute final similarities
 
         Returns:
             Logits (num_classes, H_feat, W_feat)
         """
-        # Apply ResCLIP if enabled (Phase 1)
-        if self.use_resclip and self.resclip_module is not None:
-            # Extract features and text separately for ResCLIP processing
+        # Check if we need to extract features explicitly (for Phase 2A or ResCLIP)
+        need_explicit_features = (
+            self.use_cliptrase or self.use_clip_rc or self.use_resclip
+        )
+
+        if need_explicit_features:
+            # Extract dense features explicitly
             _, dense_features = self.clip_extractor.extract_image_features(
                 image,
                 return_dense=True,
@@ -855,24 +935,49 @@ class SCLIPSegmentor:
                 preserve_resolution=False
             )  # dense_features: (H, W, D)
 
-            # Apply RCS (Residual Cross-correlation Self-attention)
-            enhanced_features = self.resclip_module.enhance_features(
-                dense_features,
-                residual_weight=0.3
-            )  # (H, W, D)
+            # Apply Phase 2A improvements (training-free human parsing)
 
-            # Get text features
-            text_features = self._get_text_features(class_names)  # (num_classes, D)
+            # Step 1: CLIPtrase - Self-correlation recalibration
+            if self.use_cliptrase and self.cliptrase_module is not None:
+                dense_features = self.cliptrase_module.forward(dense_features)
 
-            # Apply SFR (Semantic Feedback Refinement)
-            # This computes multi-scale similarity maps
-            similarities = self.resclip_module.refine_predictions(
-                enhanced_features,
-                text_features,
-                original_size=image.shape[:2]
-            )  # (num_classes, H, W)
+            # Step 2: CLIP-RC - Regional clues extraction
+            if self.use_clip_rc and self.clip_rc_module is not None:
+                dense_features = self.clip_rc_module.extract_regional_features(dense_features)
+
+            # Apply Phase 1: ResCLIP if enabled
+            if self.use_resclip and self.resclip_module is not None:
+                # Apply RCS (Residual Cross-correlation Self-attention)
+                enhanced_features = self.resclip_module.enhance_features(
+                    dense_features,
+                    residual_weight=0.3
+                )  # (H, W, D)
+
+                # Get text features
+                text_features = self._get_text_features(class_names)  # (num_classes, D)
+
+                # Apply SFR (Semantic Feedback Refinement)
+                # This computes multi-scale similarity maps
+                similarities = self.resclip_module.refine_predictions(
+                    enhanced_features,
+                    text_features,
+                    original_size=image.shape[:2]
+                )  # (num_classes, H, W)
+            else:
+                # Compute similarities directly from Phase 2A enhanced features
+                text_features = self._get_text_features(class_names)
+
+                # Reshape features for similarity computation
+                H, W, D = dense_features.shape
+                features_flat = dense_features.reshape(H * W, D)
+                features_norm = F.normalize(features_flat, dim=-1)
+                text_norm = F.normalize(text_features, dim=-1)
+
+                # Compute similarities
+                similarities = features_norm @ text_norm.to(features_norm.dtype).T
+                similarities = similarities.T.reshape(len(class_names), H, W)
         else:
-            # Standard SCLIP approach
+            # Standard SCLIP approach (no Phase 1 or Phase 2A)
             similarities = self.clip_extractor.compute_dense_similarity(
                 image,
                 class_names,
