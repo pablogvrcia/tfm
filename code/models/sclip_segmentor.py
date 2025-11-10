@@ -810,9 +810,10 @@ class SCLIPSegmentor:
                 crop_tensor = image_tensor[:, :, y1:y2, x1:x2]  # (1, 3, crop_h, crop_w)
 
                 # Process crop through CLIP encoder with CSA
-                with torch.cuda.amp.autocast(enabled=False):  # Disable autocast for stability
+                # Use autocast if FP16 is enabled for speedup
+                with torch.amp.autocast(device_type='cuda', enabled=self.clip_extractor.use_fp16):
                     features = self.clip_extractor.model.encode_image(
-                        crop_tensor.type(self.clip_extractor.model.dtype),
+                        crop_tensor,
                         return_all=True,
                         csa=True
                     )  # (1, num_patches+1, D)

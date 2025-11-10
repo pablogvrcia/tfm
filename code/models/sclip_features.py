@@ -54,10 +54,10 @@ class SCLIPFeatureExtractor:
         self.model, self.preprocess = clip.load(model_name, device=device, jit=False)
         self.model.eval()
 
-        # Apply mixed precision optimization (inspired by TernaryCLIP 2025)
+        # Note: We use autocast for FP16, NOT .half()
+        # This allows PyTorch to automatically handle mixed precision
         if self.use_fp16:
-            self.model = self.model.half()
-            print(f"[SCLIP] Enabled FP16 mixed precision for 2x speedup")
+            print(f"[SCLIP] Enabled FP16 mixed precision (autocast) for 2x speedup")
 
         # Apply torch.compile() for JIT optimization (PyTorch 2.0+)
         if self.use_compile:
@@ -137,12 +137,9 @@ class SCLIPFeatureExtractor:
                 image = Image.fromarray(image)
             image_tensor = self.preprocess(image).unsqueeze(0).to(self.device)
 
-        # Apply FP16 if enabled
-        if self.use_fp16:
-            image_tensor = image_tensor.half()
-
         # Forward pass with CSA and mixed precision
-        with torch.cuda.amp.autocast(enabled=self.use_fp16):
+        # autocast will automatically convert to FP16 where beneficial
+        with torch.amp.autocast(device_type='cuda', enabled=self.use_fp16):
             if return_dense:
                 # Get dense features: (batch, num_patches, embed_dim)
                 features = self.model.encode_image(image_tensor, return_all=True, csa=use_csa)
@@ -198,7 +195,7 @@ class SCLIPFeatureExtractor:
             return self.text_embedding_cache[cache_key]
 
         # Forward pass with mixed precision
-        with torch.cuda.amp.autocast(enabled=self.use_fp16):
+        with torch.amp.autocast(device_type='cuda', enabled=self.use_fp16):
             if use_prompt_ensemble:
                 # SCLIP approach: Average 80 ImageNet templates per class
                 all_embeddings = []

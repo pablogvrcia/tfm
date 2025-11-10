@@ -61,10 +61,10 @@ class CLIPFeatureExtractor:
         )
         self.model.eval()
 
-        # Apply mixed precision optimization (inspired by TernaryCLIP 2025)
+        # Note: We use autocast for FP16, NOT .half()
+        # This allows PyTorch to automatically handle mixed precision
         if self.use_fp16:
-            self.model = self.model.half()
-            print(f"[CLIP] Enabled FP16 mixed precision for 2x speedup")
+            print(f"[CLIP] Enabled FP16 mixed precision (autocast) for 2x speedup")
 
         # Apply torch.compile() for JIT optimization (PyTorch 2.0+)
         if self.use_compile:
@@ -202,15 +202,12 @@ class CLIPFeatureExtractor:
 
         image_tensor = self.preprocess(image).unsqueeze(0).to(self.device)
 
-        # Apply FP16 if enabled
-        if self.use_fp16:
-            image_tensor = image_tensor.half()
-
         # Clear previous features
         self.features = {}
 
         # Forward pass with autocast for mixed precision
-        with torch.cuda.amp.autocast(enabled=self.use_fp16):
+        # autocast will automatically convert to FP16 where beneficial
+        with torch.amp.autocast(device_type='cuda', enabled=self.use_fp16):
             image_features = self.model.encode_image(image_tensor)
 
         if normalize:
@@ -297,7 +294,7 @@ class CLIPFeatureExtractor:
             texts = [texts]
 
         # Forward pass with autocast for mixed precision
-        with torch.cuda.amp.autocast(enabled=self.use_fp16):
+        with torch.amp.autocast(device_type='cuda', enabled=self.use_fp16):
             if use_prompt_ensemble:
                 # Use prompt templates as described in methodology
                 # Keep it simple - 4 templates work best (over-averaging hurts)

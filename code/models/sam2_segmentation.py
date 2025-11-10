@@ -115,10 +115,10 @@ class SAM2MaskGenerator:
                 device=self.device
             )
 
-            # Apply mixed precision optimization (inspired by SAM-Lightening 2024)
+            # Note: We use autocast for FP16, NOT .half()
+            # This allows PyTorch to automatically handle mixed precision
             if self.use_fp16:
-                self.sam2_model = self.sam2_model.half()
-                print(f"✓ SAM2: Enabled FP16 mixed precision for 2x speedup")
+                print(f"✓ SAM2: Enabled FP16 mixed precision (autocast) for 2x speedup")
 
             # Apply torch.compile() for JIT optimization
             if self.use_compile:
@@ -236,7 +236,7 @@ class SAM2MaskGenerator:
                 point_labels_batch = np.array(point_labels)  # Shape: (N,)
 
                 # Use autocast for mixed precision
-                with torch.cuda.amp.autocast(enabled=self.use_fp16):
+                with torch.amp.autocast(device_type='cuda', enabled=self.use_fp16):
                     # Batch predict - process all points at once
                     masks_batch, scores_batch, _ = self.predictor.predict(
                         point_coords=point_coords_batch,
@@ -263,7 +263,7 @@ class SAM2MaskGenerator:
                     point_labels_arr = np.array([label])  # Shape: (1,)
 
                     # Use autocast for mixed precision
-                    with torch.cuda.amp.autocast(enabled=self.use_fp16):
+                    with torch.amp.autocast(device_type='cuda', enabled=self.use_fp16):
                         # Predict masks
                         masks, scores, _ = self.predictor.predict(
                             point_coords=point_coords,
