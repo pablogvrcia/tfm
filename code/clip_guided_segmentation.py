@@ -220,11 +220,11 @@ def extract_enhanced_prompts_from_clip(seg_map, probs, vocabulary, min_confidenc
             x_min, x_max = x_coords.min(), x_coords.max()
             y_min, y_max = y_coords.min(), y_coords.max()
 
-            # Add 5% margin
+            # Add 10% margin (increased from 5% to capture more context)
             width = x_max - x_min
             height = y_max - y_min
-            margin_x = int(width * 0.05)
-            margin_y = int(height * 0.05)
+            margin_x = int(width * 0.10)
+            margin_y = int(height * 0.10)
 
             x_min = max(0, x_min - margin_x)
             y_min = max(0, y_min - margin_y)
@@ -247,32 +247,28 @@ def extract_enhanced_prompts_from_clip(seg_map, probs, vocabulary, min_confidenc
 
             positive_points = np.array([[centroid_x, centroid_y]])
 
-            # === 3. NEGATIVE POINTS (uncertain/confused regions) ===
+            # === 3. NEGATIVE POINTS (confused regions OUTSIDE instance) ===
             negative_points = []
 
             # Create mask for inside the box
             inside_box_mask = np.zeros_like(seg_map, dtype=bool)
             inside_box_mask[y_min:y_max, x_min:x_max] = True
 
-            # Strategy 1: Low confidence regions inside the instance
-            uncertain_mask = (
-                region_mask &
-                (class_confidence < low_confidence_threshold)
-            )
-
-            # Strategy 2: Other classes with high confidence inside the box
+            # Strategy: Only use regions OUTSIDE the CLIP instance but INSIDE the box
+            # that have high confidence in OTHER classes (confusion/background)
             other_class_probs = probs.copy()
             other_class_probs[:, :, class_idx] = 0  # Exclude target class
             max_other_prob = other_class_probs.max(axis=-1)
 
+            # MODIFIED: Only background regions with HIGH confidence in another class
+            # NOT low-confidence regions inside the instance (Strategy 1 removed)
             confusion_mask = (
-                (seg_map != class_idx) &
-                inside_box_mask &
-                (max_other_prob > 0.5)  # High confidence in another class
+                ~region_mask &  # OUTSIDE the CLIP instance
+                inside_box_mask &  # but INSIDE the box
+                (max_other_prob > 0.6)  # High confidence in another class (raised from 0.5)
             )
 
-            # Combine both strategies
-            negative_candidate_mask = uncertain_mask | confusion_mask
+            negative_candidate_mask = confusion_mask
 
             if negative_candidate_mask.any():
                 y_neg, x_neg = np.where(negative_candidate_mask)
