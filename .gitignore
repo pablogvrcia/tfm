@@ -79,3 +79,11 @@ others
 cutouts
 
 VACE
+Wan2.1
+DiffSynth-Studio
+
+**/__pycache__/
+
+*.pyc
+*.pyo
+*.pyd
