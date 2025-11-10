@@ -37,6 +37,8 @@ try:
     from clip_guided_segmentation import (
         extract_prompt_points_from_clip,
         segment_with_guided_prompts,
+        extract_enhanced_prompts_from_clip,
+        segment_with_enhanced_prompts,
         merge_overlapping_masks
     )
     CLIP_GUIDED_AVAILABLE = True
@@ -142,6 +144,8 @@ def parse_args():
                         help='Use SAM for mask proposals (hybrid mode)')
     parser.add_argument('--use-clip-guided-sam', action='store_true',
                         help='Use CLIP-guided SAM with intelligent prompting and overlap resolution')
+    parser.add_argument('--use-clip-guided-bbox-sam', action='store_true',
+                        help='Use CLIP-guided SAM with box + negative point prompts (+20-30%% mIoU expected)')
     parser.add_argument('--min-confidence', type=float, default=0.3,
                         help='Minimum CLIP confidence for guided prompts (--use-clip-guided-sam only)')
     parser.add_argument('--min-region-size', type=int, default=100,
@@ -230,7 +234,7 @@ def segment_with_clip_guided_sam(image, class_names, segmentor, args):
 
     Uses the improved method from clip_guided_segmentation.py:
     1. CLIP dense prediction
-    2. Extract intelligent prompts
+    2. Extract intelligent prompts (points or box + negative points)
     3. SAM segmentation at prompts
     4. Merge overlaps with cross-class resolution
     """
@@ -241,24 +245,41 @@ def segment_with_clip_guided_sam(image, class_names, segmentor, args):
     probs = torch.softmax(logits, dim=0).cpu().numpy()
     probs = probs.transpose(1, 2, 0)  # (H, W, num_classes)
 
-    # Step 2: Extract prompt points
-    prompts = extract_prompt_points_from_clip(
-        seg_map, probs, class_names,
-        min_confidence=args.min_confidence,
-        min_region_size=args.min_region_size
-    )
+    # Step 2: Extract prompts (enhanced or standard)
+    if args.use_clip_guided_bbox_sam:
+        # Enhanced prompts with box + negative points
+        prompts = extract_enhanced_prompts_from_clip(
+            seg_map, probs, class_names,
+            min_confidence=args.min_confidence,
+            min_region_size=args.min_region_size
+        )
+    else:
+        # Standard point prompts
+        prompts = extract_prompt_points_from_clip(
+            seg_map, probs, class_names,
+            min_confidence=args.min_confidence,
+            min_region_size=args.min_region_size
+        )
 
     if len(prompts) == 0:
         # Fallback to dense prediction if no prompts
         return seg_map
 
-    # Step 3: Segment with guided prompts
-    results = segment_with_guided_prompts(
-        image, prompts,
-        checkpoint_path="checkpoints/sam2_hiera_large.pt",
-        model_cfg="sam2_hiera_l.yaml",
-        device=segmentor.device
-    )
+    # Step 3: Segment with guided prompts (enhanced or standard)
+    if args.use_clip_guided_bbox_sam:
+        results = segment_with_enhanced_prompts(
+            image, prompts,
+            checkpoint_path="checkpoints/sam2_hiera_large.pt",
+            model_cfg="sam2_hiera_l.yaml",
+            device=segmentor.device
+        )
+    else:
+        results = segment_with_guided_prompts(
+            image, prompts,
+            checkpoint_path="checkpoints/sam2_hiera_large.pt",
+            model_cfg="sam2_hiera_l.yaml",
+            device=segmentor.device
+        )
 
     # Step 4: Merge overlapping masks
     results = merge_overlapping_masks(results, iou_threshold=args.iou_threshold)
@@ -291,18 +312,28 @@ def main():
     args = parse_args()
 
     # Validate arguments
-    if args.use_clip_guided_sam and not CLIP_GUIDED_AVAILABLE:
-        print("Error: --use-clip-guided-sam requires clip_guided_segmentation module")
+    if (args.use_clip_guided_sam or args.use_clip_guided_bbox_sam) and not CLIP_GUIDED_AVAILABLE:
+        print("Error: --use-clip-guided-sam/--use-clip-guided-bbox-sam requires clip_guided_segmentation module")
         return
 
-    if args.use_clip_guided_sam and args.use_sam:
-        print("Error: Cannot use both --use-sam and --use-clip-guided-sam")
+    if args.use_clip_guided_sam and args.use_clip_guided_bbox_sam:
+        print("Error: Cannot use both --use-clip-guided-sam and --use-clip-guided-bbox-sam (choose one)")
+        return
+
+    if (args.use_clip_guided_sam or args.use_clip_guided_bbox_sam) and args.use_sam:
+        print("Error: Cannot use --use-sam with CLIP-guided modes")
         return
 
     print("=" * 80)
     print(f"Benchmark: {args.dataset.upper()}")
     print("=" * 80)
-    if args.use_clip_guided_sam:
+    if args.use_clip_guided_bbox_sam:
+        print(f"Mode: CLIP-Guided SAM with Box + Negative Points (Enhanced prompting)")
+        print(f"  Min confidence: {args.min_confidence}")
+        print(f"  Min region size: {args.min_region_size}")
+        print(f"  IoU threshold: {args.iou_threshold}")
+        print(f"  Expected improvement: +20-30% mIoU vs point-only")
+    elif args.use_clip_guided_sam:
         print(f"Mode: CLIP-Guided SAM (Intelligent prompting + overlap resolution)")
         print(f"  Min confidence: {args.min_confidence}")
         print(f"  Min region size: {args.min_region_size}")
@@ -375,7 +406,7 @@ def main():
 
     segmentor = SCLIPSegmentor(
         model_name=args.model,
-        use_sam=args.use_sam if not args.use_clip_guided_sam else False,  # Disable built-in SAM for clip-guided
+        use_sam=args.use_sam if not (args.use_clip_guided_sam or args.use_clip_guided_bbox_sam) else False,  # Disable built-in SAM for clip-guided modes
         use_pamr=args.use_pamr,
         pamr_steps=args.pamr_steps,
         logit_scale=args.logit_scale,
@@ -417,7 +448,7 @@ def main():
             profiler.start('total_inference')
 
         # Predict
-        if args.use_clip_guided_sam:
+        if args.use_clip_guided_sam or args.use_clip_guided_bbox_sam:
             if profiler:
                 profiler.start('clip_guided_sam')
             pred_mask = segment_with_clip_guided_sam(image, dataset.class_names, segmentor, args)
