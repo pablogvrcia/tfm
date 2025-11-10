@@ -133,6 +133,7 @@ negative_candidate_mask = uncertain_mask | confusion_mask
 | Argument | Default | Description |
 |----------|---------|-------------|
 | `--use-clip-guided-bbox-sam` | False | Enable box + negative points |
+| `--disable-negative-points` | False | Disable negative points (box-only mode) |
 | `--min-confidence` | 0.3 | Min confidence for region detection |
 | `--min-region-size` | 100 | Min pixels for instance |
 | `--iou-threshold` | 0.8 | IoU for merging overlaps |
@@ -143,8 +144,10 @@ negative_candidate_mask = uncertain_mask | confusion_mask
 |-----------|---------|-------------|
 | `low_confidence_threshold` | 0.3 | Threshold for uncertain regions |
 | `num_negative_points` | 3 | Max negative points per instance |
-| `box_margin` | 5% | Margin added to bounding box |
+| `box_margin` | 10% | Margin added to bounding box (increased from 5%) |
 | `positive_confidence` | 0.8 | Min confidence for positive centroids |
+| `min_negative_region_size` | 20 | Min pixels for negative region (noise filtering) |
+| `morphological_kernel` | 3x3 | Kernel size for noise removal |
 
 ## Expected Results
 
@@ -221,21 +224,35 @@ python -m py_compile clip_guided_segmentation.py  # ✓ Passed
 python -m py_compile run_benchmarks.py           # ✓ Passed
 ```
 
-**Quick Test:**
+**Test 1: Box + Filtered Negative Points (Default, Recommended)**
 ```bash
 python run_benchmarks.py \
     --dataset coco-stuff \
-    --num-samples 5 \
-    --use-clip-guided-bbox-sam
-```
-
-**Full Benchmark:**
-```bash
-python run_benchmarks.py \
-    --dataset coco-stuff \
-    --num-samples 50 \
+    --num-samples 10 \
     --use-clip-guided-bbox-sam \
     --use-all-phase2a
+```
+
+**Test 2: Box-only (No Negative Points)**
+```bash
+python run_benchmarks.py \
+    --dataset coco-stuff \
+    --num-samples 10 \
+    --use-clip-guided-bbox-sam \
+    --disable-negative-points \
+    --use-all-phase2a
+```
+
+**Test 3: Full Comparison (all modes)**
+```bash
+# Baseline (point-only)
+python run_benchmarks.py --dataset coco-stuff --num-samples 50 --use-clip-guided-sam
+
+# Box + filtered negative points
+python run_benchmarks.py --dataset coco-stuff --num-samples 50 --use-clip-guided-bbox-sam
+
+# Box-only (no negative points)
+python run_benchmarks.py --dataset coco-stuff --num-samples 50 --use-clip-guided-bbox-sam --disable-negative-points
 ```
 
 ## Troubleshooting
@@ -254,14 +271,92 @@ python run_benchmarks.py \
 - Negative points are only added when confusion/uncertainty detected
 - Average of 0-3 per instance is expected
 
+## Anti-Noise Filtering
+
+### Problem: SCLIP Prediction Artifacts
+
+SCLIP can produce **small isolated high-confidence predictions** (artifacts/noise):
+- Single pixels or small clusters (<5 pixels)
+- High confidence in wrong classes
+- Misinterpreted as valid negative point candidates
+- Causes SAM2 to exclude valid object regions
+
+### Solution: Multi-Stage Noise Filtering
+
+**Stage 1: Morphological Opening (Binary Opening)**
+```python
+from scipy.ndimage import binary_opening
+
+# Remove isolated pixels and small clusters (< 3x3)
+kernel = np.ones((3, 3))
+confusion_mask = binary_opening(confusion_mask, structure=kernel)
+```
+- Removes isolated pixels
+- Eliminates small clusters
+- Preserves larger coherent regions
+
+**Stage 2: Connected Component Size Filtering**
+```python
+labeled_neg, num_neg = label(confusion_mask)
+min_negative_region_size = 20
+
+for neg_id in range(1, num_neg + 1):
+    neg_region = (labeled_neg == neg_id)
+    if neg_region.sum() >= min_negative_region_size:
+        # Keep this negative region
+        filtered_mask |= neg_region
+```
+- Only keeps regions with ≥20 pixels
+- Filters remaining small artifacts
+- Ensures negative points on coherent background
+
+**Stage 3: Optional Disabling**
+```bash
+# Disable negative points entirely if filtering insufficient
+--disable-negative-points
+```
+
+### Comparison
+
+| Mode | Noise Handling | mIoU Expected | Use Case |
+|------|----------------|---------------|----------|
+| Point-only | N/A | Baseline | Original method |
+| Box-only | N/A | +10-15% | Safe fallback, no noise issues |
+| Box + Filtered Neg | Multi-stage | +20-30% | Best quality with clean negatives |
+| Box + Unfiltered Neg | None | May decrease | Artifacts cause false negatives |
+
+### Visual Example
+
+**Before Filtering:**
+```
+Negative candidates (artifacts marked X):
+░░░░░░░░░░░░░░░░░░░░
+░░░██████████░░X░░░░░  <- X = isolated artifact (1 pixel)
+░░░██Object███░░XX░░░  <- XX = small cluster (2 pixels)
+░░░██████████░░░░░░░░
+░░X░░░░░░░░░░░X░░░░░░  <- More scattered noise
+```
+
+**After Filtering:**
+```
+Negative candidates (clean):
+░░░░░░░░░░░░░░░░░░░░
+░░░██████████░░░░░░░░  <- Artifacts removed
+░░░██Object███░░░░░░░
+░░░██████████░░░░░░░░
+░░░░░░░░░░░░░░░░░░░░░  <- Clean background
+```
+
 ## References
 
 **Papers:**
 1. Box prompts: SAM2 paper (2024) - +15-25% vs points
 2. Negative points: Interactive segmentation (CVPR 2024) - +10-15%
 3. Hybrid prompting: SAM-HQ (ICCV 2023) - +20-30% combined
+4. Morphological operations: Digital Image Processing (Gonzalez & Woods)
 
 **Implementation inspired by:**
 - CLIPtrase (ECCV 2024) - self-correlation analysis
 - CLIP-RC (CVPR 2024) - regional clues extraction
 - Connected components for instance detection (scipy)
+- Binary morphology for noise removal (scipy.ndimage)
