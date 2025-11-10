@@ -152,6 +152,8 @@ def parse_args():
                         help='Minimum region size for guided prompts (--use-clip-guided-sam only)')
     parser.add_argument('--iou-threshold', type=float, default=0.8,
                         help='IoU threshold for merging overlaps (--use-clip-guided-sam only)')
+    parser.add_argument('--disable-negative-points', action='store_true', default=False,
+                        help='Disable negative points in box prompts (use only box + positive point)')
     parser.add_argument('--use-pamr', action='store_true', default=False,
                         help='Use PAMR refinement (default: False, SCLIP disables by default)')
     parser.add_argument('--pamr-steps', type=int, default=10,
@@ -247,11 +249,12 @@ def segment_with_clip_guided_sam(image, class_names, segmentor, args):
 
     # Step 2: Extract prompts (enhanced or standard)
     if args.use_clip_guided_bbox_sam:
-        # Enhanced prompts with box + negative points
+        # Enhanced prompts with box + negative points (or box-only if disabled)
         prompts = extract_enhanced_prompts_from_clip(
             seg_map, probs, class_names,
             min_confidence=args.min_confidence,
-            min_region_size=args.min_region_size
+            min_region_size=args.min_region_size,
+            use_negative_points=not args.disable_negative_points
         )
     else:
         # Standard point prompts
@@ -328,11 +331,19 @@ def main():
     print(f"Benchmark: {args.dataset.upper()}")
     print("=" * 80)
     if args.use_clip_guided_bbox_sam:
-        print(f"Mode: CLIP-Guided SAM with Box + Negative Points (Enhanced prompting)")
+        if args.disable_negative_points:
+            print(f"Mode: CLIP-Guided SAM with Box + Positive Point (Negative points disabled)")
+        else:
+            print(f"Mode: CLIP-Guided SAM with Box + Negative Points (Enhanced prompting)")
         print(f"  Min confidence: {args.min_confidence}")
         print(f"  Min region size: {args.min_region_size}")
         print(f"  IoU threshold: {args.iou_threshold}")
-        print(f"  Expected improvement: +20-30% mIoU vs point-only")
+        if not args.disable_negative_points:
+            print(f"  Negative points: Enabled (with noise filtering)")
+            print(f"  Expected improvement: +20-30% mIoU vs point-only")
+        else:
+            print(f"  Negative points: Disabled")
+            print(f"  Expected improvement: +10-15% mIoU (box-only)")
     elif args.use_clip_guided_sam:
         print(f"Mode: CLIP-Guided SAM (Intelligent prompting + overlap resolution)")
         print(f"  Min confidence: {args.min_confidence}")

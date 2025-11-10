@@ -169,7 +169,7 @@ def extract_prompt_points_from_clip(seg_map, probs, vocabulary, min_confidence=0
 
 def extract_enhanced_prompts_from_clip(seg_map, probs, vocabulary, min_confidence=0.7,
                                        min_region_size=100, low_confidence_threshold=0.3,
-                                       num_negative_points=3):
+                                       num_negative_points=3, use_negative_points=True):
     """
     Extract enhanced prompts (box + positive/negative points) from CLIP predictions.
 
@@ -184,6 +184,7 @@ def extract_enhanced_prompts_from_clip(seg_map, probs, vocabulary, min_confidenc
         min_region_size: Minimum pixel area for a region
         low_confidence_threshold: Threshold for detecting uncertain regions
         num_negative_points: Maximum negative points per instance
+        use_negative_points: If False, only use box + positive points (no negative points)
 
     Returns:
         List of prompt dictionaries with 'box', 'positive_points', 'negative_points', etc.
@@ -191,7 +192,10 @@ def extract_enhanced_prompts_from_clip(seg_map, probs, vocabulary, min_confidenc
     H, W = seg_map.shape
     prompts = []
 
-    print("\nExtracting enhanced prompts (box + points) from CLIP predictions...")
+    if use_negative_points:
+        print("\nExtracting enhanced prompts (box + positive/negative points) from CLIP predictions...")
+    else:
+        print("\nExtracting enhanced prompts (box + positive points only) from CLIP predictions...")
 
     for class_idx, class_name in enumerate(vocabulary):
         # Get high-confidence regions for this class
@@ -248,39 +252,62 @@ def extract_enhanced_prompts_from_clip(seg_map, probs, vocabulary, min_confidenc
             positive_points = np.array([[centroid_x, centroid_y]])
 
             # === 3. NEGATIVE POINTS (confused regions OUTSIDE instance) ===
+            # ANTI-NOISE STRATEGY: Filter out SCLIP artifacts before extracting negative points
             negative_points = []
 
-            # Create mask for inside the box
-            inside_box_mask = np.zeros_like(seg_map, dtype=bool)
-            inside_box_mask[y_min:y_max, x_min:x_max] = True
+            if use_negative_points:
+                # Create mask for inside the box
+                inside_box_mask = np.zeros_like(seg_map, dtype=bool)
+                inside_box_mask[y_min:y_max, x_min:x_max] = True
 
-            # Strategy: Only use regions OUTSIDE the CLIP instance but INSIDE the box
-            # that have high confidence in OTHER classes (confusion/background)
-            other_class_probs = probs.copy()
-            other_class_probs[:, :, class_idx] = 0  # Exclude target class
-            max_other_prob = other_class_probs.max(axis=-1)
+                # Strategy: Only use regions OUTSIDE the CLIP instance but INSIDE the box
+                # that have high confidence in OTHER classes (confusion/background)
+                other_class_probs = probs.copy()
+                other_class_probs[:, :, class_idx] = 0  # Exclude target class
+                max_other_prob = other_class_probs.max(axis=-1)
 
-            # MODIFIED: Only background regions with HIGH confidence in another class
-            # NOT low-confidence regions inside the instance (Strategy 1 removed)
-            confusion_mask = (
-                ~region_mask &  # OUTSIDE the CLIP instance
-                inside_box_mask &  # but INSIDE the box
-                (max_other_prob > 0.6)  # High confidence in another class (raised from 0.5)
-            )
+                # Initial confusion mask
+                confusion_mask = (
+                    ~region_mask &  # OUTSIDE the CLIP instance
+                    inside_box_mask &  # but INSIDE the box
+                    (max_other_prob > 0.6)  # High confidence in another class
+                )
 
-            negative_candidate_mask = confusion_mask
+                # NOISE FILTERING: Remove small isolated artifacts using morphological operations
+                if confusion_mask.any():
+                    from scipy.ndimage import binary_opening, binary_erosion
 
-            if negative_candidate_mask.any():
-                y_neg, x_neg = np.where(negative_candidate_mask)
+                    # Apply binary opening to remove small artifacts (< 3x3 pixels)
+                    # This removes isolated pixels and small clusters (SCLIP noise)
+                    kernel_size = 3
+                    confusion_mask = binary_opening(confusion_mask, structure=np.ones((kernel_size, kernel_size)))
 
-                # Select up to num_negative_points spatially distributed points
-                num_candidates = len(y_neg)
-                if num_candidates > num_negative_points:
-                    # Use uniform sampling
-                    indices = np.linspace(0, num_candidates - 1, num_negative_points, dtype=int)
-                    negative_points = np.stack([x_neg[indices], y_neg[indices]], axis=1)
-                elif num_candidates > 0:
-                    negative_points = np.stack([x_neg, y_neg], axis=1)
+                    # Additionally, filter by connected component size
+                    # Only keep negative regions with at least 20 pixels (not tiny artifacts)
+                    labeled_neg, num_neg = label(confusion_mask)
+                    min_negative_region_size = 20
+
+                    filtered_confusion_mask = np.zeros_like(confusion_mask)
+                    for neg_id in range(1, num_neg + 1):
+                        neg_region = (labeled_neg == neg_id)
+                        if neg_region.sum() >= min_negative_region_size:
+                            filtered_confusion_mask |= neg_region
+
+                    confusion_mask = filtered_confusion_mask
+
+                negative_candidate_mask = confusion_mask
+
+                if negative_candidate_mask.any():
+                    y_neg, x_neg = np.where(negative_candidate_mask)
+
+                    # Select up to num_negative_points spatially distributed points
+                    num_candidates = len(y_neg)
+                    if num_candidates > num_negative_points:
+                        # Use uniform sampling
+                        indices = np.linspace(0, num_candidates - 1, num_negative_points, dtype=int)
+                        negative_points = np.stack([x_neg[indices], y_neg[indices]], axis=1)
+                    elif num_candidates > 0:
+                        negative_points = np.stack([x_neg, y_neg], axis=1)
 
             # Convert to numpy array
             negative_points = np.array(negative_points) if len(negative_points) > 0 else np.array([]).reshape(0, 2)
@@ -299,7 +326,9 @@ def extract_enhanced_prompts_from_clip(seg_map, probs, vocabulary, min_confidenc
             })
 
     print(f"\nTotal enhanced prompts extracted: {len(prompts)}")
-    print(f"  Average negative points per prompt: {np.mean([len(p['negative_points']) for p in prompts]):.1f}")
+    if use_negative_points:
+        avg_neg = np.mean([len(p['negative_points']) for p in prompts]) if prompts else 0
+        print(f"  Average negative points per prompt: {avg_neg:.1f}")
     return prompts
 
 
