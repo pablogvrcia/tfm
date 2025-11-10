@@ -21,6 +21,19 @@ from models.sclip_features import SCLIPFeatureExtractor
 from models.pamr import PAMR
 from models.sam2_segmentation import SAM2MaskGenerator
 
+# Phase 1 improvements (2025)
+try:
+    from models.resclip_attention import ResCLIPModule
+    RESCLIP_AVAILABLE = True
+except ImportError:
+    RESCLIP_AVAILABLE = False
+
+try:
+    from models.densecrf_refine import DenseCRFRefiner
+    DENSECRF_AVAILABLE = True
+except ImportError:
+    DENSECRF_AVAILABLE = False
+
 
 class SCLIPSegmentor:
     """
@@ -49,6 +62,10 @@ class SCLIPSegmentor:
         use_fp16: bool = True,
         use_compile: bool = False,
         batch_prompts: bool = True,
+        # Phase 1 improvements (ICCV/CVPR 2025 papers)
+        use_loftup: bool = False,  # LoftUp feature upsampling (+2-4% mIoU)
+        use_resclip: bool = False,  # ResCLIP residual attention (+8-13% mIoU)
+        use_densecrf: bool = False,  # DenseCRF boundary refinement (+1-2% mIoU, +3-5% boundary F1)
     ):
         """
         Initialize SCLIP segmentor with 2025 performance optimizations.
@@ -69,6 +86,9 @@ class SCLIPSegmentor:
             use_fp16: Enable FP16 mixed precision (2025 optimization)
             use_compile: Enable torch.compile() (2025 optimization)
             batch_prompts: Enable batch prompt processing for SAM (2025 optimization)
+            use_loftup: Enable LoftUp feature upsampling (Phase 1)
+            use_resclip: Enable ResCLIP residual attention (Phase 1)
+            use_densecrf: Enable DenseCRF boundary refinement (Phase 1)
         """
         self.device = device
         self.use_sam = use_sam
@@ -82,6 +102,9 @@ class SCLIPSegmentor:
         self.use_fp16 = use_fp16
         self.use_compile = use_compile
         self.batch_prompts = batch_prompts
+        self.use_loftup = use_loftup
+        self.use_resclip = use_resclip
+        self.use_densecrf = use_densecrf
 
         # Text feature cache to avoid recomputing for same classes
         self._text_feature_cache = {}
@@ -91,6 +114,9 @@ class SCLIPSegmentor:
             print(f"  Mode: {'Hybrid (SAM + SCLIP)' if use_sam else 'Dense (SCLIP only)'}")
             print(f"  PAMR: {'Enabled' if use_pamr else 'Disabled'}")
             print(f"  Slide inference: {'Enabled' if slide_inference else 'Disabled'}")
+            print(f"  Phase 1: LoftUp={'Enabled' if use_loftup else 'Disabled'}, "
+                  f"ResCLIP={'Enabled' if use_resclip else 'Disabled'}, "
+                  f"DenseCRF={'Enabled' if use_densecrf else 'Disabled'}")
 
         # Initialize SCLIP feature extractor with optimizations
         self.clip_extractor = SCLIPFeatureExtractor(
@@ -98,6 +124,7 @@ class SCLIPSegmentor:
             device=device,
             use_fp16=use_fp16,
             use_compile=use_compile,
+            use_loftup=use_loftup,
         )
 
         # Initialize PAMR if enabled
@@ -120,6 +147,51 @@ class SCLIPSegmentor:
                 print("  SAM generator initialized with 2025 optimizations")
         else:
             self.sam_generator = None
+
+        # Initialize ResCLIP if enabled (Phase 1)
+        self.resclip_module = None
+        if use_resclip:
+            if not RESCLIP_AVAILABLE:
+                if verbose:
+                    print("  WARNING: ResCLIP requested but not available. Disabling.")
+                self.use_resclip = False
+            else:
+                try:
+                    self.resclip_module = ResCLIPModule(
+                        use_rcs=True,  # Enable Residual Cross-correlation Self-attention
+                        use_sfr=True,  # Enable Semantic Feedback Refinement
+                        use_fp16=use_fp16,
+                        device=device
+                    )
+                    if verbose:
+                        print(f"  ResCLIP: Enabled (RCS + SFR, +8-13% mIoU expected)")
+                except Exception as e:
+                    if verbose:
+                        print(f"  WARNING: ResCLIP initialization failed: {e}")
+                    self.use_resclip = False
+                    self.resclip_module = None
+
+        # Initialize DenseCRF if enabled (Phase 1)
+        self.densecrf_refiner = None
+        if use_densecrf:
+            if not DENSECRF_AVAILABLE:
+                if verbose:
+                    print("  WARNING: DenseCRF requested but not available. Disabling.")
+                self.use_densecrf = False
+            else:
+                try:
+                    self.densecrf_refiner = DenseCRFRefiner(
+                        max_iterations=10,
+                        pos_w=3.0,
+                        bi_w=10.0
+                    )
+                    if verbose:
+                        print(f"  DenseCRF: Enabled (+1-2% mIoU, +3-5% boundary F1 expected)")
+                except Exception as e:
+                    if verbose:
+                        print(f"  WARNING: DenseCRF initialization failed: {e}")
+                    self.use_densecrf = False
+                    self.densecrf_refiner = None
 
         if verbose:
             print("[SCLIP Segmentor] Ready!\n")
@@ -244,6 +316,32 @@ class SCLIPSegmentor:
 
         # Convert to probabilities
         probs = F.softmax(logits, dim=0)
+
+        # Apply DenseCRF boundary refinement if enabled (Phase 1)
+        if self.use_densecrf and self.densecrf_refiner is not None:
+            if self.verbose:
+                print("[Phase 1] Applying DenseCRF boundary refinement...")
+
+            # Resize image to match probability map
+            image_for_crf = image.copy()
+            if image_for_crf.shape[:2] != probs.shape[-2:]:
+                image_for_crf = cv2.resize(
+                    image_for_crf,
+                    (probs.shape[2], probs.shape[1]),  # (W, H)
+                    interpolation=cv2.INTER_LINEAR
+                )
+
+            # Apply DenseCRF refinement
+            try:
+                refined_probs = self.densecrf_refiner.refine_torch(
+                    image=torch.from_numpy(image_for_crf),
+                    probabilities=probs,
+                    return_probs=True
+                )
+                probs = refined_probs
+            except Exception as e:
+                if self.verbose:
+                    print(f"[Phase 1] DenseCRF failed: {e}. Using unrefined probabilities.")
 
         # Get predictions
         pred_mask = probs.argmax(dim=0).cpu().numpy()
@@ -741,17 +839,45 @@ class SCLIPSegmentor:
         class_names: List[str]
     ) -> torch.Tensor:
         """
-        Single forward pass to get dense logits.
+        Single forward pass to get dense logits with Phase 1 enhancements.
 
         Returns:
             Logits (num_classes, H_feat, W_feat)
         """
-        # Compute dense similarities
-        similarities = self.clip_extractor.compute_dense_similarity(
-            image,
-            class_names,
-            use_csa=True
-        )  # (num_classes, H, W)
+        # Apply ResCLIP if enabled (Phase 1)
+        if self.use_resclip and self.resclip_module is not None:
+            # Extract features and text separately for ResCLIP processing
+            _, dense_features = self.clip_extractor.extract_image_features(
+                image,
+                return_dense=True,
+                use_csa=True,
+                normalize=True,
+                preserve_resolution=False
+            )  # dense_features: (H, W, D)
+
+            # Apply RCS (Residual Cross-correlation Self-attention)
+            enhanced_features = self.resclip_module.enhance_features(
+                dense_features,
+                residual_weight=0.3
+            )  # (H, W, D)
+
+            # Get text features
+            text_features = self._get_text_features(class_names)  # (num_classes, D)
+
+            # Apply SFR (Semantic Feedback Refinement)
+            # This computes multi-scale similarity maps
+            similarities = self.resclip_module.refine_predictions(
+                enhanced_features,
+                text_features,
+                original_size=image.shape[:2]
+            )  # (num_classes, H, W)
+        else:
+            # Standard SCLIP approach
+            similarities = self.clip_extractor.compute_dense_similarity(
+                image,
+                class_names,
+                use_csa=True
+            )  # (num_classes, H, W)
 
         return similarities
 

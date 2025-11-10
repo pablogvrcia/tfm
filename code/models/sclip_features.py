@@ -17,6 +17,12 @@ import sys
 from models.clip import clip
 from prompts.imagenet_template import openai_imagenet_template
 
+try:
+    from models.loftup_upsampler import LoftUpUpsampler
+    LOFTUP_AVAILABLE = True
+except ImportError:
+    LOFTUP_AVAILABLE = False
+
 
 class SCLIPFeatureExtractor:
     """
@@ -34,6 +40,7 @@ class SCLIPFeatureExtractor:
         device: str = "cuda" if torch.cuda.is_available() else "cpu",
         use_fp16: bool = True,  # Mixed precision for 2x speedup (inspired by TernaryCLIP 2025)
         use_compile: bool = False,  # torch.compile() for JIT optimization
+        use_loftup: bool = False,  # LoftUp feature upsampling for +2-4% mIoU (ICCV 2025)
     ):
         """
         Initialize SCLIP feature extractor with 2025 performance optimizations.
@@ -43,6 +50,7 @@ class SCLIPFeatureExtractor:
             device: Computation device
             use_fp16: Enable mixed precision (FP16) for faster inference
             use_compile: Enable torch.compile() for JIT optimization
+            use_loftup: Enable LoftUp feature upsampling for better dense predictions
         """
         self.device = device
         self.model_name = model_name
@@ -74,6 +82,31 @@ class SCLIPFeatureExtractor:
 
         print(f"[SCLIP] Model loaded successfully")
         print(f"[SCLIP] Patch size: {self.patch_size}, Embedding dim: {self.embed_dim}")
+
+        # Initialize LoftUp upsampler if requested
+        self.use_loftup = use_loftup
+        self.loftup_upsampler = None
+        if use_loftup:
+            if not LOFTUP_AVAILABLE:
+                print(f"[SCLIP] Warning: LoftUp requested but not available")
+                print(f"[SCLIP] Install with: pip install torch torchvision")
+                print(f"[SCLIP] Continuing without LoftUp upsampling")
+                self.use_loftup = False
+            else:
+                try:
+                    self.loftup_upsampler = LoftUpUpsampler(
+                        model_name="loftup_clip",
+                        backbone=model_name,
+                        device=device,
+                        use_fp16=use_fp16,
+                        use_pretrained=True
+                    )
+                    print(f"[SCLIP] LoftUp upsampler enabled (+2-4% mIoU expected)")
+                except Exception as e:
+                    print(f"[SCLIP] LoftUp initialization failed: {e}")
+                    print(f"[SCLIP] Continuing without LoftUp upsampling")
+                    self.use_loftup = False
+                    self.loftup_upsampler = None
 
         # Text embedding cache
         self.text_embedding_cache = {}
@@ -157,6 +190,25 @@ class SCLIPFeatureExtractor:
 
                 # Reshape to (1, H, W, D)
                 patch_features = patch_features.reshape(1, grid_size, grid_size, self.embed_dim)
+
+                # Apply LoftUp upsampling if enabled
+                if self.use_loftup and self.loftup_upsampler is not None:
+                    # Convert to (B, C, H, W) format for upsampling
+                    patch_features_chw = patch_features.permute(0, 3, 1, 2)  # (1, D, H, W)
+
+                    # Determine target size (2x upsampling is standard for LoftUp)
+                    target_h = grid_size * 2
+                    target_w = grid_size * 2
+
+                    # Apply LoftUp upsampling
+                    upsampled_features = self.loftup_upsampler(
+                        patch_features_chw,
+                        target_size=(target_h, target_w),
+                        original_image=image_tensor  # Provide original image for guidance
+                    )
+
+                    # Convert back to (1, H, W, D) format
+                    patch_features = upsampled_features.permute(0, 2, 3, 1)
 
                 # Return as (H, W, D)
                 return None, patch_features.squeeze(0)
