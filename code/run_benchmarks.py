@@ -24,6 +24,9 @@ import json
 from datetime import datetime
 from tqdm import tqdm
 import time
+import psutil
+import torch
+from collections import defaultdict
 
 from models.sclip_segmentor import SCLIPSegmentor
 from datasets import COCOStuffDataset, PASCALVOCDataset
@@ -40,6 +43,84 @@ try:
 except ImportError:
     CLIP_GUIDED_AVAILABLE = False
     print("Warning: clip_guided_segmentation module not available")
+
+
+class PerformanceProfiler:
+    """
+    Performance profiling for benchmarks - inspired by 2025 optimization papers.
+
+    Tracks: timing, memory usage, GPU utilization, throughput
+    """
+    def __init__(self):
+        self.timings = defaultdict(list)
+        self.memory_usage = defaultdict(list)
+        self.gpu_memory = defaultdict(list)
+        self.start_times = {}
+
+    def start(self, name: str):
+        """Start timing a section."""
+        self.start_times[name] = time.time()
+
+    def end(self, name: str):
+        """End timing a section and record metrics."""
+        if name not in self.start_times:
+            return
+
+        elapsed = time.time() - self.start_times[name]
+        self.timings[name].append(elapsed)
+
+        # Record memory usage
+        process = psutil.Process()
+        mem_mb = process.memory_info().rss / 1024 / 1024
+        self.memory_usage[name].append(mem_mb)
+
+        # Record GPU memory if available
+        if torch.cuda.is_available():
+            gpu_mem_mb = torch.cuda.memory_allocated() / 1024 / 1024
+            self.gpu_memory[name].append(gpu_mem_mb)
+
+        del self.start_times[name]
+
+    def get_summary(self):
+        """Get performance summary."""
+        summary = {}
+
+        for name in self.timings:
+            times = self.timings[name]
+            summary[name] = {
+                'count': len(times),
+                'total_time': sum(times),
+                'mean_time': np.mean(times),
+                'std_time': np.std(times),
+                'min_time': np.min(times),
+                'max_time': np.max(times),
+                'mean_memory_mb': np.mean(self.memory_usage[name]) if self.memory_usage[name] else 0,
+                'mean_gpu_memory_mb': np.mean(self.gpu_memory[name]) if self.gpu_memory[name] else 0,
+            }
+
+        return summary
+
+    def print_summary(self):
+        """Print formatted performance summary."""
+        summary = self.get_summary()
+
+        print("\n" + "="*80)
+        print("PERFORMANCE PROFILING SUMMARY (2025 Optimizations)")
+        print("="*80)
+
+        for name, stats in sorted(summary.items()):
+            print(f"\n{name}:")
+            print(f"  Count:        {stats['count']}")
+            print(f"  Total time:   {stats['total_time']:.2f}s")
+            print(f"  Mean time:    {stats['mean_time']:.3f}s ± {stats['std_time']:.3f}s")
+            print(f"  Min/Max time: {stats['min_time']:.3f}s / {stats['max_time']:.3f}s")
+            print(f"  Throughput:   {1.0/stats['mean_time']:.2f} samples/sec")
+            if stats['mean_memory_mb'] > 0:
+                print(f"  Mean RAM:     {stats['mean_memory_mb']:.1f} MB")
+            if stats['mean_gpu_memory_mb'] > 0:
+                print(f"  Mean GPU RAM: {stats['mean_gpu_memory_mb']:.1f} MB")
+
+        print("\n" + "="*80)
 
 
 def parse_args():
@@ -89,6 +170,16 @@ def parse_args():
                         help='Output directory for results')
     parser.add_argument('--save-vis', action='store_true',
                         help='Save visualizations')
+
+    # Performance optimizations (2025 papers)
+    parser.add_argument('--use-fp16', action='store_true', default=True,
+                        help='Enable FP16 mixed precision (inspired by TernaryCLIP 2025)')
+    parser.add_argument('--use-compile', action='store_true', default=False,
+                        help='Enable torch.compile() for JIT optimization (PyTorch 2.0+)')
+    parser.add_argument('--batch-prompts', action='store_true', default=True,
+                        help='Enable batch processing for SAM prompts (inspired by EfficientViT-SAM 2024)')
+    parser.add_argument('--enable-profiling', action='store_true', default=False,
+                        help='Enable detailed performance profiling')
 
     return parser.parse_args()
 
@@ -214,8 +305,18 @@ def main():
     print(f"Classes: {dataset.num_classes}")
     print()
 
-    # Initialize SCLIP segmentor
-    print("Initializing SCLIP segmentor...")
+    # Initialize performance profiler
+    profiler = PerformanceProfiler() if args.enable_profiling else None
+
+    # Initialize SCLIP segmentor with 2025 optimizations
+    print("Initializing SCLIP segmentor with 2025 optimizations...")
+    if args.use_fp16:
+        print("  ✓ FP16 mixed precision enabled (TernaryCLIP 2025)")
+    if args.use_compile:
+        print("  ✓ torch.compile() enabled")
+    if args.batch_prompts:
+        print("  ✓ Batch prompt processing enabled (EfficientViT-SAM 2024)")
+
     segmentor = SCLIPSegmentor(
         model_name=args.model,
         use_sam=args.use_sam if not args.use_clip_guided_sam else False,  # Disable built-in SAM for clip-guided
@@ -226,8 +327,13 @@ def main():
         slide_inference=args.slide_inference,
         slide_crop=args.slide_crop,
         slide_stride=args.slide_stride,
-        verbose=True
+        verbose=True,
+        # 2025 optimization parameters
+        use_fp16=args.use_fp16,
+        use_compile=args.use_compile,
+        batch_prompts=args.batch_prompts,
     )
+    print()
 
     # Collect predictions and ground truth
     all_preds = []
@@ -243,11 +349,26 @@ def main():
         image = sample['image']
         gt_mask = sample['mask']
 
+        # Profile prediction performance
+        if profiler:
+            profiler.start('total_inference')
+
         # Predict
         if args.use_clip_guided_sam:
+            if profiler:
+                profiler.start('clip_guided_sam')
             pred_mask = segment_with_clip_guided_sam(image, dataset.class_names, segmentor, args)
+            if profiler:
+                profiler.end('clip_guided_sam')
         else:
+            if profiler:
+                profiler.start('sclip_segment')
             pred_mask = segmentor.segment(image, dataset.class_names)
+            if profiler:
+                profiler.end('sclip_segment')
+
+        if profiler:
+            profiler.end('total_inference')
 
         # Collect predictions
         all_preds.append(pred_mask)
@@ -407,6 +528,10 @@ def main():
     print("=" * 80)
     print("✓ Benchmark evaluation complete!")
     print("=" * 80)
+
+    # Print performance profiling summary
+    if profiler:
+        profiler.print_summary()
 
     # Summary
     print()

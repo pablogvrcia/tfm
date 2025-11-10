@@ -45,9 +45,13 @@ class SCLIPSegmentor:
         slide_crop: int = 224,  # SCLIP paper: crop=224
         slide_stride: int = 112,  # SCLIP paper: stride=112
         verbose: bool = True,
+        # 2025 optimization parameters
+        use_fp16: bool = True,
+        use_compile: bool = False,
+        batch_prompts: bool = True,
     ):
         """
-        Initialize SCLIP segmentor.
+        Initialize SCLIP segmentor with 2025 performance optimizations.
 
         Args:
             model_name: CLIP model (ViT-L/14@336px recommended by SCLIP)
@@ -62,6 +66,9 @@ class SCLIPSegmentor:
             slide_crop: Crop size for sliding window
             slide_stride: Stride for sliding window
             verbose: Print progress
+            use_fp16: Enable FP16 mixed precision (2025 optimization)
+            use_compile: Enable torch.compile() (2025 optimization)
+            batch_prompts: Enable batch prompt processing for SAM (2025 optimization)
         """
         self.device = device
         self.use_sam = use_sam
@@ -72,6 +79,9 @@ class SCLIPSegmentor:
         self.slide_crop = slide_crop
         self.slide_stride = slide_stride
         self.verbose = verbose
+        self.use_fp16 = use_fp16
+        self.use_compile = use_compile
+        self.batch_prompts = batch_prompts
 
         # Text feature cache to avoid recomputing for same classes
         self._text_feature_cache = {}
@@ -82,10 +92,12 @@ class SCLIPSegmentor:
             print(f"  PAMR: {'Enabled' if use_pamr else 'Disabled'}")
             print(f"  Slide inference: {'Enabled' if slide_inference else 'Disabled'}")
 
-        # Initialize SCLIP feature extractor
+        # Initialize SCLIP feature extractor with optimizations
         self.clip_extractor = SCLIPFeatureExtractor(
             model_name=model_name,
-            device=device
+            device=device,
+            use_fp16=use_fp16,
+            use_compile=use_compile,
         )
 
         # Initialize PAMR if enabled
@@ -96,11 +108,16 @@ class SCLIPSegmentor:
         else:
             self.pamr = None
 
-        # Initialize SAM if hybrid mode
+        # Initialize SAM if hybrid mode with 2025 optimizations
         if use_sam:
-            self.sam_generator = SAM2MaskGenerator(device=device)
+            self.sam_generator = SAM2MaskGenerator(
+                device=device,
+                use_fp16=use_fp16,
+                use_compile=use_compile,
+                batch_prompts=batch_prompts,
+            )
             if verbose:
-                print("  SAM generator initialized")
+                print("  SAM generator initialized with 2025 optimizations")
         else:
             self.sam_generator = None
 
