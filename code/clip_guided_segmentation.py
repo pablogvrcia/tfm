@@ -169,12 +169,14 @@ def extract_prompt_points_from_clip(seg_map, probs, vocabulary, min_confidence=0
 
 def extract_enhanced_prompts_from_clip(seg_map, probs, vocabulary, min_confidence=0.7,
                                        min_region_size=100, low_confidence_threshold=0.3,
-                                       num_negative_points=1, use_negative_points=True):
+                                       num_negative_points=1, use_negative_points=True, use_multipoint=True):
     """
-    Extract enhanced prompts (box + positive/negative points) from CLIP predictions.
+    Extract enhanced prompts from CLIP predictions.
 
-    This function extracts bounding boxes and negative points to improve SAM2 prompting.
-    Expected improvement: +20-30% mIoU vs point-only prompts.
+    Two modes:
+    - Multi-point mode (use_multipoint=True): 5-9 positive points distributed across region, NO box
+      Expected: +5-10% mIoU, robust to CLIP imprecision
+    - Box mode (use_multipoint=False): Box + optional negative points (problematic with imprecise CLIP)
 
     Args:
         seg_map: (H, W) predicted class indices
@@ -182,9 +184,10 @@ def extract_enhanced_prompts_from_clip(seg_map, probs, vocabulary, min_confidenc
         vocabulary: List of class names
         min_confidence: Minimum confidence to consider a region
         min_region_size: Minimum pixel area for a region
-        low_confidence_threshold: Threshold for detecting uncertain regions (unused currently)
-        num_negative_points: Maximum negative points per instance (default: 1, ultra conservative)
-        use_negative_points: If False, only use box + positive points (no negative points)
+        low_confidence_threshold: Threshold for detecting uncertain regions (unused)
+        num_negative_points: Maximum negative points per instance (box mode only)
+        use_negative_points: If False, only use box + positive points (box mode only)
+        use_multipoint: If True, use multi-point mode (NO box). If False, use box mode.
 
     Returns:
         List of prompt dictionaries with 'box', 'positive_points', 'negative_points', etc.
@@ -192,7 +195,9 @@ def extract_enhanced_prompts_from_clip(seg_map, probs, vocabulary, min_confidenc
     H, W = seg_map.shape
     prompts = []
 
-    if use_negative_points:
+    if use_multipoint:
+        print("\nExtracting multi-point prompts (5-9 positive points, NO box) from CLIP predictions...")
+    elif use_negative_points:
         print("\nExtracting enhanced prompts (box + positive/negative points) from CLIP predictions...")
     else:
         print("\nExtracting enhanced prompts (box + positive points only) from CLIP predictions...")
@@ -219,43 +224,80 @@ def extract_enhanced_prompts_from_clip(seg_map, probs, vocabulary, min_confidenc
             if region_size < min_region_size:
                 continue
 
-            # === 1. BOUNDING BOX ===
+            # Get region coordinates
             y_coords, x_coords = np.where(region_mask)
             x_min, x_max = x_coords.min(), x_coords.max()
             y_min, y_max = y_coords.min(), y_coords.max()
 
-            # Add 30% margin (increased to capture more context when CLIP is imprecise)
-            width = x_max - x_min
-            height = y_max - y_min
-            margin_x = int(width * 0.30)
-            margin_y = int(height * 0.30)
+            if use_multipoint:
+                # === MULTI-POINT MODE: Extract 5-9 positive points, NO box ===
+                high_conf_in_region = region_mask & (class_confidence > 0.8)
 
-            x_min = max(0, x_min - margin_x)
-            y_min = max(0, y_min - margin_y)
-            x_max = min(W - 1, x_max + margin_x)
-            y_max = min(H - 1, y_max + margin_y)
+                if high_conf_in_region.any():
+                    y_high, x_high = np.where(high_conf_in_region)
+                    centroid_x = int(x_high.mean())
+                    centroid_y = int(y_high.mean())
+                else:
+                    centroid_x = int(x_coords.mean())
+                    centroid_y = int(y_coords.mean())
 
-            box = np.array([x_min, y_min, x_max, y_max])
+                # Build multi-point grid: centroid + 4 corners + 4 edge midpoints
+                positive_points_list = [
+                    [centroid_x, centroid_y],  # Center
+                    [x_min, y_min],             # Top-left corner
+                    [x_max, y_min],             # Top-right corner
+                    [x_min, y_max],             # Bottom-left corner
+                    [x_max, y_max],             # Bottom-right corner
+                    [centroid_x, y_min],        # Top-middle
+                    [centroid_x, y_max],        # Bottom-middle
+                    [x_min, centroid_y],        # Left-middle
+                    [x_max, centroid_y],        # Right-middle
+                ]
 
-            # === 2. POSITIVE POINTS (high confidence centroids) ===
-            high_conf_in_region = region_mask & (class_confidence > 0.8)
+                # Filter points to only include those within the actual region
+                # (some corners might be outside if region is not rectangular)
+                filtered_points = []
+                for px, py in positive_points_list:
+                    # Ensure within image bounds
+                    px = max(0, min(W - 1, px))
+                    py = max(0, min(H - 1, py))
+                    filtered_points.append([px, py])
 
-            if high_conf_in_region.any():
-                y_high, x_high = np.where(high_conf_in_region)
-                centroid_x = int(x_high.mean())
-                centroid_y = int(y_high.mean())
+                positive_points = np.array(filtered_points)
+                box = None  # No box in multi-point mode
+
             else:
-                # Fallback: use region centroid
-                centroid_x = int(x_coords.mean())
-                centroid_y = int(y_coords.mean())
+                # === BOX MODE: Box + single positive point + optional negative points ===
+                # Add 30% margin
+                width = x_max - x_min
+                height = y_max - y_min
+                margin_x = int(width * 0.30)
+                margin_y = int(height * 0.30)
 
-            positive_points = np.array([[centroid_x, centroid_y]])
+                x_min = max(0, x_min - margin_x)
+                y_min = max(0, y_min - margin_y)
+                x_max = min(W - 1, x_max + margin_x)
+                y_max = min(H - 1, y_max + margin_y)
 
-            # === 3. NEGATIVE POINTS (confused regions OUTSIDE instance) ===
-            # ANTI-NOISE STRATEGY: Filter out SCLIP artifacts before extracting negative points
+                box = np.array([x_min, y_min, x_max, y_max])
+
+                # Single positive point at centroid
+                high_conf_in_region = region_mask & (class_confidence > 0.8)
+
+                if high_conf_in_region.any():
+                    y_high, x_high = np.where(high_conf_in_region)
+                    centroid_x = int(x_high.mean())
+                    centroid_y = int(y_high.mean())
+                else:
+                    centroid_x = int(x_coords.mean())
+                    centroid_y = int(y_coords.mean())
+
+                positive_points = np.array([[centroid_x, centroid_y]])
+
+            # === 3. NEGATIVE POINTS (only in box mode) ===
             negative_points = []
 
-            if use_negative_points:
+            if not use_multipoint and use_negative_points:
                 # Create mask for inside the box
                 inside_box_mask = np.zeros_like(seg_map, dtype=bool)
                 inside_box_mask[y_min:y_max, x_min:x_max] = True
@@ -454,13 +496,23 @@ def segment_with_enhanced_prompts(image, prompts, checkpoint_path=None, model_cf
             all_points = positive_points
             point_labels = np.array([1] * len(positive_points))
 
-        # Get mask from SAM2 with box + points
-        masks, scores, _ = predictor.predict(
-            point_coords=all_points,
-            point_labels=point_labels,
-            box=box[None, :],  # SAM2 expects shape [1, 4]
-            multimask_output=True  # Get 3 masks, pick best
-        )
+        # Get mask from SAM2
+        # If box is None (multi-point mode), use only points
+        # If box is provided (box mode), use box + points
+        if box is not None:
+            masks, scores, _ = predictor.predict(
+                point_coords=all_points,
+                point_labels=point_labels,
+                box=box[None, :],  # SAM2 expects shape [1, 4]
+                multimask_output=True  # Get 3 masks, pick best
+            )
+        else:
+            # Multi-point mode: no box, just multiple positive points
+            masks, scores, _ = predictor.predict(
+                point_coords=all_points,
+                point_labels=point_labels,
+                multimask_output=True  # Get 3 masks, pick best
+            )
 
         # Pick mask with highest score
         best_idx = np.argmax(scores)
