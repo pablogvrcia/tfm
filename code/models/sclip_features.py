@@ -278,7 +278,8 @@ class SCLIPFeatureExtractor:
         dense_flat = dense_features.reshape(H * W, D)  # (H*W, D)
 
         # Compute similarity: (H*W, D) @ (D, num_classes) = (H*W, num_classes)
-        similarities = dense_flat @ text_features.T
+        # Ensure both tensors have the same dtype (important for FP16 mixed precision)
+        similarities = dense_flat @ text_features.to(dense_flat.dtype).T
 
         # Reshape back to spatial: (num_classes, H, W)
         similarities = similarities.T.reshape(len(texts), H, W)

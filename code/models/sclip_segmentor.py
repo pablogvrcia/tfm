@@ -823,7 +823,8 @@ class SCLIPSegmentor:
                 features = features / features.norm(dim=-1, keepdim=True)
 
                 # Compute logits: features @ text_features^T
-                crop_logits = features @ text_features.T  # (1, num_patches, num_classes)
+                # Ensure both tensors have the same dtype (important for FP16 mixed precision)
+                crop_logits = features @ text_features.to(features.dtype).T  # (1, num_patches, num_classes)
 
                 # Reshape to spatial: (1, num_classes, h_patches, w_patches)
                 patch_size = self.clip_extractor.model.visual.patch_size
