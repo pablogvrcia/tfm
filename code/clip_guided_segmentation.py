@@ -169,7 +169,7 @@ def extract_prompt_points_from_clip(seg_map, probs, vocabulary, min_confidence=0
 
 def extract_enhanced_prompts_from_clip(seg_map, probs, vocabulary, min_confidence=0.7,
                                        min_region_size=100, low_confidence_threshold=0.3,
-                                       num_negative_points=3, use_negative_points=True):
+                                       num_negative_points=1, use_negative_points=True):
     """
     Extract enhanced prompts (box + positive/negative points) from CLIP predictions.
 
@@ -182,8 +182,8 @@ def extract_enhanced_prompts_from_clip(seg_map, probs, vocabulary, min_confidenc
         vocabulary: List of class names
         min_confidence: Minimum confidence to consider a region
         min_region_size: Minimum pixel area for a region
-        low_confidence_threshold: Threshold for detecting uncertain regions
-        num_negative_points: Maximum negative points per instance
+        low_confidence_threshold: Threshold for detecting uncertain regions (unused currently)
+        num_negative_points: Maximum negative points per instance (default: 1, ultra conservative)
         use_negative_points: If False, only use box + positive points (no negative points)
 
     Returns:
@@ -224,11 +224,11 @@ def extract_enhanced_prompts_from_clip(seg_map, probs, vocabulary, min_confidenc
             x_min, x_max = x_coords.min(), x_coords.max()
             y_min, y_max = y_coords.min(), y_coords.max()
 
-            # Add 10% margin (increased from 5% to capture more context)
+            # Add 30% margin (increased to capture more context when CLIP is imprecise)
             width = x_max - x_min
             height = y_max - y_min
-            margin_x = int(width * 0.10)
-            margin_y = int(height * 0.10)
+            margin_x = int(width * 0.30)
+            margin_y = int(height * 0.30)
 
             x_min = max(0, x_min - margin_x)
             y_min = max(0, y_min - margin_y)
@@ -266,11 +266,12 @@ def extract_enhanced_prompts_from_clip(seg_map, probs, vocabulary, min_confidenc
                 other_class_probs[:, :, class_idx] = 0  # Exclude target class
                 max_other_prob = other_class_probs.max(axis=-1)
 
-                # Initial confusion mask
+                # Initial confusion mask - ULTRA CONSERVATIVE
+                # Only place negative points where there's VERY high confidence (>0.8) in another class
                 confusion_mask = (
                     ~region_mask &  # OUTSIDE the CLIP instance
                     inside_box_mask &  # but INSIDE the box
-                    (max_other_prob > 0.6)  # High confidence in another class
+                    (max_other_prob > 0.8)  # VERY high confidence in another class (raised from 0.6)
                 )
 
                 # NOISE FILTERING: Remove small isolated artifacts using morphological operations
@@ -283,9 +284,9 @@ def extract_enhanced_prompts_from_clip(seg_map, probs, vocabulary, min_confidenc
                     confusion_mask = binary_opening(confusion_mask, structure=np.ones((kernel_size, kernel_size)))
 
                     # Additionally, filter by connected component size
-                    # Only keep negative regions with at least 20 pixels (not tiny artifacts)
+                    # Only keep negative regions with at least 50 pixels (ultra conservative)
                     labeled_neg, num_neg = label(confusion_mask)
-                    min_negative_region_size = 20
+                    min_negative_region_size = 50  # Increased from 20 to be more conservative
 
                     filtered_confusion_mask = np.zeros_like(confusion_mask)
                     for neg_id in range(1, num_neg + 1):
