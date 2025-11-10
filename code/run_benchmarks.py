@@ -1,5 +1,5 @@
 """
-SCLIP Benchmark Runner
+SCLIP Benchmark Runner with LoFTup Support
 
 Evaluates SCLIP-based semantic segmentation on standard benchmarks.
 
@@ -7,14 +7,20 @@ Usage:
     # Dense mode (pure SCLIP, fastest, best performance)
     python run_benchmarks.py --dataset coco-stuff --num-samples 10
 
+    # With LoFTup enhancement (improved features)
+    python run_benchmarks.py --dataset pascal-voc --num-samples 10 --use-loftup
+
+    # Compare with and without LoFTup (A/B testing)
+    python run_benchmarks.py --dataset pascal-voc --num-samples 10 --compare-loftup
+
     # Hybrid mode (SCLIP + SAM)
     python run_benchmarks.py --dataset coco-stuff --num-samples 10 --use-sam
 
     # With PAMR refinement (better boundaries)
     python run_benchmarks.py --dataset coco-stuff --num-samples 10 --use-pamr
 
-    # Sliding window inference (slower but better)
-    python run_benchmarks.py --dataset coco-stuff --num-samples 10 --slide-inference
+    # Full comparison: baseline vs LoFTup on Pascal VOC
+    python run_benchmarks.py --dataset pascal-voc --compare-loftup --save-vis
 """
 
 import argparse
@@ -83,6 +89,18 @@ def parse_args():
                         help='Crop size for sliding window (SCLIP default: 224)')
     parser.add_argument('--slide-stride', type=int, default=112,
                         help='Stride for sliding window (SCLIP default: 112)')
+
+    # LoFTup settings
+    parser.add_argument('--use-loftup', action='store_true', default=False,
+                        help='Enable LoFTup feature upsampling (improved spatial resolution)')
+    parser.add_argument('--no-loftup', action='store_false', dest='use_loftup',
+                        help='Disable LoFTup feature upsampling')
+    parser.add_argument('--loftup-adaptive', action='store_true', default=True,
+                        help='Use adaptive LoFTup upsampling (adjusts factor based on feature size)')
+    parser.add_argument('--loftup-factor', type=float, default=2.0,
+                        help='Fixed LoFTup upsampling factor (if not adaptive, default: 2.0)')
+    parser.add_argument('--compare-loftup', action='store_true',
+                        help='Run comparison: baseline vs LoFTup (A/B testing)')
 
     # Output
     parser.add_argument('--output-dir', type=str, default='benchmarks/results',
@@ -178,66 +196,29 @@ def segment_with_clip_guided_sam(image, class_names, segmentor, args):
     return final_seg_map
 
 
-def main():
-    args = parse_args()
+def run_single_evaluation(segmentor, dataset, args, mode_name="default"):
+    """
+    Run evaluation on dataset with given segmentor.
 
-    # Validate arguments
-    if args.use_clip_guided_sam and not CLIP_GUIDED_AVAILABLE:
-        print("Error: --use-clip-guided-sam requires clip_guided_segmentation module")
-        return
+    Args:
+        segmentor: SCLIPSegmentor instance
+        dataset: Dataset instance
+        args: Arguments
+        mode_name: Name for this evaluation mode (e.g., "baseline", "loftup")
 
-    if args.use_clip_guided_sam and args.use_sam:
-        print("Error: Cannot use both --use-sam and --use-clip-guided-sam")
-        return
-
-    print("=" * 80)
-    print(f"Benchmark: {args.dataset.upper()}")
-    print("=" * 80)
-    if args.use_clip_guided_sam:
-        print(f"Mode: CLIP-Guided SAM (Intelligent prompting + overlap resolution)")
-        print(f"  Min confidence: {args.min_confidence}")
-        print(f"  Min region size: {args.min_region_size}")
-        print(f"  IoU threshold: {args.iou_threshold}")
-    elif args.use_sam:
-        print(f"Mode: Hybrid (SAM + SCLIP)")
-    else:
-        print(f"Mode: Dense (SCLIP only)")
-    print(f"PAMR: {args.use_pamr}")
-    print(f"Slide inference: {args.slide_inference}")
-    print()
-
-    # Load dataset
-    print("Loading dataset...")
-    dataset = load_dataset(args.dataset, args.data_dir, args.num_samples)
-    print(f"Dataset: {args.dataset}")
-    print(f"Samples: {len(dataset)}")
-    print(f"Classes: {dataset.num_classes}")
-    print()
-
-    # Initialize SCLIP segmentor
-    print("Initializing SCLIP segmentor...")
-    segmentor = SCLIPSegmentor(
-        model_name=args.model,
-        use_sam=args.use_sam if not args.use_clip_guided_sam else False,  # Disable built-in SAM for clip-guided
-        use_pamr=args.use_pamr,
-        pamr_steps=args.pamr_steps,
-        logit_scale=args.logit_scale,
-        prob_threshold=args.prob_threshold,
-        slide_inference=args.slide_inference,
-        slide_crop=args.slide_crop,
-        slide_stride=args.slide_stride,
-        verbose=True
-    )
-
-    # Collect predictions and ground truth
+    Returns:
+        dict: Results including metrics and timing
+    """
     all_preds = []
     all_gts = []
 
-    # Evaluation loop
-    print("Starting evaluation...")
+    print(f"\n{'='*80}")
+    print(f"Evaluating: {mode_name}")
+    print(f"{'='*80}")
+
     start_time = time.time()
 
-    for idx in tqdm(range(len(dataset)), desc="Evaluating"):
+    for idx in tqdm(range(len(dataset)), desc=f"Evaluating {mode_name}"):
         # Load sample
         sample = dataset[idx]
         image = sample['image']
@@ -255,86 +236,7 @@ def main():
 
         # Save visualization if requested
         if args.save_vis:
-            import matplotlib.pyplot as plt
-            import matplotlib.patches as mpatches
-
-            vis_dir = Path(args.output_dir) / 'visualizations' / args.dataset
-            vis_dir.mkdir(parents=True, exist_ok=True)
-
-            # Create visualization with adaptive height for legend
-            fig, axes = plt.subplots(1, 3, figsize=(20, 7))
-
-            axes[0].imshow(image)
-            axes[0].set_title(f"Image {idx}", fontsize=14, fontweight='bold')
-            axes[0].axis('off')
-
-            # Choose colormap based on dataset
-            if dataset.num_classes <= 21:
-                # Pascal VOC - use distinctive colors for few classes
-                from matplotlib.colors import ListedColormap
-                import matplotlib.cm as cm
-                # Use a colormap that works well for small number of classes
-                base_cmap = cm.get_cmap('tab20', 20)
-                colors = [base_cmap(i) for i in range(20)]
-                colors.insert(0, (0, 0, 0, 1))  # Black for background/class 0
-                voc_cmap = ListedColormap(colors)
-                cmap_viz = voc_cmap
-                vmax_viz = dataset.num_classes - 1
-                cmap_legend = cm.get_cmap('tab20', 20)
-            else:
-                # COCO-Stuff - use extended colormap
-                cmap_viz = 'tab20'
-                vmax_viz = 170
-                cmap_legend = plt.cm.get_cmap('tab20', 171)
-
-            # Ground truth with legend
-            axes[1].imshow(gt_mask, cmap=cmap_viz, vmin=0, vmax=vmax_viz)
-            axes[1].set_title("Ground Truth", fontsize=14, fontweight='bold')
-            axes[1].axis('off')
-
-            # Prediction with legend
-            axes[2].imshow(pred_mask, cmap=cmap_viz, vmin=0, vmax=vmax_viz)
-            axes[2].set_title("Prediction", fontsize=14, fontweight='bold')
-            axes[2].axis('off')
-
-            # Create legend showing present classes
-            gt_classes = np.unique(gt_mask[gt_mask != 255])
-            pred_classes = np.unique(pred_mask)
-
-            # Show ALL classes that appear in either GT or predictions
-            all_classes = sorted(set(gt_classes.tolist()) | set(pred_classes.tolist()))
-            display_classes = all_classes  # Show all present classes, no limit
-
-            # Create color patches for legend
-            legend_elements = []
-            for cls in display_classes:
-                if dataset.num_classes <= 21:
-                    # Pascal VOC coloring
-                    if cls == 0:
-                        color = (0, 0, 0, 1)  # Black for background
-                    else:
-                        color = cmap_legend((cls - 1) / 19)
-                else:
-                    # COCO-Stuff coloring
-                    color = cmap_legend(cls / 170)
-
-                in_gt = "✓" if cls in gt_classes else ""
-                in_pred = "✓" if cls in pred_classes else ""
-                label = f"{dataset.class_names[cls]} {in_gt}{in_pred}"
-                legend_elements.append(mpatches.Patch(color=color, label=label))
-
-            # Add legend below the images with adaptive columns
-            num_cols = min(6, len(legend_elements))  # Up to 6 columns
-            fig.legend(handles=legend_elements, loc='lower center',
-                      ncol=num_cols, fontsize=8, frameon=True,
-                      title="Classes (✓✓ = in both GT and pred, ✓ = in one only)")
-
-            # Calculate space needed for legend based on number of rows
-            num_rows = (len(legend_elements) + num_cols - 1) // num_cols
-            legend_height = 0.08 + (num_rows - 1) * 0.03  # More space per row
-            plt.tight_layout(rect=[0, legend_height, 1, 1])  # Leave space for legend
-            plt.savefig(vis_dir / f'sample_{idx:04d}.png', dpi=150, bbox_inches='tight')
-            plt.close()
+            save_visualization(image, gt_mask, pred_mask, dataset, idx, args, mode_name)
 
     # Compute metrics per sample and average
     all_results = []
@@ -357,15 +259,321 @@ def main():
         'per_class_iou': {}
     }
 
-    # Average per-class IoU (use nanmean to ignore classes not in GT)
+    # Average per-class IoU
     for class_idx in range(dataset.num_classes):
         class_name = dataset.class_names[class_idx]
         class_ious = [r['per_class_iou'].get(class_idx, np.nan) for r in all_results]
         results['per_class_iou'][class_name] = np.nanmean(class_ious)
 
     elapsed_time = time.time() - start_time
-    print(f"\nEvaluation completed in {elapsed_time:.2f}s")
-    print(f"Average time per image: {elapsed_time / len(dataset):.2f}s")
+    results['elapsed_time'] = elapsed_time
+    results['time_per_image'] = elapsed_time / len(dataset)
+
+    return results, all_preds, all_gts
+
+
+def save_visualization(image, gt_mask, pred_mask, dataset, idx, args, mode_name="default"):
+    """Save visualization of segmentation results."""
+    import matplotlib.pyplot as plt
+    import matplotlib.patches as mpatches
+
+    vis_dir = Path(args.output_dir) / 'visualizations' / args.dataset / mode_name
+    vis_dir.mkdir(parents=True, exist_ok=True)
+
+    # Create visualization
+    fig, axes = plt.subplots(1, 3, figsize=(20, 7))
+
+    axes[0].imshow(image)
+    axes[0].set_title(f"Image {idx}", fontsize=14, fontweight='bold')
+    axes[0].axis('off')
+
+    # Choose colormap based on dataset
+    if dataset.num_classes <= 21:
+        from matplotlib.colors import ListedColormap
+        import matplotlib.cm as cm
+        base_cmap = cm.get_cmap('tab20', 20)
+        colors = [base_cmap(i) for i in range(20)]
+        colors.insert(0, (0, 0, 0, 1))
+        voc_cmap = ListedColormap(colors)
+        cmap_viz = voc_cmap
+        vmax_viz = dataset.num_classes - 1
+        cmap_legend = cm.get_cmap('tab20', 20)
+    else:
+        cmap_viz = 'tab20'
+        vmax_viz = 170
+        cmap_legend = plt.cm.get_cmap('tab20', 171)
+
+    # Ground truth
+    axes[1].imshow(gt_mask, cmap=cmap_viz, vmin=0, vmax=vmax_viz)
+    axes[1].set_title("Ground Truth", fontsize=14, fontweight='bold')
+    axes[1].axis('off')
+
+    # Prediction
+    axes[2].imshow(pred_mask, cmap=cmap_viz, vmin=0, vmax=vmax_viz)
+    axes[2].set_title(f"Prediction ({mode_name})", fontsize=14, fontweight='bold')
+    axes[2].axis('off')
+
+    # Create legend
+    gt_classes = np.unique(gt_mask[gt_mask != 255])
+    pred_classes = np.unique(pred_mask)
+    all_classes = sorted(set(gt_classes.tolist()) | set(pred_classes.tolist()))
+
+    legend_elements = []
+    for cls in all_classes:
+        if dataset.num_classes <= 21:
+            color = (0, 0, 0, 1) if cls == 0 else cmap_legend((cls - 1) / 19)
+        else:
+            color = cmap_legend(cls / 170)
+
+        in_gt = "✓" if cls in gt_classes else ""
+        in_pred = "✓" if cls in pred_classes else ""
+        label = f"{dataset.class_names[cls]} {in_gt}{in_pred}"
+        legend_elements.append(mpatches.Patch(color=color, label=label))
+
+    num_cols = min(6, len(legend_elements))
+    fig.legend(handles=legend_elements, loc='lower center',
+              ncol=num_cols, fontsize=8, frameon=True,
+              title="Classes (✓✓ = in both, ✓ = in one)")
+
+    num_rows = (len(legend_elements) + num_cols - 1) // num_cols
+    legend_height = 0.08 + (num_rows - 1) * 0.03
+    plt.tight_layout(rect=[0, legend_height, 1, 1])
+    plt.savefig(vis_dir / f'sample_{idx:04d}.png', dpi=150, bbox_inches='tight')
+    plt.close()
+
+
+def print_comparison_results(baseline_results, loftup_results, dataset):
+    """Print comparison between baseline and LoFTup results."""
+    print("\n" + "=" * 80)
+    print("COMPARISON: Baseline vs LoFTup")
+    print("=" * 80)
+
+    # Overall metrics
+    print("\nOverall Metrics:")
+    print(f"{'Metric':<20} {'Baseline':<12} {'LoFTup':<12} {'Improvement':<12}")
+    print("-" * 60)
+
+    metrics = ['miou', 'pixel_accuracy', 'f1', 'precision', 'recall', 'boundary_f1']
+    for metric in metrics:
+        baseline_val = baseline_results[metric] * 100
+        loftup_val = loftup_results[metric] * 100
+        improvement = loftup_val - baseline_val
+        improvement_str = f"+{improvement:.2f}%" if improvement >= 0 else f"{improvement:.2f}%"
+
+        print(f"{metric:<20} {baseline_val:>6.2f}%     {loftup_val:>6.2f}%     {improvement_str:>12}")
+
+    # Timing
+    print("\nTiming:")
+    baseline_time = baseline_results['time_per_image']
+    loftup_time = loftup_results['time_per_image']
+    overhead = ((loftup_time / baseline_time) - 1) * 100
+
+    print(f"{'Time per image':<20} {baseline_time:>6.2f}s     {loftup_time:>6.2f}s     +{overhead:>5.1f}%")
+
+    # Per-class improvements
+    print("\nTop 10 Classes with Largest Improvements:")
+    print(f"{'Class':<20} {'Baseline':<12} {'LoFTup':<12} {'Improvement':<12}")
+    print("-" * 60)
+
+    class_improvements = {}
+    for class_name in baseline_results['per_class_iou'].keys():
+        baseline_iou = baseline_results['per_class_iou'][class_name]
+        loftup_iou = loftup_results['per_class_iou'][class_name]
+
+        if not (np.isnan(baseline_iou) or np.isnan(loftup_iou)):
+            improvement = (loftup_iou - baseline_iou) * 100
+            class_improvements[class_name] = {
+                'baseline': baseline_iou * 100,
+                'loftup': loftup_iou * 100,
+                'improvement': improvement
+            }
+
+    # Sort by improvement
+    sorted_classes = sorted(class_improvements.items(),
+                           key=lambda x: x[1]['improvement'],
+                           reverse=True)
+
+    for class_name, metrics in sorted_classes[:10]:
+        baseline_val = metrics['baseline']
+        loftup_val = metrics['loftup']
+        improvement = metrics['improvement']
+        improvement_str = f"+{improvement:.2f}%" if improvement >= 0 else f"{improvement:.2f}%"
+
+        print(f"{class_name:<20} {baseline_val:>6.2f}%     {loftup_val:>6.2f}%     {improvement_str:>12}")
+
+    # Summary
+    print("\n" + "=" * 80)
+    print("SUMMARY")
+    print("=" * 80)
+
+    miou_improvement = (loftup_results['miou'] - baseline_results['miou']) * 100
+
+    if miou_improvement > 0:
+        print(f"✓ LoFTup improves mIoU by {miou_improvement:.2f} percentage points")
+        print(f"  ({baseline_results['miou']*100:.2f}% → {loftup_results['miou']*100:.2f}%)")
+    else:
+        print(f"✗ LoFTup decreases mIoU by {abs(miou_improvement):.2f} percentage points")
+        print(f"  ({baseline_results['miou']*100:.2f}% → {loftup_results['miou']*100:.2f}%)")
+
+    print(f"✓ Computational overhead: +{overhead:.1f}%")
+
+    # Count improved classes
+    num_improved = sum(1 for v in class_improvements.values() if v['improvement'] > 0)
+    num_total = len(class_improvements)
+    print(f"✓ Improved classes: {num_improved}/{num_total} ({num_improved/num_total*100:.1f}%)")
+
+
+def save_comparison_report(baseline_results, loftup_results, dataset, args):
+    """Save detailed comparison report to JSON."""
+    output_dir = Path(args.output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    report = {
+        'dataset': args.dataset,
+        'num_samples': len(dataset),
+        'timestamp': datetime.now().isoformat(),
+        'args': vars(args),
+        'baseline': baseline_results,
+        'loftup': loftup_results,
+        'comparison': {
+            'miou_improvement': (loftup_results['miou'] - baseline_results['miou']) * 100,
+            'f1_improvement': (loftup_results['f1'] - baseline_results['f1']) * 100,
+            'overhead_percent': ((loftup_results['time_per_image'] / baseline_results['time_per_image']) - 1) * 100
+        }
+    }
+
+    report_file = output_dir / f"{args.dataset}_loftup_comparison.json"
+    with open(report_file, 'w') as f:
+        json.dump(report, f, indent=2)
+
+    print(f"\nComparison report saved to: {report_file}")
+
+    return report_file
+
+
+def main():
+    args = parse_args()
+
+    # Validate arguments
+    if args.use_clip_guided_sam and not CLIP_GUIDED_AVAILABLE:
+        print("Error: --use-clip-guided-sam requires clip_guided_segmentation module")
+        return
+
+    if args.use_clip_guided_sam and args.use_sam:
+        print("Error: Cannot use both --use-sam and --use-clip-guided-sam")
+        return
+
+    print("=" * 80)
+    print(f"Benchmark: {args.dataset.upper()}")
+    print("=" * 80)
+
+    if args.compare_loftup:
+        print(f"Mode: COMPARISON (Baseline vs LoFTup)")
+    elif args.use_clip_guided_sam:
+        print(f"Mode: CLIP-Guided SAM (Intelligent prompting + overlap resolution)")
+        print(f"  Min confidence: {args.min_confidence}")
+        print(f"  Min region size: {args.min_region_size}")
+        print(f"  IoU threshold: {args.iou_threshold}")
+    elif args.use_sam:
+        print(f"Mode: Hybrid (SAM + SCLIP)")
+    else:
+        print(f"Mode: Dense (SCLIP only)")
+
+    print(f"PAMR: {args.use_pamr}")
+    print(f"Slide inference: {args.slide_inference}")
+    print(f"LoFTup: {args.use_loftup if not args.compare_loftup else 'Comparison mode'}")
+    print()
+
+    # Load dataset
+    print("Loading dataset...")
+    dataset = load_dataset(args.dataset, args.data_dir, args.num_samples)
+    print(f"Dataset: {args.dataset}")
+    print(f"Samples: {len(dataset)}")
+    print(f"Classes: {dataset.num_classes}")
+    print()
+
+    # Run comparison mode if requested
+    if args.compare_loftup:
+        print("\n" + "=" * 80)
+        print("RUNNING COMPARISON MODE")
+        print("=" * 80)
+
+        # 1. Run baseline (without LoFTup)
+        print("\nInitializing baseline segmentor (without LoFTup)...")
+        baseline_segmentor = SCLIPSegmentor(
+            model_name=args.model,
+            use_sam=args.use_sam if not args.use_clip_guided_sam else False,
+            use_pamr=args.use_pamr,
+            pamr_steps=args.pamr_steps,
+            logit_scale=args.logit_scale,
+            prob_threshold=args.prob_threshold,
+            slide_inference=args.slide_inference,
+            slide_crop=args.slide_crop,
+            slide_stride=args.slide_stride,
+            use_loftup=False,  # Disable LoFTup for baseline
+            verbose=True
+        )
+
+        baseline_results, baseline_preds, baseline_gts = run_single_evaluation(
+            baseline_segmentor, dataset, args, mode_name="baseline"
+        )
+
+        # 2. Run with LoFTup
+        print("\nInitializing LoFTup-enhanced segmentor...")
+        loftup_segmentor = SCLIPSegmentor(
+            model_name=args.model,
+            use_sam=args.use_sam if not args.use_clip_guided_sam else False,
+            use_pamr=args.use_pamr,
+            pamr_steps=args.pamr_steps,
+            logit_scale=args.logit_scale,
+            prob_threshold=args.prob_threshold,
+            slide_inference=args.slide_inference,
+            slide_crop=args.slide_crop,
+            slide_stride=args.slide_stride,
+            use_loftup=True,  # Enable LoFTup
+            loftup_adaptive=args.loftup_adaptive,
+            loftup_upsample_factor=args.loftup_factor,
+            verbose=True
+        )
+
+        loftup_results, loftup_preds, loftup_gts = run_single_evaluation(
+            loftup_segmentor, dataset, args, mode_name="loftup"
+        )
+
+        # 3. Print comparison
+        print_comparison_results(baseline_results, loftup_results, dataset)
+
+        # 4. Save comparison report
+        save_comparison_report(baseline_results, loftup_results, dataset, args)
+
+        return  # Exit after comparison
+
+    # Single evaluation mode
+    print("Initializing SCLIP segmentor...")
+    segmentor = SCLIPSegmentor(
+        model_name=args.model,
+        use_sam=args.use_sam if not args.use_clip_guided_sam else False,
+        use_pamr=args.use_pamr,
+        pamr_steps=args.pamr_steps,
+        logit_scale=args.logit_scale,
+        prob_threshold=args.prob_threshold,
+        slide_inference=args.slide_inference,
+        slide_crop=args.slide_crop,
+        slide_stride=args.slide_stride,
+        use_loftup=args.use_loftup,
+        loftup_adaptive=args.loftup_adaptive,
+        loftup_upsample_factor=args.loftup_factor,
+        verbose=True
+    )
+
+    # Run single evaluation
+    mode_name = "loftup" if args.use_loftup else "baseline"
+    results, all_preds, all_gts = run_single_evaluation(
+        segmentor, dataset, args, mode_name=mode_name
+    )
+
+    print(f"\nEvaluation completed in {results['elapsed_time']:.2f}s")
+    print(f"Average time per image: {results['time_per_image']:.2f}s")
 
     # Print results
     print()
