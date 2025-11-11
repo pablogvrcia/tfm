@@ -314,6 +314,103 @@ MATERIAL_TEMPLATES = {
         lambda c: 'a photo of a chain-link fence.',
         lambda c: 'wire mesh fence.',
     ],
+
+    # Enhanced '-other' classes (fix for background misclassification)
+    # Problem: '-other' is dataset-specific, not natural language
+    # Solution: Use descriptive terms CLIP understands
+    'wall-other': [
+        lambda c: 'a plain wall.',
+        lambda c: 'an unmarked wall.',
+        lambda c: 'a simple wall surface.',
+        lambda c: 'a blank wall.',
+        lambda c: 'an ordinary wall.',
+    ],
+    'floor-other': [
+        lambda c: 'a plain floor.',
+        lambda c: 'an unmarked floor.',
+        lambda c: 'a simple floor surface.',
+        lambda c: 'a blank floor.',
+        lambda c: 'an ordinary floor.',
+    ],
+    'ceiling-other': [
+        lambda c: 'a plain ceiling.',
+        lambda c: 'an unmarked ceiling.',
+        lambda c: 'a simple ceiling surface.',
+        lambda c: 'a blank ceiling.',
+        lambda c: 'an ordinary ceiling.',
+    ],
+    'building-other': [
+        lambda c: 'a plain building.',
+        lambda c: 'a generic building.',
+        lambda c: 'an ordinary building.',
+        lambda c: 'a simple building facade.',
+        lambda c: 'an unmarked building.',
+    ],
+    'plant-other': [
+        lambda c: 'a generic plant.',
+        lambda c: 'an ordinary plant.',
+        lambda c: 'plain vegetation.',
+        lambda c: 'an unspecified plant.',
+        lambda c: 'common greenery.',
+    ],
+    'textile-other': [
+        lambda c: 'plain fabric.',
+        lambda c: 'generic textile.',
+        lambda c: 'an ordinary cloth.',
+        lambda c: 'simple fabric material.',
+        lambda c: 'unmarked textile.',
+    ],
+    'food-other': [
+        lambda c: 'generic food.',
+        lambda c: 'an ordinary food item.',
+        lambda c: 'plain food.',
+        lambda c: 'unspecified food.',
+        lambda c: 'common food.',
+    ],
+
+    # Pascal VOC specific fixes
+    # Problem: Compound words without spaces/hyphens confuse CLIP tokenizer
+    # Solution: Add proper spacing or synonyms
+
+    'background': [
+        lambda c: 'empty background.',
+        lambda c: 'background region.',
+        lambda c: 'a blank area.',
+        lambda c: 'unmarked background.',
+        lambda c: 'plain background.',
+    ],
+
+    'aeroplane': [
+        lambda c: 'an aeroplane.',
+        lambda c: 'an airplane.',              # US English synonym
+        lambda c: 'a plane.',                   # Short form
+        lambda c: 'an aircraft.',               # Generic term
+        lambda c: 'a photo of a plane.',
+    ],
+
+    'diningtable': [
+        lambda c: 'a dining table.',            # Add space
+        lambda c: 'a table for dining.',
+        lambda c: 'a dinner table.',
+        lambda c: 'a dining room table.',
+        lambda c: 'a photo of a dining table.',
+    ],
+
+    'pottedplant': [
+        lambda c: 'a potted plant.',            # Add space
+        lambda c: 'a plant in a pot.',
+        lambda c: 'a houseplant.',
+        lambda c: 'an indoor plant.',
+        lambda c: 'a photo of a potted plant.',
+    ],
+
+    'tvmonitor': [
+        lambda c: 'a TV monitor.',              # Add space
+        lambda c: 'a television.',              # Full word
+        lambda c: 'a TV screen.',
+        lambda c: 'a television monitor.',
+        lambda c: 'a photo of a TV.',
+    ],
 }
 
 
