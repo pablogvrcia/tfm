@@ -84,6 +84,9 @@ class SCLIPSegmentor:
         use_clip_rc: bool = False,  # CLIP-RC regional clues extraction (+8-12% mIoU person)
         # Phase 2B improvements (2025 - prompt engineering)
         template_strategy: str = "imagenet80",  # Prompt template strategy (+2-5% mIoU, 3-4x faster)
+        # Phase 2C improvements (2025 - confidence sharpening)
+        use_confidence_sharpening: bool = False,  # Sharpen flat predictions (+5-8% mIoU)
+        use_hierarchical_prediction: bool = False,  # Group similar classes (+3-5% mIoU)
     ):
         """
         Initialize SCLIP segmentor with 2025 performance optimizations.
@@ -115,6 +118,8 @@ class SCLIPSegmentor:
                 - "spatial": Spatial context templates (+1-2% mIoU)
                 - "top3": Ultra-fast top-3 templates (5x faster)
                 - "adaptive": Adaptive per-class selection (stuff vs thing, +3-5% mIoU)
+            use_confidence_sharpening: Enable confidence sharpening for flat distributions (Phase 2C)
+            use_hierarchical_prediction: Enable hierarchical class grouping (Phase 2C)
         """
         self.device = device
         self.use_sam = use_sam
@@ -134,6 +139,8 @@ class SCLIPSegmentor:
         self.use_cliptrase = use_cliptrase
         self.use_clip_rc = use_clip_rc
         self.template_strategy = template_strategy
+        self.use_confidence_sharpening = use_confidence_sharpening
+        self.use_hierarchical_prediction = use_hierarchical_prediction
 
         # Text feature cache to avoid recomputing for same classes
         self._text_feature_cache = {}
@@ -150,6 +157,9 @@ class SCLIPSegmentor:
                 print(f"  Phase 2A: CLIPtrase={'Enabled' if use_cliptrase else 'Disabled'}, "
                       f"CLIP-RC={'Enabled' if use_clip_rc else 'Disabled'}")
             print(f"  Phase 2B: Template Strategy={template_strategy}")
+            if use_confidence_sharpening or use_hierarchical_prediction:
+                print(f"  Phase 2C: Confidence Sharpening={'Enabled' if use_confidence_sharpening else 'Disabled'}, "
+                      f"Hierarchical={'Enabled' if use_hierarchical_prediction else 'Disabled'}")
 
         # Initialize SCLIP feature extractor with optimizations
         self.clip_extractor = SCLIPFeatureExtractor(
@@ -380,6 +390,24 @@ class SCLIPSegmentor:
 
             # Convert back to original dtype
             logits = logits.to(logits_dtype)
+
+        # Apply Phase 2C: Confidence Sharpening (before temperature scaling)
+        if self.use_confidence_sharpening or self.use_hierarchical_prediction:
+            try:
+                from prompts.confidence_sharpening import sharpen_predictions
+                logits = sharpen_predictions(
+                    logits,
+                    class_names,
+                    use_hierarchical=self.use_hierarchical_prediction,
+                    use_calibration=self.use_confidence_sharpening,
+                    use_adaptive_temp=False,  # We'll apply temperature manually
+                    base_temperature=1.0  # No scaling here
+                )
+                if self.verbose:
+                    print("[Phase 2C] Applied confidence sharpening")
+            except Exception as e:
+                if self.verbose:
+                    print(f"[Phase 2C] Sharpening failed: {e}")
 
         # Scale logits (temperature)
         logits = logits * self.logit_scale

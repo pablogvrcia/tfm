@@ -209,6 +209,12 @@ def parse_args():
                              '  top3: Ultra-fast top-3 templates (5x faster)\n'
                              '  adaptive: Adaptive per-class (stuff vs thing, +3-5%% mIoU)')
 
+    # Phase 2C improvements (2025 - confidence sharpening for flat predictions)
+    parser.add_argument('--use-confidence-sharpening', action='store_true', default=False,
+                        help='Enable confidence sharpening for flat predictions (+5-8%% mIoU, Phase 2C)')
+    parser.add_argument('--use-hierarchical-prediction', action='store_true', default=False,
+                        help='Enable hierarchical class grouping (+3-5%% mIoU, Phase 2C)')
+
     return parser.parse_args()
 
 
@@ -407,6 +413,9 @@ def main():
         use_clip_rc=use_clip_rc,
         # Phase 2B improvements (2025 - prompt engineering)
         template_strategy=args.template_strategy,
+        # Phase 2C improvements (2025 - confidence sharpening)
+        use_confidence_sharpening=args.use_confidence_sharpening,
+        use_hierarchical_prediction=args.use_hierarchical_prediction,
     )
     print()
 
