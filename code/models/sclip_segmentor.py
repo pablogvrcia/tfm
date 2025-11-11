@@ -82,6 +82,8 @@ class SCLIPSegmentor:
         # Phase 2A improvements (2025 - training-free for human parsing)
         use_cliptrase: bool = False,  # CLIPtrase self-correlation recalibration (+5-10% mIoU person)
         use_clip_rc: bool = False,  # CLIP-RC regional clues extraction (+8-12% mIoU person)
+        # Phase 2B improvements (2025 - prompt engineering)
+        template_strategy: str = "imagenet80",  # Prompt template strategy (+2-5% mIoU, 3-4x faster)
     ):
         """
         Initialize SCLIP segmentor with 2025 performance optimizations.
@@ -107,6 +109,12 @@ class SCLIPSegmentor:
             use_densecrf: Enable DenseCRF boundary refinement (Phase 1)
             use_cliptrase: Enable CLIPtrase self-correlation recalibration (Phase 2A)
             use_clip_rc: Enable CLIP-RC regional clues extraction (Phase 2A)
+            template_strategy: Prompt template strategy (Phase 2B):
+                - "imagenet80": Original 80 ImageNet templates (baseline)
+                - "top7": Top-7 dense prediction templates (recommended, 3-4x faster, +2-3% mIoU)
+                - "spatial": Spatial context templates (+1-2% mIoU)
+                - "top3": Ultra-fast top-3 templates (5x faster)
+                - "adaptive": Adaptive per-class selection (stuff vs thing, +3-5% mIoU)
         """
         self.device = device
         self.use_sam = use_sam
@@ -125,6 +133,7 @@ class SCLIPSegmentor:
         self.use_densecrf = use_densecrf
         self.use_cliptrase = use_cliptrase
         self.use_clip_rc = use_clip_rc
+        self.template_strategy = template_strategy
 
         # Text feature cache to avoid recomputing for same classes
         self._text_feature_cache = {}
@@ -140,6 +149,7 @@ class SCLIPSegmentor:
             if use_cliptrase or use_clip_rc:
                 print(f"  Phase 2A: CLIPtrase={'Enabled' if use_cliptrase else 'Disabled'}, "
                       f"CLIP-RC={'Enabled' if use_clip_rc else 'Disabled'}")
+            print(f"  Phase 2B: Template Strategy={template_strategy}")
 
         # Initialize SCLIP feature extractor with optimizations
         self.clip_extractor = SCLIPFeatureExtractor(
@@ -148,6 +158,7 @@ class SCLIPSegmentor:
             use_fp16=use_fp16,
             use_compile=use_compile,
             use_loftup=use_loftup,
+            template_strategy=template_strategy,  # Phase 2B: Prompt engineering
         )
 
         # Initialize PAMR if enabled

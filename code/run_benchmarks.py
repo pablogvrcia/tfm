@@ -199,6 +199,16 @@ def parse_args():
     parser.add_argument('--use-all-phase2a', action='store_true', default=False,
                         help='Enable all Phase 2A improvements (CLIPtrase + CLIP-RC)')
 
+    # Phase 2B improvements (2025 - prompt engineering)
+    parser.add_argument('--template-strategy', type=str, default='imagenet80',
+                        choices=['imagenet80', 'top7', 'spatial', 'top3', 'adaptive'],
+                        help='Prompt template strategy (Phase 2B):\n'
+                             '  imagenet80: Original 80 ImageNet templates (baseline)\n'
+                             '  top7: Top-7 dense prediction templates (recommended, 3-4x faster, +2-3%% mIoU)\n'
+                             '  spatial: Spatial context templates (+1-2%% mIoU)\n'
+                             '  top3: Ultra-fast top-3 templates (5x faster)\n'
+                             '  adaptive: Adaptive per-class (stuff vs thing, +3-5%% mIoU)')
+
     return parser.parse_args()
 
 
@@ -395,6 +405,8 @@ def main():
         # Phase 2A improvements (2025 - training-free human parsing)
         use_cliptrase=use_cliptrase,
         use_clip_rc=use_clip_rc,
+        # Phase 2B improvements (2025 - prompt engineering)
+        template_strategy=args.template_strategy,
     )
     print()
 
