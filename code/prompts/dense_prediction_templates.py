@@ -186,6 +186,9 @@ def get_adaptive_templates(class_name: str):
     This implements the class-type aware strategy from CLIP-DIY (CVPR 2024)
     and DenseCLIP (CVPR 2022), which shows +3-5% mIoU improvement.
 
+    NEW: Special handling for material-specific compound classes (wall-brick, floor-wood, etc.)
+    to preserve material/texture information that CLIP understands better.
+
     Args:
         class_name: Name of the class
 
@@ -195,17 +198,123 @@ def get_adaptive_templates(class_name: str):
     # Normalize class name (lowercase, remove special chars)
     class_normalized = class_name.lower().strip()
 
+    # PRIORITY 1: Check for material-specific templates (wall-brick, floor-wood, etc.)
+    # These override default stuff/thing templates to preserve material information
+    if class_normalized in MATERIAL_TEMPLATES:
+        return MATERIAL_TEMPLATES[class_normalized]
+
     # Remove common suffixes for matching
     for suffix in ['-merged', '-other', '-stuff']:
         if class_normalized.endswith(suffix):
             class_normalized = class_normalized[:-len(suffix)]
 
-    # Check if it's a stuff class
+    # PRIORITY 2: Check if it's a stuff class
     if class_normalized in STUFF_CLASSES:
         return stuff_templates
     else:
         # Default to thing templates
         return thing_templates
+
+
+# =============================================================================
+# Material-Aware Templates for Compound Classes
+# =============================================================================
+# Special handling for hyphenated compound classes (e.g., wall-brick, floor-wood)
+# CLIP understands "brick wall" better than "wall-brick"
+
+MATERIAL_TEMPLATES = {
+    # Wall materials
+    'wall-brick': [
+        lambda c: 'a brick wall.',
+        lambda c: 'a wall made of bricks.',
+        lambda c: 'brick wall surface.',
+        lambda c: 'a photo of a brick wall.',
+        lambda c: 'wall with brick texture.',
+    ],
+    'wall-stone': [
+        lambda c: 'a stone wall.',
+        lambda c: 'a wall made of stone.',
+        lambda c: 'stone wall surface.',
+        lambda c: 'a photo of a stone wall.',
+        lambda c: 'wall with stone texture.',
+    ],
+    'wall-tile': [
+        lambda c: 'a tiled wall.',
+        lambda c: 'a wall made of tiles.',
+        lambda c: 'tile wall surface.',
+        lambda c: 'a photo of a tiled wall.',
+        lambda c: 'wall with tile pattern.',
+    ],
+    'wall-wood': [
+        lambda c: 'a wooden wall.',
+        lambda c: 'a wall made of wood.',
+        lambda c: 'wood wall surface.',
+        lambda c: 'a photo of a wooden wall.',
+        lambda c: 'wall with wood texture.',
+    ],
+    'wall-concrete': [
+        lambda c: 'a concrete wall.',
+        lambda c: 'a wall made of concrete.',
+        lambda c: 'concrete wall surface.',
+        lambda c: 'a photo of a concrete wall.',
+        lambda c: 'wall with concrete texture.',
+    ],
+    'wall-panel': [
+        lambda c: 'a paneled wall.',
+        lambda c: 'a wall with panels.',
+        lambda c: 'wall paneling.',
+        lambda c: 'a photo of a paneled wall.',
+        lambda c: 'wall panel surface.',
+    ],
+
+    # Floor materials
+    'floor-wood': [
+        lambda c: 'a wooden floor.',
+        lambda c: 'a floor made of wood.',
+        lambda c: 'wood floor surface.',
+        lambda c: 'a photo of a wooden floor.',
+        lambda c: 'floor with wood texture.',
+    ],
+    'floor-tile': [
+        lambda c: 'a tiled floor.',
+        lambda c: 'a floor made of tiles.',
+        lambda c: 'tile floor surface.',
+        lambda c: 'a photo of a tiled floor.',
+        lambda c: 'floor with tile pattern.',
+    ],
+    'floor-stone': [
+        lambda c: 'a stone floor.',
+        lambda c: 'a floor made of stone.',
+        lambda c: 'stone floor surface.',
+        lambda c: 'a photo of a stone floor.',
+        lambda c: 'floor with stone texture.',
+    ],
+    'floor-marble': [
+        lambda c: 'a marble floor.',
+        lambda c: 'a floor made of marble.',
+        lambda c: 'marble floor surface.',
+        lambda c: 'a photo of a marble floor.',
+        lambda c: 'floor with marble pattern.',
+    ],
+
+    # Ceiling materials
+    'ceiling-tile': [
+        lambda c: 'a tiled ceiling.',
+        lambda c: 'a ceiling made of tiles.',
+        lambda c: 'ceiling tiles.',
+        lambda c: 'a photo of a tiled ceiling.',
+        lambda c: 'ceiling with tile pattern.',
+    ],
+
+    # Fence materials
+    'fence-chainlink': [
+        lambda c: 'a chain-link fence.',
+        lambda c: 'a metal chain fence.',
+        lambda c: 'chain link fencing.',
+        lambda c: 'a photo of a chain-link fence.',
+        lambda c: 'wire mesh fence.',
+    ],
+}
 
 
 # =============================================================================
