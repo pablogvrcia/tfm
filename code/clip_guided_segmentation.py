@@ -27,6 +27,7 @@ from models.sclip_segmentor import SCLIPSegmentor
 from models.video_segmentation import CLIPGuidedVideoSegmentor
 from scipy.ndimage import label, center_of_mass
 import cv2
+import os
 
 
 def generate_distinct_colors(n):
@@ -556,13 +557,17 @@ def main():
     if is_video:
         print(f"Detected video input: {args.image}")
 
-        # Check for unsupported features
+        # Check for mask generation modes
         if args.edit in ["replace", "remove"] or args.use_inpainting:
-            print("\nWARNING: Video inpainting/editing is not yet supported!")
-            print("Only segmentation visualization is available for videos.")
-            print("Use --edit segment (default) for video segmentation.\n")
-            if args.edit != "segment":
+            # For these modes, we'll generate a B/W mask based on --edit-prompt
+            if not args.prompt:
+                print("\nERROR: --prompt is required for replace/remove/inpainting modes")
+                print("Specify which object to mask using --prompt <class_name>")
                 return
+
+            print(f"\nGenerating B/W mask for '{args.prompt}' in video mode...")
+            print("Note: Full video inpainting/editing is not yet supported.")
+            print("This will generate a mask for the first frame.\n")
 
         # Extract first frame for CLIP analysis
         print("Extracting first frame for CLIP analysis...")
@@ -612,38 +617,332 @@ def main():
 
     # Handle video vs image differently
     if is_video:
-        print("\n" + "="*50)
-        print("STEP 3: SAM2 Video Segmentation")
-        print("="*50)
+        # Check if we're in mask generation mode
+        if args.edit in ["replace", "remove"] or args.use_inpainting:
+            print("\n" + "="*50)
+            print("STEP 3: Generate B/W Mask Video")
+            print("="*50)
 
-        # Initialize video segmentor
-        video_segmentor = CLIPGuidedVideoSegmentor(
-            checkpoint_path=args.checkpoint,
-            model_cfg=args.model_cfg,
-            device=args.device
-        )
+            # Initialize video segmentor to track object across all frames
+            video_segmentor = CLIPGuidedVideoSegmentor(
+                checkpoint_path=args.checkpoint,
+                model_cfg=args.model_cfg,
+                device=args.device
+            )
 
-        # Determine output path (change extension to .mp4)
-        output_path = args.output
-        if not output_path.endswith('.mp4'):
-            output_path = output_path.rsplit('.', 1)[0] + '.mp4'
+            # Filter prompts to only track the target class
+            filtered_prompts = [p for p in prompts if p['class_name'] == args.prompt]
 
-        # Segment video
-        video_segments = video_segmentor.segment_video(
-            video_path=args.image,
-            prompts=prompts,
-            output_path=output_path,
-            visualize=True
-        )
+            if len(filtered_prompts) == 0:
+                print(f"\nWARNING: No prompts found for target class '{args.prompt}'")
+                return
 
-        print(f"\n{'='*50}")
-        print("VIDEO SEGMENTATION COMPLETE!")
-        print(f"{'='*50}")
-        print(f"Output saved to: {output_path}")
-        print(f"Tracked {len(prompts)} objects across video")
+            print(f"\nTracking {len(filtered_prompts)} instances of '{args.prompt}' across video")
 
-        # Statistics
-        print_statistics_video(video_segments, prompts)
+            # Generate output filename for mask video
+            base_name = args.output.rsplit('.', 1)[0]
+            mask_output = f"{base_name}_mask_{args.prompt}.mp4"
+
+            # Segment video and generate mask video
+            video_segments = video_segmentor.segment_video(
+                video_path=args.image,
+                prompts=filtered_prompts,
+                output_path=mask_output,
+                visualize=False  # We'll create custom mask visualization
+            )
+
+            # Create B/W mask video from segmentation results
+            print("\nGenerating B/W mask video...")
+            cap = cv2.VideoCapture(args.image)
+            fps = cap.get(cv2.CAP_PROP_FPS)
+            width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+            height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+            cap.release()
+
+            # First, save frames as temporary images, then use ffmpeg to create video
+            import tempfile
+            import shutil
+            import subprocess
+
+            temp_dir = tempfile.mkdtemp()
+            print(f"Saving mask frames to temporary directory: {temp_dir}")
+
+            try:
+                # Generate mask frames and save as images
+                # Use sequential numbering starting from 0 for ffmpeg
+                for seq_idx, frame_idx in enumerate(sorted(video_segments.keys())):
+                    masks = video_segments[frame_idx]
+
+                    # Combine all masks for this frame
+                    combined_mask = np.zeros((height, width), dtype=np.uint8)
+
+                    # Debug: print first mask shape
+                    if seq_idx == 0 and masks:
+                        first_mask = next(iter(masks.values()))
+                        print(f"Debug: First mask shape: {first_mask.shape}, dtype: {first_mask.dtype}")
+                        print(f"Debug: Expected shape: (height={height}, width={width})")
+
+                    for obj_id, mask in masks.items():
+                        if mask.sum() > 0:  # Only if mask has content
+                            # Handle dimension issues first
+                            if len(mask.shape) == 3:
+                                # If mask has shape (1, H, W) or (H, W, 1), squeeze it
+                                if mask.shape[0] == 1:
+                                    mask = mask[0]  # Remove leading dimension
+                                elif mask.shape[2] == 1:
+                                    mask = mask[:, :, 0]  # Remove trailing dimension
+                                else:
+                                    print(f"Warning: 3D mask with shape {mask.shape}, cannot handle")
+                                    continue
+
+                            # After squeezing, check if dimensions need transposing
+                            if mask.shape == (width, height):
+                                # If dimensions are swapped, transpose
+                                mask = mask.T
+                            elif mask.shape != (height, width):
+                                print(f"Warning: mask shape {mask.shape} doesn't match expected ({height}, {width}), skipping")
+                                continue
+
+                            mask_binary = (mask.astype(bool).astype(np.uint8) * 255)
+                            combined_mask = np.maximum(combined_mask, mask_binary)
+
+                    # Save as PNG with sequential numbering starting from 0
+                    frame_path = f"{temp_dir}/frame_{seq_idx:06d}.png"
+                    success = cv2.imwrite(frame_path, combined_mask)
+                    if not success:
+                        print(f"Warning: Failed to write frame {seq_idx} to {frame_path}")
+                    elif seq_idx == 0:
+                        print(f"Debug: Successfully wrote first frame, shape: {combined_mask.shape}")
+
+                print(f"Saved {len(video_segments)} mask frames")
+
+                # Also create a preview video with original frames + gray overlay on tracked area
+                print("\nGenerating preview video with gray overlay on tracked area...")
+                preview_output = f"{base_name}_preview_{args.prompt}.mp4"
+                preview_dir = tempfile.mkdtemp()
+
+                # Read original video and apply gray overlay
+                cap = cv2.VideoCapture(args.image)
+                frame_count = 0
+
+                while True:
+                    ret, frame = cap.read()
+                    if not ret:
+                        break
+
+                    if frame_count in video_segments:
+                        masks = video_segments[frame_count]
+
+                        # Combine all masks for this frame
+                        combined_mask = np.zeros((frame.shape[0], frame.shape[1]), dtype=bool)
+                        for obj_id, mask in masks.items():
+                            # Handle 3D masks
+                            if len(mask.shape) == 3 and mask.shape[0] == 1:
+                                mask = mask[0]
+
+                            if mask.sum() > 0:
+                                combined_mask |= mask.astype(bool)
+
+                        # Apply gray overlay (128, 128, 128) to tracked areas
+                        frame_preview = frame.copy()
+                        frame_preview[combined_mask] = [128, 128, 128]
+
+                        # Save preview frame
+                        preview_frame_path = f"{preview_dir}/frame_{frame_count:06d}.png"
+                        cv2.imwrite(preview_frame_path, frame_preview)
+                    else:
+                        # No mask for this frame, save original
+                        preview_frame_path = f"{preview_dir}/frame_{frame_count:06d}.png"
+                        cv2.imwrite(preview_frame_path, frame)
+
+                    frame_count += 1
+
+                cap.release()
+                print(f"Generated {frame_count} preview frames")
+
+                # Create preview video using ffmpeg
+                preview_cmd = [
+                    'ffmpeg',
+                    '-y',
+                    '-framerate', str(fps),
+                    '-i', f'{preview_dir}/frame_%06d.png',
+                    '-c:v', 'libx264',
+                    '-pix_fmt', 'yuv420p',
+                    '-crf', '23',
+                    preview_output
+                ]
+
+                result_preview = subprocess.run(preview_cmd, capture_output=True, text=True)
+                if result_preview.returncode == 0:
+                    print(f"Saved preview video to {preview_output}")
+                else:
+                    print(f"Warning: Failed to create preview video: {result_preview.stderr}")
+
+                # Clean up preview frames
+                shutil.rmtree(preview_dir)
+
+                # Use ffmpeg to create video from frames
+                print("\nCreating B/W mask video from frames using ffmpeg...")
+                ffmpeg_cmd = [
+                    'ffmpeg',
+                    '-y',  # Overwrite output file
+                    '-framerate', str(fps),
+                    '-i', f'{temp_dir}/frame_%06d.png',
+                    '-c:v', 'libx264',
+                    '-pix_fmt', 'yuv420p',
+                    '-crf', '23',
+                    mask_output
+                ]
+
+                result = subprocess.run(
+                    ffmpeg_cmd,
+                    capture_output=True,
+                    text=True
+                )
+
+                if result.returncode == 0:
+                    print(f"\nSaved B/W mask video to {mask_output}")
+                else:
+                    print(f"Error creating video with ffmpeg: {result.stderr}")
+                    print("Trying alternative method with OpenCV...")
+
+                    # Fallback: try OpenCV with mp4v codec
+                    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+                    mask_writer = cv2.VideoWriter(mask_output, fourcc, fps, (width, height), isColor=False)
+
+                    for seq_idx in range(len(video_segments)):
+                        frame_path = f"{temp_dir}/frame_{seq_idx:06d}.png"
+                        frame = cv2.imread(frame_path, cv2.IMREAD_GRAYSCALE)
+                        if frame is not None:
+                            mask_writer.write(frame)
+
+                    mask_writer.release()
+                    print(f"\nSaved B/W mask video to {mask_output} (using OpenCV fallback)")
+
+            finally:
+                # Clean up temporary directory
+                shutil.rmtree(temp_dir)
+                print(f"Cleaned up temporary files")
+
+            # Statistics
+            print_statistics_video(video_segments, filtered_prompts)
+
+            # Run VACE inference if edit_prompt is provided
+            if args.edit_prompt:
+                print("\n" + "="*50)
+                print("STEP 4: VACE Video Inpainting")
+                print("="*50)
+                print(f"Running VACE inference with prompt: '{args.edit_prompt}'")
+
+                try:
+                    # Save current directory
+                    original_dir = os.getcwd()
+
+                    # Change to VACE directory for imports to work correctly
+                    vace_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'VACE')
+                    os.chdir(vace_path)
+
+                    # Add VACE to path
+                    import sys
+                    if vace_path not in sys.path:
+                        sys.path.insert(0, vace_path)
+
+                    from vace.vace_wan_inference import main as vace_main
+
+                    # Convert paths to absolute paths since we're changing directories
+                    abs_preview_output = os.path.abspath(os.path.join(original_dir, preview_output))
+                    abs_mask_output = os.path.abspath(os.path.join(original_dir, mask_output))
+                    abs_save_dir = os.path.abspath(os.path.join(original_dir, os.path.dirname(mask_output)))
+                    abs_save_file = os.path.abspath(os.path.join(original_dir, f"{base_name}_inpainted_{args.prompt}.mp4"))
+
+                    # Prepare VACE arguments
+                    vace_args = {
+                        'model_name': 'vace-1.3B',
+                        'size': '480p',
+                        'frame_num': min(81, len(video_segments)),  # VACE expects 4n+1 frames
+                        'ckpt_dir': 'models/Wan2.1-VACE-1.3B/',  # Relative to VACE directory
+                        'src_video': abs_preview_output,  # Use absolute path
+                        'src_mask': abs_mask_output,  # Use absolute path
+                        'prompt': args.edit_prompt,
+                        'use_prompt_extend': 'plain',
+                        'base_seed': 2025,
+                        'sample_solver': 'unipc',
+                        'sample_steps': None,  # Will default to 50
+                        'sample_shift': None,  # Will default to 16
+                        'sample_guide_scale': 5.0,
+                        'save_dir': abs_save_dir,  # Use absolute path
+                        'save_file': abs_save_file,  # Use absolute path
+                        'offload_model': None,
+                        'ulysses_size': 1,
+                        'ring_size': 1,
+                        't5_fsdp': False,
+                        't5_cpu': False,
+                        'dit_fsdp': False,
+                        'src_ref_images': None,
+                    }
+
+                    print(f"VACE output will be saved to: {abs_save_file}")
+                    print("This may take several minutes depending on your hardware...")
+
+                    # Run VACE inference
+                    result = vace_main(vace_args)
+
+                    # Change back to original directory
+                    os.chdir(original_dir)
+
+                    if result and 'out_video' in result:
+                        print(f"\nVACE inpainting complete!")
+                        print(f"Output video: {result['out_video']}")
+                    else:
+                        print("\nVACE inpainting completed (check output directory)")
+
+                except ImportError as e:
+                    os.chdir(original_dir)  # Make sure to change back
+                    print(f"\nError: Could not import VACE inference module: {e}")
+                    print("Make sure VACE is installed in the VACE/ directory")
+                except Exception as e:
+                    os.chdir(original_dir)  # Make sure to change back
+                    print(f"\nError during VACE inference: {e}")
+                    import traceback
+                    traceback.print_exc()
+            else:
+                print("\nSkipping VACE inference (no --edit-prompt provided)")
+                print("To run inpainting, add --edit-prompt 'your description here'")
+
+        else:
+            # Normal video segmentation mode
+            print("\n" + "="*50)
+            print("STEP 3: SAM2 Video Segmentation")
+            print("="*50)
+
+            # Initialize video segmentor
+            video_segmentor = CLIPGuidedVideoSegmentor(
+                checkpoint_path=args.checkpoint,
+                model_cfg=args.model_cfg,
+                device=args.device
+            )
+
+            # Determine output path (change extension to .mp4)
+            output_path = args.output
+            if not output_path.endswith('.mp4'):
+                output_path = output_path.rsplit('.', 1)[0] + '.mp4'
+
+            # Segment video
+            video_segments = video_segmentor.segment_video(
+                video_path=args.image,
+                prompts=prompts,
+                output_path=output_path,
+                visualize=True
+            )
+
+            print(f"\n{'='*50}")
+            print("VIDEO SEGMENTATION COMPLETE!")
+            print(f"{'='*50}")
+            print(f"Output saved to: {output_path}")
+            print(f"Tracked {len(prompts)} objects across video")
+
+            # Statistics
+            print_statistics_video(video_segments, prompts)
 
     else:
         # Image segmentation (original workflow)
