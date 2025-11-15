@@ -1,871 +1,489 @@
 \chapter{Methodology}
 \label{ch:methodology}
 
-This chapter details the methodology employed to develop our open-vocabulary semantic segmentation system. Unlike traditional approaches that rely on closed-vocabulary classifiers, our work leverages recent advances in vision-language models and promptable segmentation to enable flexible, language-driven image understanding and manipulation.
+This chapter presents our systematic approach to enhancing SCLIP-based open-vocabulary semantic segmentation through four improvement phases. We integrate recent state-of-the-art techniques into a unified training-free framework, progressively addressing CLIP's limitations in spatial localization, human parsing, and computational efficiency.
 
-Our contribution is a CLIP-guided prompting approach that combines SCLIP's dense predictions with SAM2's segmentation quality through intelligent prompt extraction. This fully annotation-free method extracts semantic prompt points from CLIP's high-confidence regions, using SAM2 to generate high-quality masks with direct class assignment.
+\section{Baseline: SCLIP Dense Prediction Framework}
+\label{sec:baseline_sclip}
 
-Building upon insights from SCLIP \cite{sclip2024}, MaskCLIP \cite{zhou2022extract}, CLIPSeg \cite{luddecke2022clipseg}, and SAM 2 \cite{ravi2024sam2}, this chapter presents our CLIP-guided prompting methodology in detail.
+Our work builds upon SCLIP \cite{sclip2024}, which modifies CLIP's final transformer layer to improve dense prediction quality. This section briefly describes the baseline architecture (detailed technical explanation in Annex A).
 
-\section{CLIP-Guided Prompting Approach}
-\label{sec:clip_guided_approach}
+\subsection{Cross-layer Self-Attention (CSA)}
 
-Our main contribution is a CLIP-guided prompting system that leverages SCLIP's Cross-layer Self-Attention mechanism to extract intelligent prompt points for SAM2 segmentation. This approach achieves fully annotation-free open-vocabulary segmentation by combining semantic understanding with high-quality boundary delineation through efficient, semantically-guided prompting.
+SCLIP replaces the standard attention mechanism in CLIP's final layer:
 
-\subsection{Motivation and Design Philosophy}
+\begin{equation}
+\text{Standard:} \quad A = \text{softmax}\left(\frac{QK^T}{\sqrt{d}}\right)
+\end{equation}
 
-CLIP-guided prompting offers several key advantages for open-vocabulary segmentation:
+\begin{equation}
+\text{CSA:} \quad A_{\text{CSA}} = \text{softmax}\left(\frac{QQ^T + KK^T}{\sqrt{d}}\right)
+\end{equation}
 
-\begin{itemize}
-    \item \textbf{Efficient semantic guidance:} Instead of blindly prompting SAM2 at thousands of points (e.g., 4096 in a grid), CLIP identifies 50-300 semantically meaningful locations, reducing computational cost by 96\% while maintaining competitive accuracy.
+This modification encourages spatial coherence: patches with similar queries or keys (likely belonging to the same object) mutually reinforce through self-similarity, producing more consistent segmentation masks.
 
-    \item \textbf{Zero spatial user input:} Users provide only a text vocabulary; the system automatically determines where objects are located without requiring manual clicks or bounding boxes.
+\subsection{Dense Prediction Pipeline}
 
-    \item \textbf{High-quality segmentation:} SAM2 provides precise object boundaries at each semantically-guided prompt point, combining CLIP's semantic understanding with SAM2's superior mask quality.
-
-    \item \textbf{Training-free operation:} Uses frozen CLIP and SAM2 models without any fine-tuning, enabling zero-shot transfer to new domains.
-\end{itemize}
-
-Our key insight is to use CLIP's dense predictions not as the final output, but as intelligent guidance for SAM2 prompting, achieving both efficiency and quality.
-
-\subsection{System Overview}
-
-Our CLIP-guided prompting pipeline consists of four main stages:
+SCLIP processes images through four stages:
 
 \begin{enumerate}
-    \item \textbf{Dense Semantic Prediction:} SCLIP extracts dense features using Cross-layer Self-Attention (CSA) and produces pixel-wise class predictions through similarity matching with text embeddings.
-
-    \item \textbf{Intelligent Prompt Extraction:} Extract 50-300 representative points from high-confidence regions in SCLIP's predictions using connected component analysis and centroid computation.
-
-    \item \textbf{SAM2 Segmentation:} Prompt SAM2 at each extracted point to generate high-quality instance masks with direct class assignment based on CLIP predictions.
-
-    \item \textbf{Overlap Resolution:} Resolve overlapping masks through IoU-based filtering and confidence-based priority assignment.
+\item \textbf{Patch embedding:} 224×224 image → 14×14 grid of 16×16 patches → 196 tokens
+\item \textbf{Transformer encoding:} 12 ViT layers, with CSA applied in layer 12
+\item \textbf{Text encoding:} Vocabulary prompts → normalized text embeddings
+\item \textbf{Similarity matching:} Dense dot-product between patch features and text embeddings → pixel-wise class predictions
 \end{enumerate}
+
+\textbf{Baseline performance:} 22.77\% mIoU on COCO-Stuff-164k (reported in SCLIP paper).
 
 \begin{figure}[h]
 \centering
 \fbox{\parbox{0.9\textwidth}{\centering
 \vspace{1cm}
-\textbf{[PLACEHOLDER: CLIP-Guided Prompting Pipeline Diagram]}\\[0.5cm]
-\textit{This figure should show the CLIP-guided prompting pipeline:}\\[0.3cm]
-\begin{tabular}{l}
-\textbf{Stage 1 - Dense CLIP Prediction:}\\
-\quad Input image → SCLIP (ViT-B/16 with CSA) → Dense class probabilities (H×W×C)\\
-\quad Apply Cross-layer Self-Attention → Extract dense patch features → Pixel-wise predictions\\[0.3cm]
-\textbf{Stage 2 - Intelligent Prompt Extraction:}\\
-\quad SCLIP predictions → Connected component analysis → Extract centroids\\
-\quad Filter by confidence (>0.3) and size (>100 pixels) → 50-300 prompt points\\[0.3cm]
-\textbf{Stage 3 - SAM2 Segmentation:}\\
-\quad Prompt points → SAM2 predictor → High-quality instance masks\\
-\quad Direct class assignment from CLIP predictions → Instance-level segmentation\\[0.3cm]
-\textbf{Stage 4 - Overlap Resolution:}\\
-\quad IoU-based filtering → Confidence-based priority → Final segmentation\\[0.3cm]
-\end{tabular}
-\textit{Include visualization: dense heatmap, extracted points, SAM2 masks, final result.}
+\textbf{[FIGURE 3.1: SCLIP Baseline Architecture]}\\[0.5cm]
+\textit{Show 4-stage pipeline:}\\[0.3cm]
+\textbf{Input Image (224×224)} → \textbf{Patch Embedding (14×14 grid)}\\
+→ \textbf{Transformer Layers 1-11 (standard attention)}\\
+→ \textbf{Layer 12 (CSA: $QQ^T + KK^T$)}\\
+→ \textbf{Dense Similarity Matching (14×14×C logits)}\\
+→ \textbf{Upsample \& Softmax (H×W segmentation)}\\[0.3cm]
+\textit{Highlight the CSA layer in a different color. Show example output: input image, predicted mask, ground truth.}
 \vspace{1cm}
 }}
-\caption{Overview of our CLIP-guided prompting pipeline. The system uses CLIP's dense predictions to extract intelligent prompt points, achieving 96\% reduction in prompts compared to blind grid sampling while maintaining competitive accuracy.}
-\label{fig:clip_guided_pipeline}
+\caption{SCLIP baseline architecture. Cross-layer Self-Attention in the final layer improves spatial coherence for dense prediction.}
+\label{fig:sclip_baseline}
 \end{figure}
 
-The key insight motivating our design is that CLIP's dense predictions identify where objects are located, enabling intelligent SAM2 prompting with far fewer points than blind grid sampling. By extracting points from SCLIP's high-confidence regions, we guide SAM2 to focus on semantically relevant areas, achieving both efficiency and accuracy.
+\section{Phase 1: Spatial Enhancement and Boundary Refinement}
 
-\subsection{Foundation: Vision Transformer and CLIP Architecture}
-\label{sec:vit_clip_foundation}
+Phase 1 addresses CLIP's weak spatial localization through three complementary techniques targeting resolution, feature coherence, and boundary quality.
 
-Before explaining SCLIP's modifications, we first establish how the Vision Transformer (ViT) and CLIP architectures function. Understanding these foundations is essential for comprehending SCLIP's Cross-layer Self-Attention innovation.
+\subsection{LoftUp: Feature Upsampling}
 
-\subsubsection{Vision Transformer: From Images to Sequences}
+\textbf{Motivation:} CLIP's 14×14 feature grid (for 224×224 input) provides only coarse spatial resolution. Naive bilinear upsampling introduces blur and semantic drift.
 
-The Vision Transformer \cite{dosovitskiy2020image} adapts the Transformer architecture \cite{vaswani2017attention} from NLP to computer vision by treating an image as a sequence of patches.
-
-\textbf{Core Idea:} Instead of processing images through convolutional layers, ViT:
-\begin{enumerate}
-    \item Divides the image into fixed-size patches
-    \item Linearly embeds each patch
-    \item Processes the patch sequence through standard Transformer layers
-    \item Uses the output for classification or (in our case) dense prediction
-\end{enumerate}
-
-\textbf{Why this works:} Transformers excel at modeling long-range dependencies through self-attention. By treating spatial patches as sequence elements, ViT can capture relationships between distant image regions (e.g., "this patch of sky relates to that patch of sky") more effectively than CNNs with limited receptive fields.
-
-\subsubsection{Self-Attention Mechanism: The Heart of Transformers}
-
-Self-attention allows each element in a sequence to attend to all other elements, computing context-aware representations.
-
-\textbf{Input:} Sequence of $N$ token embeddings $X \in \mathbb{R}^{N \times D}$
-
-\textbf{Learnable Parameters:} Three weight matrices per attention head:
-\begin{itemize}
-    \item $W_Q \in \mathbb{R}^{D \times d_h}$ (Query projection)
-    \item $W_K \in \mathbb{R}^{D \times d_h}$ (Key projection)
-    \item $W_V \in \mathbb{R}^{D \times d_h}$ (Value projection)
-\end{itemize}
-where $d_h = D / H$ is the dimension per head ($H$ = number of heads, typically 8-16).
-
-\textbf{Step-by-step computation:}
-
-\textbf{(1) Project to Queries, Keys, Values:}
-\begin{align}
-Q &= X W_Q \in \mathbb{R}^{N \times d_h} \quad \text{(What am I looking for?)} \\
-K &= X W_K \in \mathbb{R}^{N \times d_h} \quad \text{(What do I contain?)} \\
-V &= X W_V \in \mathbb{R}^{N \times d_h} \quad \text{(What information do I provide?)}
-\end{align}
-
-\textbf{Intuition:}
-\begin{itemize}
-    \item Each token $i$ produces a \textit{query} $Q_i$: "What information am I seeking?"
-    \item Each token $j$ produces a \textit{key} $K_j$: "What information do I offer?"
-    \item Each token $j$ produces a \textit{value} $V_j$: "Here's my actual information"
-\end{itemize}
-
-\textbf{(2) Compute Attention Weights:}
-\begin{equation}
-A = \text{softmax}\left(\frac{Q K^T}{\sqrt{d_h}}\right) \in \mathbb{R}^{N \times N}
-\end{equation}
-
-This computes how much token $i$ should attend to token $j$:
-\begin{equation}
-A_{ij} = \frac{\exp(Q_i \cdot K_j / \sqrt{d_h})}{\sum_{k=1}^{N} \exp(Q_i \cdot K_k / \sqrt{d_h})}
-\end{equation}
-
-\textbf{Why $Q K^T$?} It measures compatibility: if token $i$'s query is similar to token $j$'s key (high dot product), then $j$ likely has relevant information for $i$.
-
-\textbf{Why divide by $\sqrt{d_h}$?} Scaling factor prevents dot products from becoming too large in high dimensions, which would cause softmax to produce very peaked distributions (gradient saturation).
-
-\textbf{(3) Weighted Aggregation:}
-\begin{equation}
-\text{Output} = A V \in \mathbb{R}^{N \times d_h}
-\end{equation}
-
-Each output token is a weighted sum of all value vectors:
-\begin{equation}
-\text{Output}_i = \sum_{j=1}^{N} A_{ij} V_j
-\end{equation}
-
-\textbf{Intuition:} Token $i$ aggregates information from all other tokens, weighted by attention scores. If $A_{i,j} = 0.7$ and $A_{i,k} = 0.3$, then output $i$ is 70\% influenced by token $j$ and 30\% by token $k$.
-
-\subsubsection{Multi-Head Attention: Parallel Attention Patterns}
-
-Instead of one attention mechanism, Transformers use $H$ parallel heads (e.g., $H=8$) to capture different types of relationships.
-
-\textbf{Why multiple heads?} Different heads can specialize:
-\begin{itemize}
-    \item Head 1 might learn positional relationships ("nearby patches")
-    \item Head 2 might learn color similarity
-    \item Head 3 might learn semantic relationships ("all sky patches")
-\end{itemize}
-
-\textbf{Computation:}
-\begin{align}
-\text{head}_h &= \text{Attention}(X W_Q^h, X W_K^h, X W_V^h) \in \mathbb{R}^{N \times d_h} \\
-\text{MultiHead}(X) &= \text{Concat}(\text{head}_1, \ldots, \text{head}_H) W_O \in \mathbb{R}^{N \times D}
-\end{align}
-
-where $W_O \in \mathbb{R}^{D \times D}$ is an output projection matrix.
-
-\subsubsection{Complete Transformer Layer}
-
-A full Transformer layer combines multi-head self-attention with position-wise feed-forward networks:
-
-\textbf{(1) Multi-Head Self-Attention with Residual:}
-\begin{align}
-\hat{X} &= \text{LayerNorm}(X) \\
-X' &= X + \text{MultiHead}(\hat{X})
-\end{align}
-
-\textbf{(2) Feed-Forward Network (MLP) with Residual:}
-\begin{align}
-\hat{X}' &= \text{LayerNorm}(X') \\
-X_{\text{out}} &= X' + \text{MLP}(\hat{X}')
-\end{align}
-
-where MLP typically consists of two linear layers with GELU activation:
-\begin{equation}
-\text{MLP}(x) = W_2 \cdot \text{GELU}(W_1 x + b_1) + b_2
-\end{equation}
-
-\textbf{Why residual connections?} They allow gradients to flow directly through the network, enabling training of very deep models (12-24 layers for ViT).
-
-\textbf{Why LayerNorm before (not after)?} Pre-normalization stabilizes training and is the modern standard (vs. original post-normalization).
-
-\subsubsection{Vision Transformer (ViT) Complete Pipeline}
-
-\textbf{Architecture: ViT-B/16 (used in CLIP and SCLIP)}
-\begin{itemize}
-    \item Patch size: $P = 16$ pixels
-    \item Embedding dimension: $D = 512$
-    \item Number of layers: $L = 12$
-    \item Number of heads: $H = 8$
-    \item MLP hidden dimension: $2048$ (4× expansion)
-\end{itemize}
-
-\textbf{Complete forward pass:}
-
-\textbf{(a) Patch Embedding:}
-\begin{equation}
-X_{\text{patches}} = \text{LinearProjection}(\text{Flatten}(\text{Patches}(I))) \in \mathbb{R}^{N \times D}
-\end{equation}
-where $N = H_{\text{img}} W_{\text{img}} / P^2$ (e.g., $N = 224 \times 224 / 16^2 = 196$).
-
-\textbf{(b) Prepend CLS Token:}
-\begin{equation}
-X_0 = [\text{CLS}; X_{\text{patches}}] \in \mathbb{R}^{(N+1) \times D}
-\end{equation}
-
-The CLS (classification) token is a learnable embedding that aggregates global image information. For classification, only the CLS token output is used. For dense prediction (our case), we use all patch tokens.
-
-\textbf{(c) Add Position Embeddings:}
-\begin{equation}
-X_0 \leftarrow X_0 + E_{\text{pos}}
-\end{equation}
-
-Position embeddings are learned vectors that encode spatial location, allowing the model to distinguish between patches at different positions.
-
-\textbf{(d) Process through $L$ Transformer Layers:}
-\begin{equation}
-X_\ell = \text{TransformerLayer}_\ell(X_{\ell-1}) \quad \text{for } \ell = 1, \ldots, 12
-\end{equation}
-
-\textbf{(e) Extract Features:}
-\begin{itemize}
-    \item \textbf{For classification:} Use CLS token: $X_{12}[0, :]$
-    \item \textbf{For dense prediction:} Use all patch tokens: $X_{12}[1:, :]$
-\end{itemize}
-
-\subsubsection{CLIP: Connecting Vision and Language}
-
-CLIP \cite{radford2021learning} trains a Vision Transformer and Text Transformer jointly to align image and text representations in a shared embedding space.
-
-\textbf{Training Objective (Contrastive Learning):}
-
-Given a batch of $B$ image-text pairs $(I_i, T_i)$:
-
-\textbf{(1) Encode images and texts:}
-\begin{align}
-f_i &= \text{ViT}(I_i) \in \mathbb{R}^{D} \quad \text{(use CLS token)} \\
-t_i &= \text{TextTransformer}(T_i) \in \mathbb{R}^{D}
-\end{align}
-
-\textbf{(2) Normalize:}
-\begin{align}
-f_i &\leftarrow f_i / \|f_i\|_2 \\
-t_i &\leftarrow t_i / \|t_i\|_2
-\end{align}
-
-\textbf{(3) Compute similarity matrix:}
-\begin{equation}
-S_{ij} = f_i \cdot t_j \quad \in [-1, 1]
-\end{equation}
-
-\textbf{(4) Contrastive loss:} Maximize $S_{ii}$ (matching pairs) and minimize $S_{ij}$ for $i \neq j$ (non-matching pairs):
-\begin{equation}
-\mathcal{L} = -\frac{1}{B} \sum_{i=1}^{B} \left[ \log \frac{\exp(S_{ii}/\tau)}{\sum_{j=1}^{B} \exp(S_{ij}/\tau)} + \log \frac{\exp(S_{ii}/\tau)}{\sum_{j=1}^{B} \exp(S_{ji}/\tau)} \right]
-\end{equation}
-
-where $\tau$ is a learnable temperature parameter.
-
-\textbf{Result:} After training on 400M image-text pairs, CLIP learns:
-\begin{itemize}
-    \item Images of "dogs" are close to text "a photo of a dog"
-    \item Images of "cars" are close to text "a car on the road"
-    \item Zero-shot transfer: Can classify/segment unseen categories by comparing to text embeddings
-\end{itemize}
-
-\textbf{Why CLIP enables open-vocabulary segmentation:}
-\begin{enumerate}
-    \item \textbf{Shared embedding space:} Both images and text map to the same 512-D space
-    \item \textbf{Semantic understanding:} Learned on natural language descriptions, not just class labels
-    \item \textbf{Zero-shot:} Given text "airplane", CLIP can recognize airplanes without airplane-specific training
-\end{enumerate}
-
-\subsection{SCLIP's Dense Feature Extraction: Complete Pipeline}
-\label{sec:sclip_dense_extraction}
-
-Building on the Vision Transformer and CLIP foundations, this section explains how SCLIP modifies CLIP's final attention layer to extract dense semantic features using Cross-layer Self-Attention (CSA).
-
-\subsubsection{Step 1: Image Preprocessing and Patchification}
-
-\textbf{Input:} RGB image $I \in \mathbb{R}^{H \times W \times 3}$ (e.g., 224×224×3)
-
-\textbf{Normalization:}
-\begin{equation}
-I_{\text{norm}} = \frac{I / 255 - \mu}{\sigma}
-\end{equation}
-where $\mu$ and $\sigma$ are CLIP's standard ImageNet normalization parameters (mean and standard deviation per RGB channel).
-
-\textbf{Patch Embedding:} The normalized image is divided into non-overlapping patches of size $P \times P$ (ViT-B/16 uses $P=16$):
-\begin{equation}
-\text{Number of patches: } N = \frac{H}{P} \times \frac{W}{P} = 14 \times 14 = 196 \text{ (for 224×224 input)}
-\end{equation}
-
-Each patch is linearly projected to a $D$-dimensional embedding ($D=512$ for ViT-B/16):
-\begin{equation}
-X_{\text{patch}} \in \mathbb{R}^{N \times D}
-\end{equation}
-
-A learnable [CLS] token is prepended:
-\begin{equation}
-X_0 = [\text{CLS}; X_{\text{patch}}] \in \mathbb{R}^{(N+1) \times D}
-\end{equation}
-
-\textbf{Positional Encoding:} Learnable positional embeddings $E_{\text{pos}} \in \mathbb{R}^{(N+1) \times D}$ are added:
-\begin{equation}
-X_0 \leftarrow X_0 + E_{\text{pos}}
-\end{equation}
-
-\subsubsection{Step 2: Transformer Layers with Standard Attention}
-
-ViT-B/16 has 12 transformer layers. Layers 1-11 use standard multi-head self-attention (MHSA):
-
-\textbf{For each layer $\ell = 1, \ldots, 11$:}
-
-\textbf{(a) Layer Normalization:}
-\begin{equation}
-\hat{X}_{\ell-1} = \text{LayerNorm}(X_{\ell-1})
-\end{equation}
-
-\textbf{(b) Standard Multi-Head Self-Attention:}
-
-For each attention head $h$:
-\begin{align}
-Q_h &= \hat{X}_{\ell-1} W_Q^h \in \mathbb{R}^{(N+1) \times d_h} \\
-K_h &= \hat{X}_{\ell-1} W_K^h \in \mathbb{R}^{(N+1) \times d_h} \\
-V_h &= \hat{X}_{\ell-1} W_V^h \in \mathbb{R}^{(N+1) \times d_h}
-\end{align}
-
-where $d_h = D / H$ (head dimension, $d_h = 512/8 = 64$ for ViT-B/16 with 8 heads).
-
-\textbf{Standard attention computation:}
-\begin{equation}
-\text{Attention}_h(Q_h, K_h, V_h) = \text{softmax}\left(\frac{Q_h K_h^T}{\sqrt{d_h}}\right) V_h
-\end{equation}
-
-The attention matrix $A_h = \text{softmax}\left(\frac{Q_h K_h^T}{\sqrt{d_h}}\right) \in \mathbb{R}^{(N+1) \times (N+1)}$ represents how much each token attends to every other token.
-
-\textbf{Concatenate all heads and project:}
-\begin{equation}
-\text{MHSA}(\hat{X}_{\ell-1}) = \text{Concat}(\text{Attention}_1, \ldots, \text{Attention}_H) W_O
-\end{equation}
-
-\textbf{(c) Residual Connection + MLP:}
-\begin{align}
-X'_{\ell} &= X_{\ell-1} + \text{MHSA}(\hat{X}_{\ell-1}) \\
-X_{\ell} &= X'_{\ell} + \text{MLP}(\text{LayerNorm}(X'_{\ell}))
-\end{align}
-
-\subsubsection{Step 3: Final Layer with Cross-layer Self-Attention (CSA)}
-
-\textbf{This is SCLIP's key innovation.} The final layer ($\ell = 12$) uses CSA instead of standard attention.
-
-\textbf{(a) Layer Normalization:}
-\begin{equation}
-\hat{X}_{11} = \text{LayerNorm}(X_{11})
-\end{equation}
-
-\textbf{(b) Compute Q, K, V as before:}
-\begin{align}
-Q_h &= \hat{X}_{11} W_Q^h \in \mathbb{R}^{(N+1) \times d_h} \\
-K_h &= \hat{X}_{11} W_K^h \in \mathbb{R}^{(N+1) \times d_h} \\
-V_h &= \hat{X}_{11} W_V^h \in \mathbb{R}^{(N+1) \times d_h}
-\end{align}
-
-\textbf{(c) Cross-layer Self-Attention (CSA) - The Key Difference:}
-
-Instead of computing $Q_h K_h^T$, CSA computes:
-\begin{equation}
-\boxed{A_h^{\text{CSA}} = \text{softmax}\left(\frac{Q_h Q_h^T + K_h K_h^T}{\sqrt{d_h}}\right)}
-\end{equation}
-
-\textbf{Why this works better for dense prediction:}
+\textbf{Solution:} LoftUp \cite{loftup2025} learns to upsample CLIP features from 14×14 to 28×28 while preserving semantic content through:
 
 \begin{itemize}
-    \item \textbf{$Q_h Q_h^T$:} Measures similarity between queries. If patch $i$ and patch $j$ have similar queries, they likely belong to the same semantic region (e.g., both are "sky"). This encourages \textit{spatial grouping}.
-
-    \item \textbf{$K_h K_h^T$:} Measures similarity between keys. Provides complementary structural information about which patches should be grouped together.
-
-    \item \textbf{Combined effect:} Patches in the same semantic region mutually reinforce each other through both query and key similarities, producing more spatially coherent features.
-
-    \item \textbf{Contrast with standard $Q_h K_h^T$:} Standard attention measures query-key compatibility, which works well for global understanding (classification) but can create noisy, fragmented dense predictions.
+\item Learned interpolation kernels trained on vision-language alignment objectives
+\item Semantic consistency loss ensuring upsampled features maintain similarity to text embeddings
+\item Pre-trained weights available via torch.hub, enabling training-free integration
 \end{itemize}
 
-\textbf{Apply attention to values:}
-\begin{equation}
-\text{CSA}_h(Q_h, K_h, V_h) = A_h^{\text{CSA}} V_h \in \mathbb{R}^{(N+1) \times d_h}
-\end{equation}
+\textbf{Implementation:}
+\begin{verbatim}
+upsampler = torch.hub.load('loftup_model')
+features_14x14 = sclip_encoder(image)  # [14, 14, 512]
+features_28x28 = upsampler(features_14x14)  # [28, 28, 512]
+\end{verbatim}
 
-\textbf{(d) Concatenate and project:}
-\begin{equation}
-X_{12} = X_{11} + \text{Concat}(\text{CSA}_1, \ldots, \text{CSA}_H) W_O + \text{MLP}(\cdots)
-\end{equation}
+\textbf{Expected improvement:} +2-4\% mIoU by doubling effective spatial resolution.
 
-\subsubsection{Step 4: Extract Dense Patch Features}
+\begin{figure}[h]
+\centering
+\fbox{\parbox{0.9\textwidth}{\centering
+\vspace{1cm}
+\textbf{[FIGURE 3.2: LoftUp Feature Upsampling]}\\[0.5cm]
+\textit{Show comparison:}\\[0.3cm]
+\textbf{Top row:} Input image | SCLIP 14×14 features (visualized) | Bilinear upsample 28×28\\
+\textbf{Bottom row:} Input image | SCLIP 14×14 features | LoftUp upsample 28×28\\[0.3cm]
+\textit{Highlight how LoftUp preserves sharp semantic boundaries compared to blurry bilinear interpolation. Use heatmap visualization.}
+\vspace{1cm}
+}}
+\caption{LoftUp learns semantic-aware upsampling, preserving feature quality while doubling spatial resolution.}
+\label{fig:loftup}
+\end{figure}
 
-From the final layer output $X_{12} \in \mathbb{R}^{(N+1) \times D}$:
+\subsection{ResCLIP: Residual Attention Enhancement}
 
-\textbf{(a) Remove CLS token:}
-\begin{equation}
-F_{\text{patch}} = X_{12}[1:, :] \in \mathbb{R}^{N \times D} = \mathbb{R}^{196 \times 512}
-\end{equation}
+\textbf{Motivation:} Even with higher resolution, CLIP features lack spatial coherence within object regions. Adjacent patches of the same object may have inconsistent predictions.
 
-\textbf{(b) Reshape to spatial grid:}
-\begin{equation}
-F_{\text{spatial}} = \text{reshape}(F_{\text{patch}}, (H_p, W_p, D)) \in \mathbb{R}^{14 \times 14 \times 512}
-\end{equation}
+\textbf{Solution:} ResCLIP \cite{resclip2025} introduces two mechanisms:
 
-where $H_p = W_p = \sqrt{N} = 14$ (for 224×224 input).
+\subsubsection{Residual Cross-correlation Self-Attention (RCS)}
 
-\textbf{(c) L2 Normalization:}
-\begin{equation}
-F_{\text{norm}}[i,j,:] = \frac{F_{\text{spatial}}[i,j,:]}{\|F_{\text{spatial}}[i,j,:]\|_2}
-\end{equation}
-
-Now $F_{\text{norm}} \in \mathbb{R}^{14 \times 14 \times 512}$ contains normalized dense features.
-
-\subsubsection{Step 5: Text Encoding with Prompt Ensembling}
-
-For each class name $c$ (e.g., "car"), we generate multiple text prompts using templates \cite{zhou2022learning}:
-
-\textbf{Prompt templates:}
-\begin{itemize}
-    \item "a photo of a \{class\}"
-    \item "\{class\} in the scene"
-    \item "a rendering of a \{class\}"
-    \item \ldots (80 templates total in practice)
-\end{itemize}
-
-For class "car", this produces: ["a photo of a car", "car in the scene", \ldots]
-
-\textbf{Encode each prompt:} Use CLIP's text transformer to get embeddings:
-\begin{equation}
-t_{c,i} = \text{CLIP}_{\text{text}}(\text{template}_i(c)) \in \mathbb{R}^{D}
-\end{equation}
-
-\textbf{Average embeddings (prompt ensembling):}
-\begin{equation}
-e_c = \frac{1}{M} \sum_{i=1}^{M} t_{c,i} \in \mathbb{R}^{D}
-\end{equation}
-where $M$ is the number of templates.
-
-\textbf{L2 Normalization:}
-\begin{equation}
-e_c \leftarrow \frac{e_c}{\|e_c\|_2}
-\end{equation}
-
-This gives us normalized text embeddings $e_c \in \mathbb{R}^{512}$ for each class.
-
-\subsubsection{Step 6: Compute Dense Similarity Scores}
-
-For each spatial location $(i, j)$ in the 14×14 grid and each class $c$:
+Enhances patch-to-patch similarity within semantic regions:
 
 \begin{equation}
-S_{i,j,c} = F_{\text{norm}}[i,j,:] \cdot e_c \in [-1, 1]
+C = F F^T \quad \text{(cross-correlation matrix, } N \times N)
 \end{equation}
-
-This is the cosine similarity (dot product of normalized vectors). We get a similarity tensor:
-\begin{equation}
-S \in \mathbb{R}^{14 \times 14 \times C}
-\end{equation}
-where $C$ is the number of classes (e.g., $C=3$ for ["car", "road", "background"]).
-
-\subsubsection{Step 7: Upsample to Original Resolution}
-
-The 14×14 similarity maps are upsampled to the original image resolution using bilinear interpolation:
 
 \begin{equation}
-S_{\text{full}} = \text{Upsample}(S, \text{size}=(H, W)) \in \mathbb{R}^{H \times W \times C}
+F_{\text{enhanced}} = F + \alpha \cdot \text{softmax}(C) F
 \end{equation}
 
-For example, if the original image is 512×512, we upsample from 14×14 to 512×512.
+where $\alpha$ controls the strength of residual enhancement (default 0.3).
 
-\subsubsection{Step 8: Generate Dense Predictions}
+\textbf{Intuition:} Patches with similar features (high $F_i \cdot F_j$) reinforce each other's representations, creating smoother, more coherent object regions.
 
-\textbf{(a) Apply temperature scaling:}
-\begin{equation}
-L = S_{\text{full}} \times T
-\end{equation}
-where $T = 40.0$ is the temperature (sharpens the distribution).
+\subsubsection{Semantic Feedback Refinement (SFR)}
 
-\textbf{(b) Convert to probabilities via softmax:}
-\begin{equation}
-P_{x,y,c} = \frac{\exp(L_{x,y,c})}{\sum_{c'=1}^{C} \exp(L_{x,y,c'})}
-\end{equation}
-
-\textbf{(c) Assign class labels:}
-\begin{equation}
-\boxed{\hat{c}(x, y) = \arg\max_{c} P_{x,y,c}}
-\end{equation}
-
-This produces the final dense segmentation mask $\hat{c} \in \mathbb{R}^{H \times W}$ where each pixel is assigned a class index.
-
-\subsubsection{Summary and Implementation Considerations}
+Multi-scale coarse-to-fine refinement:
 
 \begin{enumerate}
-    \item \textbf{Minimal architectural modification:} CSA requires changing only the attention computation in the final layer from $Q K^T$ to $Q Q^T + K K^T$, making it straightforward to implement on top of existing CLIP models.
-
-    \item \textbf{Spatial coherence through self-similarity:} The $Q Q^T$ and $K K^T$ terms measure patch-to-patch similarity within the same representation space, encouraging patches with similar semantic content to have strong mutual attention weights, thereby improving spatial consistency in dense predictions.
-
-    \item \textbf{Training-free approach:} SCLIP leverages pre-trained CLIP weights without requiring fine-tuning or additional training data, applying CSA as a modification to the inference-time forward pass.
-
-    \item \textbf{Resolution characteristics:} The Vision Transformer with 16×16 patches produces a 14×14 feature grid for 224×224 input images. These features must be upsampled to the target resolution via bilinear interpolation for pixel-level predictions.
-
-    \item \textbf{Sliding window inference for high-resolution inputs:} Images larger than 224×224 (e.g., 2048×2048) are processed using overlapping 224×224 crops with 50\% stride overlap, and predictions are aggregated through averaging.
-
-    \item \textbf{Temperature scaling for prediction sharpening:} The logit scale parameter $T = 40.0$ amplifies the differences between class scores before softmax, producing more confident and less ambiguous predictions.
+\item Generate coarse predictions at 14×14 resolution
+\item Identify high-confidence regions as "semantic anchors"
+\item Upsample to 28×28, using anchors to guide boundary placement
+\item Iteratively refine predictions with feedback from previous scale
 \end{enumerate}
 
+\textbf{Implementation complexity:} Moderate. Requires 2-3 forward passes at different scales, increasing inference time by ~30\%.
 
-\subsection{Intelligent Prompt Extraction}
+\textbf{Expected improvement:} +8-13\% mIoU through enhanced spatial coherence.
 
-Our key contribution is intelligent prompt extraction that uses SCLIP's semantic understanding to guide SAM2 prompting, achieving massive efficiency gains without sacrificing accuracy. This section details the complete pipeline from SCLIP's dense predictions to semantically meaningful prompt points.
+\begin{figure}[h]
+\centering
+\fbox{\parbox{0.9\textwidth}{\centering
+\vspace{1cm}
+\textbf{[FIGURE 3.3: ResCLIP RCS and SFR]}\\[0.5cm]
+\textit{Left panel: RCS Mechanism}\\
+Show cross-correlation matrix C (heatmap) and how similar patches reinforce each other.\\[0.3cm]
+\textit{Right panel: SFR Multi-Scale Refinement}\\
+Show 3 stages: Coarse (14×14) → Medium (28×28) → Fine (H×W)\\
+Visualize how high-confidence anchors guide boundary refinement.\\[0.3cm]
+\textit{Include before/after segmentation: baseline SCLIP vs ResCLIP enhanced.}
+\vspace{1cm}
+}}
+\caption{ResCLIP's RCS and SFR mechanisms enhance spatial coherence through patch similarity and multi-scale refinement.}
+\label{fig:resclip}
+\end{figure}
 
-\subsubsection{Motivation: From Dense Predictions to Sparse Prompts}
+\subsection{DenseCRF: Boundary Refinement}
 
-Naive approaches to combining CLIP with SAM often use exhaustive grid sampling: prompting SAM at every point in a dense grid (e.g., 64×64 = 4096 points) and using CLIP to classify the resulting masks. This has two major drawbacks:
+\textbf{Motivation:} Even with improved features, boundaries may be jagged due to independent pixel-wise predictions. Post-processing can enforce appearance consistency.
 
-\begin{itemize}
-    \item \textbf{Computational inefficiency:} Generating 4096 SAM masks per image is prohibitively expensive (minutes per image even on modern GPUs)
-    \item \textbf{Semantic blindness:} Grid points are placed uniformly without considering object locations, wasting computation on background regions
-\end{itemize}
-
-Our intelligent extraction inverts this paradigm: we first run SCLIP to identify \textit{where} objects are likely to exist, then prompt SAM2 only at those semantically meaningful locations. This achieves a 96\% reduction in prompts (50-300 vs 4096) while maintaining competitive accuracy.
-
-\subsubsection{Complete Prompt Extraction Pipeline}
-
-Given SCLIP's dense prediction outputs from the previous stage:
-\begin{itemize}
-    \item Segmentation map: $\hat{c} \in \mathbb{R}^{H \times W}$ (predicted class per pixel)
-    \item Probability map: $P \in \mathbb{R}^{H \times W \times C}$ (confidence scores for $C$ classes)
-\end{itemize}
-
-We extract semantically meaningful prompt points through the following five-stage pipeline:
-
-\paragraph{Stage 1: Per-Class Confidence Masking}
-
-For each class $c \in \{1, \ldots, C\}$, we create a binary confidence mask identifying high-certainty regions:
+\textbf{Solution:} Dense Conditional Random Fields \cite{densecrf2011} define an energy function:
 
 \begin{equation}
-M_c^{\text{conf}}(x,y) = \begin{cases}
-1 & \text{if } \hat{c}(x,y) = c \text{ and } P_{x,y,c} > \tau_{\text{conf}} \\
-0 & \text{otherwise}
-\end{cases}
-\end{equation}
-
-where $\tau_{\text{conf}}$ is the confidence threshold (typically 0.7). This filters out low-confidence predictions that may be noise or ambiguous regions. The threshold is deliberately set high to ensure SAM2 prompts are placed only at locations where CLIP has strong semantic evidence.
-
-\paragraph{Stage 2: Connected Component Analysis}
-
-For each class's confidence mask $M_c^{\text{conf}}$, we apply connected component labeling to identify spatially disjoint object instances. This clustering step groups adjacent pixels belonging to the same semantic class into discrete regions:
-
-\begin{equation}
-\text{CC}(M_c^{\text{conf}}) \rightarrow \{R_c^1, R_c^2, \ldots, R_c^{N_c}\}
-\end{equation}
-
-where $R_c^i \subseteq \{(x,y) : M_c^{\text{conf}}(x,y) = 1\}$ represents the $i$-th connected region for class $c$.
-
-We use 8-connectivity (considering diagonal neighbors) to ensure that objects touching at corners are grouped together. This connected component analysis efficiently identifies disjoint regions using standard graph-based labeling algorithms.
-
-\textbf{Why clustering matters:} Without clustering, all pixels of class "car" would be treated as a single object. Clustering separates individual car instances, allowing SAM2 to generate distinct masks for each vehicle. For example, a street scene with 5 cars produces 5 separate connected components, each receiving its own prompt point.
-
-\paragraph{Stage 3: Region Filtering by Size}
-
-Many connected components are spurious detections (noise, texture patterns, shadows) that happen to exceed the confidence threshold locally. We filter these using a minimum region size criterion:
-
-\begin{equation}
-\text{Keep } R_c^i \text{ if } |R_c^i| > \tau_{\text{area}}
-\end{equation}
-
-where $|R_c^i|$ denotes the number of pixels in region $R_c^i$, and $\tau_{\text{area}}$ is the minimum area threshold (typically 100 pixels).
-
-This size filtering serves multiple purposes:
-\begin{itemize}
-    \item Removes noise and artifacts from SCLIP predictions
-    \item Focuses computation on salient objects rather than tiny regions
-    \item Prevents SAM2 from being distracted by spurious high-confidence pixels
-\end{itemize}
-
-For a 224×224 image (50,176 pixels), a threshold of 100 pixels means we ignore regions smaller than 0.2\% of the image area, which is reasonable for most semantic segmentation tasks.
-
-\paragraph{Stage 4: Centroid Computation}
-
-For each valid connected component $R_c^i$, we extract a representative prompt point by computing the spatial centroid:
-
-\begin{equation}
-\mathbf{p}_c^i = (\bar{x}_c^i, \bar{y}_c^i) = \left( \frac{1}{|R_c^i|} \sum_{(x,y) \in R_c^i} x, \frac{1}{|R_c^i|} \sum_{(x,y) \in R_c^i} y \right)
-\end{equation}
-
-The centroid represents the geometric center of the region and typically falls near the object's interior, making it an ideal point prompt for SAM2. Unlike random sampling or boundary-based selection, centroids are:
-\begin{itemize}
-    \item \textbf{Stable:} Robust to minor segmentation boundary variations
-    \item \textbf{Interior:} Likely to fall inside the object rather than on edges
-    \item \textbf{Representative:} Capture the region's spatial extent
-\end{itemize}
-
-We round centroid coordinates to the nearest integer pixel location: $\mathbf{p}_c^i = (\text{round}(\bar{x}_c^i), \text{round}(\bar{y}_c^i))$.
-
-\paragraph{Stage 5: Prompt Metadata Aggregation}
-
-For each extracted prompt point $\mathbf{p}_c^i$, we aggregate metadata to inform downstream processing:
-
-\begin{equation}
-\text{Prompt}_c^i = \{
-\mathbf{p}_c^i, \quad c, \quad \text{conf}_c^i, \quad |R_c^i|
-\}
+E(x) = \sum_i \psi_u(x_i) + \sum_{i<j} \psi_p(x_i, x_j)
 \end{equation}
 
 where:
 \begin{itemize}
-    \item $\mathbf{p}_c^i \in \mathbb{R}^2$: Centroid coordinates $(x, y)$
-    \item $c \in \{1, \ldots, C\}$: Class index (e.g., 1="car", 2="person")
-    \item $\text{conf}_c^i = P_{\bar{x}_c^i, \bar{y}_c^i, c}$: CLIP confidence at centroid
-    \item $|R_c^i| \in \mathbb{N}$: Region area in pixels
+\item $\psi_u(x_i)$: Unary potential from SCLIP predictions (negative log-probability)
+\item $\psi_p(x_i, x_j)$: Pairwise potential encouraging label agreement between similar pixels:
 \end{itemize}
-
-This metadata serves multiple purposes:
-\begin{itemize}
-    \item Class index $c$ enables direct class assignment to SAM2 masks (explained in next section)
-    \item Confidence score allows prioritizing high-certainty prompts during processing
-    \item Region size can be used for overlap resolution (larger regions take precedence)
-\end{itemize}
-
-\subsubsection{Algorithm Summary and Efficiency Analysis}
-
-The complete prompt extraction algorithm processes all classes in parallel:
 
 \begin{equation}
-\text{Prompts} = \bigcup_{c=1}^{C} \left\{ \text{Prompt}_c^i : R_c^i \text{ valid after filtering} \right\}
+\psi_p(x_i, x_j) = \mu(x_i, x_j) \left[ w_1 \exp\left(-\frac{\|p_i - p_j\|^2}{2\sigma_{\alpha}^2}\right) + w_2 \exp\left(-\frac{\|p_i - p_j\|^2}{2\sigma_{\beta}^2} - \frac{\|I_i - I_j\|^2}{2\sigma_{\gamma}^2}\right) \right]
 \end{equation}
 
-\textbf{Typical prompt counts:} For Pascal VOC 2012 images with 21 classes (20 objects + background), we extract:
-\begin{itemize}
-    \item \textbf{Simple scenes:} 50-100 prompts (sparse objects, large background regions)
-    \item \textbf{Complex scenes:} 200-300 prompts (multiple object instances per class)
-    \item \textbf{Average:} $\sim$150 prompts per image
-\end{itemize}
+The first term enforces spatial smoothness; the second enforces appearance consistency (similar-colored pixels prefer the same label).
 
-\textbf{Efficiency gains:} Compared to 64×64 grid sampling (4096 prompts):
+\textbf{Implementation:} Uses pydensecrf library, 10 mean-field iterations.
+
+\textbf{Expected improvement:} +1-2\% mIoU, +3-5\% boundary F1-score.
+
+\begin{figure}[h]
+\centering
+\fbox{\parbox{0.9\textwidth}{\centering
+\vspace{1cm}
+\textbf{[FIGURE 3.4: DenseCRF Boundary Refinement]}\\[0.5cm]
+\textit{Show 4-column comparison for 2 example images:}\\[0.3cm]
+\textbf{Column 1:} Input image\\
+\textbf{Column 2:} SCLIP baseline prediction (jagged boundaries)\\
+\textbf{Column 3:} After DenseCRF (smooth boundaries)\\
+\textbf{Column 4:} Ground truth\\[0.3cm]
+\textit{Zoom insets highlighting boundary improvements. Show boundary F1 scores.}
+\vspace{1cm}
+}}
+\caption{DenseCRF post-processing enforces appearance consistency, producing smooth object boundaries.}
+\label{fig:densecrf}
+\end{figure}
+
+\subsection{Phase 1 Summary}
+
+\textbf{Combined pipeline:}
 \begin{equation}
-\text{Reduction} = 1 - \frac{150}{4096} = 96.3\%
+\text{SCLIP} \xrightarrow{\text{LoftUp}} 28 \times 28 \xrightarrow{\text{ResCLIP}} \text{Enhanced features} \xrightarrow{\text{Similarity}} \text{Logits} \xrightarrow{\text{DenseCRF}} \text{Final mask}
 \end{equation}
 
-This 27× reduction in SAM2 queries translates directly to 27× speedup in mask generation, enabling practical deployment on consumer hardware.
+\textbf{Expected cumulative improvement:} +11-19\% mIoU over baseline.
 
-\subsubsection{Hyperparameter Selection}
+\textbf{Ablation strategy:} Each component can be enabled/disabled independently for systematic evaluation.
 
-Two key hyperparameters control the prompt extraction process:
+\section{Phase 2A: Training-Free Human Parsing Enhancement}
 
-\begin{itemize}
-    \item \textbf{Confidence threshold $\tau_{\text{conf}}$:} Higher values (0.7-0.9) produce fewer but higher-quality prompts by requiring strong CLIP evidence. Lower values (0.3-0.5) increase recall at the cost of more false positives. We use 0.7 as default, balancing precision and recall.
+Phase 2A specifically targets the "person" class, which exhibits poor baseline performance due to pose variation, clothing diversity, and CLIP's global feature aggregation bias.
 
-    \item \textbf{Minimum area $\tau_{\text{area}}$:} Larger values (200-500) filter more aggressively, reducing noise but potentially missing small objects. Smaller values (50-100) retain more detections but include spurious regions. We use 100 pixels as default, appropriate for objects of interest in most semantic segmentation benchmarks.
-\end{itemize}
+\subsection{CLIPtrase: Self-Correlation Recalibration}
 
-These thresholds can be adjusted based on application requirements: surveillance systems may prefer high recall (lower thresholds), while precision-critical applications (medical imaging) may demand higher thresholds.
+\textbf{Observation:} CLIP's self-attention tends to overly smooth local details, aggregating body parts into holistic "person" representations that lose fine-grained structure.
 
-\subsubsection{Direct Class Assignment}
-
-Unlike methods that require voting or post-processing, our approach performs direct class assignment:
-
-For each prompt point $p_i$ with extracted class label $c_i$:
+\textbf{Solution:} CLIPtrase \cite{cliptrase2024} recalibrates the correlation matrix to enhance local awareness:
 
 \begin{equation}
-\text{SAM2}(p_i) \rightarrow M_i \text{ where } M_i \text{ is assigned class } c_i
+C_{\text{orig}} = \text{softmax}(QK^T) \in \mathbb{R}^{N \times N}
 \end{equation}
 
-SAM2 generates a high-quality instance mask $M_i$ at prompt $p_i$, and we directly assign it the class $c_i$ determined by SCLIP's prediction at that location. This simple yet effective strategy combines:
+\begin{equation}
+C_{\text{recal}} = C_{\text{orig}} \odot M_{\text{local}}
+\end{equation}
 
-\begin{itemize}
-    \item \textbf{SCLIP's semantic understanding:} Correct class assignment from vision-language features
-    \item \textbf{SAM2's segmentation quality:} Precise object boundaries from specialized segmentation model
-    \item \textbf{Efficient processing:} No need for majority voting or multi-scale evaluation
-\end{itemize}
+where $M_{\text{local}}$ is a learned mask emphasizing short-range correlations (neighboring patches) over long-range aggregation.
 
-\subsection{Extension to Video Segmentation}
+\textbf{Implementation:} Training-free; uses pre-computed recalibration matrices from CLIPtrase paper.
 
-While our primary focus is on image segmentation evaluated on Pascal VOC 2012, our CLIP-guided prompting approach naturally extends to video segmentation by leveraging SAM2's native video tracking capabilities. This extension demonstrates that intelligent semantic guidance can be applied to temporal data while maintaining efficiency and requiring only first-frame analysis.
+\textbf{Expected improvement:} +5-10\% mIoU for person class by preserving body part boundaries.
 
-\subsubsection{SAM2 Video Architecture}
+\begin{figure}[h]
+\centering
+\fbox{\parbox{0.9\textwidth}{\centering
+\vspace{1cm}
+\textbf{[FIGURE 3.5: CLIPtrase Self-Correlation Recalibration]}\\[0.5cm]
+\textit{Show attention visualization:}\\[0.3cm]
+\textbf{Top:} Original CLIP attention (overly global, merges body parts)\\
+\textbf{Bottom:} CLIPtrase recalibrated attention (local, preserves structure)\\[0.3cm]
+\textit{Include example: person wearing striped shirt. Show how CLIPtrase correctly segments arms, torso separately instead of merging.}
+\vspace{1cm}
+}}
+\caption{CLIPtrase recalibrates self-attention to emphasize local correlations, crucial for parsing articulated human poses.}
+\label{fig:cliptrase}
+\end{figure}
 
-SAM2 \cite{ravi2024sam2} extends the original Segment Anything Model to video by introducing a memory-based architecture for temporal consistency. The key innovation is a streaming memory mechanism that maintains object identity across frames without requiring per-frame segmentation.
+\subsection{CLIP-RC: Regional Clue Extraction}
 
-The video predictor operates through three main components:
+\textbf{Observation:} CLIP features are dominated by global scene context. For humans, this means body part details are overshadowed by background and holistic pose information.
 
-\begin{enumerate}
-    \item \textbf{Image encoder:} Processes individual frames to extract visual features (inherited from SAM)
-    \item \textbf{Memory attention:} Maintains a memory bank of object features from previous frames
-    \item \textbf{Mask decoder:} Generates segmentation masks using current frame features and memory context
-\end{enumerate}
-
-This architecture enables SAM2 to propagate segmentation masks across video frames by:
-\begin{itemize}
-    \item Storing high-confidence predictions in memory banks
-    \item Retrieving relevant memories when processing subsequent frames
-    \item Adapting to object appearance changes through continuous memory updates
-    \item Handling temporary occlusions by relying on memory-based predictions
-\end{itemize}
-
-\subsubsection{CLIP-Guided Video Segmentation Pipeline}
-
-Our video segmentation approach combines CLIP's semantic understanding for initial object detection with SAM2's temporal tracking for frame-to-frame propagation. The complete pipeline consists of five stages:
-
-\paragraph{Stage 1: First Frame Extraction and CLIP Analysis}
-
-We begin by extracting the first frame (frame 0) from the input video. This frame is converted to RGB color space to match CLIP's expected input format.
-
-SCLIP dense prediction is then applied to frame 0 with the user-provided vocabulary (e.g., ["horse", "rider", "motorcycle", "person"]). This produces:
-\begin{itemize}
-    \item Segmentation map: $(H \times W)$ pixel-wise class predictions
-    \item Probability map: $(H \times W \times C)$ confidence scores for each of $C$ classes
-\end{itemize}
-
-This first-frame analysis is the \textit{only} time CLIP processes the video, making the approach computationally efficient compared to per-frame dense prediction.
-
-\paragraph{Stage 2: Semantic Prompt Extraction}
-
-Using the same intelligent prompting strategy as our image pipeline, we extract 50-300 semantic prompt points from high-confidence CLIP regions on frame 0. For each detected object class:
+\textbf{Solution:} CLIP-RC \cite{cliprc2024} extracts regional features through spatial pyramid pooling:
 
 \begin{enumerate}
-    \item Identify high-confidence regions: pixels where $p(c|x) > \tau_{\text{conf}}$ (typically $\tau_{\text{conf}} = 0.7$)
-    \item Find connected components using binary morphological operations
-    \item Filter regions by minimum size: $\text{area}(R) > \tau_{\text{area}}$ (typically $\tau_{\text{area}} = 100$ pixels)
-    \item Extract centroid coordinates as prompt points: $\mathbf{p}_i = (\bar{x}_i, \bar{y}_i)$
-    \item Associate each prompt with its class index and confidence score
+\item Divide feature map into $k \times k$ grids (e.g., $k=3$ for 9 regions)
+\item For each region, compute regional descriptor: $r_i = \text{MaxPool}(F_{\text{region}_i})$
+\item Concatenate regional descriptors with global feature: $F_{\text{RC}} = [F_{\text{global}}; r_1; r_2; \ldots; r_9]$
+\item Use $F_{\text{RC}}$ for similarity matching instead of $F_{\text{global}}$
 \end{enumerate}
 
-Each extracted prompt contains:
-\begin{itemize}
-    \item Spatial coordinates: $(x, y)$ pixel location
-    \item Class identifier: Integer index (used as SAM2 object ID)
-    \item Class label: Human-readable semantic label
-    \item Confidence score: CLIP confidence at the centroid
-    \item Region size: Pixel area of the detected region
-\end{itemize}
+\textbf{Intuition:} Regional descriptors capture local variations (e.g., "head" region, "torso" region) that global pooling would average out.
 
-\paragraph{Stage 3: SAM2 Video Predictor Initialization}
+\textbf{Expected improvement:} +8-12\% mIoU for person class.
 
-We initialize SAM2's video predictor with the following configuration:
+\begin{figure}[h]
+\centering
+\fbox{\parbox{0.9\textwidth}{\centering
+\vspace{1cm}
+\textbf{[FIGURE 3.6: CLIP-RC Regional Clue Extraction]}\\[0.5cm]
+\textit{Show spatial pyramid:}\\[0.3cm]
+\textbf{Left:} Input image of person\\
+\textbf{Middle:} 3×3 grid overlay showing regional divisions\\
+\textbf{Right:} Feature extraction diagram showing regional descriptors concatenated\\[0.3cm]
+\textit{Example: Basketball player. Show how different regions capture ball, jersey, legs separately.}
+\vspace{1cm}
+}}
+\caption{CLIP-RC extracts regional features to combat global feature dominance, preserving body part details.}
+\label{fig:cliprc}
+\end{figure}
 
-\begin{itemize}
-    \item \textbf{Model:} SAM2 Hiera-Large architecture
-    \item \textbf{Video loading:} Video frames offloaded to CPU RAM to conserve GPU memory
-    \item \textbf{State management:} Intermediate states maintained on CPU between frame processing
-\end{itemize}
+\subsection{Phase 2A Summary}
 
-The predictor initializes an inference state containing:
-\begin{itemize}
-    \item Video metadata: number of frames, resolution, frame rate
-    \item Memory banks: initially empty, populated during propagation
-    \item Object registry: maps object IDs to their tracking states
-\end{itemize}
+\textbf{Combined human parsing pipeline:}
+\begin{equation}
+\text{SCLIP} \xrightarrow{\text{CLIPtrase}} \text{Local attention} \xrightarrow{\text{CLIP-RC}} \text{Regional features} \rightarrow \text{Enhanced person masks}
+\end{equation}
 
-For each extracted prompt point $\mathbf{p}_i$ with class index $c_i$, we register it as a foreground point on frame 0. This associates the spatial location with the object class, using the class index as the unique object identifier for temporal tracking across the video.
+\textbf{Expected improvement:} +7-12\% overall mIoU, +13-22\% for person class specifically.
 
-\paragraph{Stage 4: Temporal Mask Propagation}
+\textbf{Compatibility:} Can be combined with Phase 1 enhancements for cumulative gains.
 
-Once all prompts are registered on frame 0, SAM2 propagates masks across the entire video using its memory-based tracking mechanism. The propagation proceeds as follows:
+\section{Phase 2B: Prompt Engineering and Template Optimization}
 
-\begin{enumerate}
-    \item \textbf{Frame encoding:} Each frame $I_t$ is processed by the image encoder to produce visual features $\mathbf{f}_t$
+Phase 2B addresses computational inefficiency by optimizing text prompt templates used for CLIP encoding.
 
-    \item \textbf{Memory retrieval:} For each tracked object, SAM2 retrieves relevant memories from previous frames using cross-attention:
-    \[
-    \mathbf{m}_t = \text{Attention}(\mathbf{q}_t, \{\mathbf{k}_1, \ldots, \mathbf{k}_{t-1}\}, \{\mathbf{v}_1, \ldots, \mathbf{v}_{t-1}\})
-    \]
-    where $\mathbf{q}_t$ is the current frame query, and $\{\mathbf{k}_i, \mathbf{v}_i\}$ are memory key-value pairs from previous frames.
+\subsection{Baseline: 80-Template Ensembling}
 
-    \item \textbf{Mask prediction:} The mask decoder combines current features $\mathbf{f}_t$ and retrieved memories $\mathbf{m}_t$ to predict object masks:
-    \[
-    M_t^{(i)} = \text{Decoder}(\mathbf{f}_t, \mathbf{m}_t^{(i)})
-    \]
+Standard practice uses 80 generic ImageNet classification templates:
 
-    \item \textbf{Memory update:} High-confidence predictions are stored in the memory bank for future reference
-\end{enumerate}
+\begin{verbatim}
+templates = [
+    "a photo of a {}",
+    "a rendering of a {}",
+    "{} in the scene",
+    ...  # 80 total
+]
+\end{verbatim}
 
-The propagation iterates through all video frames, applying this process sequentially. For each frame, binary masks are obtained by thresholding the mask logits at zero, yielding segmentation masks for all tracked objects across the entire video.
+For each class, compute: $e_c = \frac{1}{80} \sum_{i=1}^{80} \text{CLIP}_{\text{text}}(\text{template}_i(c))$
 
-\paragraph{Stage 5: Video Rendering and Output}
+\textbf{Problem:} Computationally expensive (80× text encoding) and not optimized for dense prediction.
 
-The final stage generates a visualization video by overlaying colored segmentation masks on the original frames:
+\subsection{Top-7 Template Strategy}
 
-\begin{enumerate}
-    \item \textbf{Frame reading:} Original video frames are read sequentially
+PixelCLIP research identified 7 templates most effective for segmentation:
 
-    \item \textbf{Mask overlay:} For each frame $t$ and object $i$, we blend the mask with a distinct color:
-    \[
-    I'_t(x,y) = \begin{cases}
-    0.5 \cdot I_t(x,y) + 0.5 \cdot \mathbf{c}_i & \text{if } M_t^{(i)}(x,y) = 1 \\
-    I_t(x,y) & \text{otherwise}
-    \end{cases}
-    \]
-    where $\mathbf{c}_i$ is a distinct RGB color assigned to class $i$ using a curated color palette with visually distinguishable hues.
+\begin{verbatim}
+top7_templates = [
+    "a photo of a {}",
+    "{} in the image",
+    "this is a {}",
+    "there is a {}",
+    "{} in the scene",
+    "a picture of a {}",
+    "an image of a {}"
+]
+\end{verbatim}
 
-    \item \textbf{Label rendering:} Class names are rendered at object centroids with high-contrast text for visibility across different backgrounds
+\textbf{Speedup:} $80/7 \approx 11.4\times$ faster text encoding.
 
-    \item \textbf{Video encoding:} Frames are encoded using H.264 codec with standard YUV420p pixel format for universal compatibility. We use perceptually lossless quality settings with optimized file structure for streaming playback across web browsers and media players.
-\end{enumerate}
+\textbf{Expected improvement:} +2-3\% mIoU (slightly better than 80-template due to segmentation-specific curation).
 
-\subsubsection{Memory Efficiency Optimizations}
+\subsection{Adaptive Template Selection}
 
-Video processing presents significant memory challenges, especially on consumer GPUs with limited VRAM (e.g., GTX 1060 6GB). We implement several optimizations to enable video segmentation within these constraints:
-
-\paragraph{CPU Offloading}
-
-SAM2's video predictor supports offloading video frames and intermediate states to CPU RAM rather than keeping everything in GPU VRAM. Specifically:
+Different object types benefit from different prompts:
 
 \begin{itemize}
-    \item \textbf{Video frame offloading:} Raw video frames are stored on CPU and loaded to GPU only when needed for processing. This prevents VRAM saturation when processing long videos.
-
-    \item \textbf{State offloading:} Intermediate computation states (attention maps, memory banks) are maintained on CPU between frames, with only active states loaded to GPU during processing.
+\item \textbf{Stuff classes} (sky, road, grass): "this is {}", "the {}"
+\item \textbf{Things classes} (car, person, dog): "a photo of a {}", "{} in the image"
+\item \textbf{Material classes} (wall-brick, floor-marble): "a {} surface", "{} texture"
 \end{itemize}
 
-While this strategy increases CPU-GPU data transfer overhead, it enables processing videos that would otherwise exceed the 6GB VRAM capacity of our consumer-grade hardware.
+\textbf{Implementation:} Pre-classify COCO-Stuff categories into stuff/things/material, apply appropriate template subset.
 
-\paragraph{Temporary Frame Storage}
+\textbf{Expected improvement:} +3-5\% mIoU over generic templates.
 
-During video rendering, segmented frames are saved as temporary PNG files in a dedicated directory rather than kept in memory. This prevents RAM exhaustion on long videos. After FFmpeg encoding completes, the temporary directory is automatically cleaned up to free disk space.
+\begin{figure}[h]
+\centering
+\fbox{\parbox{0.9\textwidth}{\centering
+\vspace{1cm}
+\textbf{[FIGURE 3.7: Template Engineering Results]}\\[0.5cm]
+\textit{Show bar chart:}\\[0.3cm]
+\textbf{X-axis:} Template strategy (80-generic, Top-7, Adaptive)\\
+\textbf{Y-axis Left:} mIoU (\%)\\
+\textbf{Y-axis Right:} Inference time (seconds)\\[0.3cm]
+\textit{Include dual y-axis showing accuracy vs speed trade-off.}\\
+\textit{Highlight: Top-7 achieves 11.4× speedup with minimal accuracy loss; Adaptive achieves best accuracy.}
+\vspace{1cm}
+}}
+\caption{Prompt engineering achieves substantial speedups and accuracy gains through task-specific template curation.}
+\label{fig:templates}
+\end{figure}
 
-\paragraph{Single-Pass Processing}
+\subsection{Phase 2B Summary}
 
-Unlike approaches that require multiple passes over the video (e.g., optical flow initialization + refinement), our pipeline processes each frame exactly once during the propagation stage, minimizing I/O and memory overhead.
+\textbf{Expected improvement:} +3-5\% mIoU with 3-11× computational speedup.
 
-\subsubsection{Implementation Considerations}
+\textbf{Implementation note:} Template selection is a simple configuration change, no model modification required.
 
-\textbf{One-time CLIP analysis:} Unlike per-frame dense prediction methods that run CLIP on every frame, our approach performs semantic analysis only on frame 0. SAM2's memory-based tracking handles temporal propagation, making video segmentation as efficient as image segmentation (plus video encoding overhead).
+\section{Phase 2C: Confidence Sharpening (Work in Progress)}
 
-\textbf{Object ID assignment:} We use CLIP class indices as SAM2 object IDs. This creates a direct mapping between semantic classes and tracked objects. All instances of the same class (e.g., multiple "person" objects) are tracked under the same ID, which is suitable for class-level segmentation but does not distinguish individual instances.
+Phase 2C addresses a common failure mode: flat prediction distributions where multiple classes have similar confidence scores, causing noisy segmentation.
 
-\textbf{Limitation - No video inpainting:} While mask generation works for videos, we do not implement video inpainting due to computational resource constraints. Video diffusion models (e.g., Stable Video Diffusion) require significantly more GPU memory (typically 12-24GB VRAM) and processing time (minutes per frame) than single-frame inpainting, making them impractical on our hardware setup (GTX 1060 6GB with only 6GB VRAM).
+\subsection{Hierarchical Class Grouping}
 
-\textbf{Encoding compatibility:} We deliberately choose H.264 codec with YUV420p pixel format and faststart flag to ensure output videos are universally playable across platforms (web browsers, mobile devices, media players) and support efficient streaming playback.
+\textbf{Observation:} Predicting among 171 COCO-Stuff classes simultaneously is challenging. Many errors occur within semantically similar groups (e.g., confusing "car" with "bus").
 
-\subsubsection{Video Examples and Applications}
+\textbf{Solution:} Two-stage hierarchical prediction:
 
-We demonstrate video segmentation on sports footage (MotoGP racing, NBA basketball) where CLIP identifies specific riders/players by name (e.g., "Valentino Rossi", "Stephen Curry") and SAM2 tracks them consistently across frames. Example vocabularies include:
+\textbf{Stage 1:} Classify into coarse groups (stuff vs things, or semantic categories like "vehicle", "furniture", "nature")
+
+\textbf{Stage 2:} Within predicted group, classify into specific classes
+
+\textbf{Implementation:} Define class hierarchy manually or via hierarchical clustering of CLIP embeddings.
+
+\textbf{Expected improvement:} +3-5\% mIoU by reducing classification complexity.
+
+\subsection{Confidence Calibration}
+
+\textbf{Observation:} Softmax often produces overconfident predictions even for ambiguous pixels.
+
+\textbf{Solution:} Temperature scaling and entropy-based filtering:
+
+\begin{equation}
+P_{\text{calibrated}} = \text{softmax}(L / T_{\text{calib}})
+\end{equation}
+
+where $T_{\text{calib}} < T_{\text{original}}$ sharpens the distribution for high-entropy pixels (uncertain regions).
+
+\textbf{Expected improvement:} +2-3\% mIoU by reducing label noise.
+
+\subsection{Phase 2C Status}
+
+\textbf{Current status:} Implemented but not fully evaluated in this thesis. Preliminary experiments show promising results.
+
+\textbf{Expected total improvement:} +5-8\% mIoU.
+
+\section{Integrated System Architecture}
+
+Figure~\ref{fig:full_pipeline} shows the complete system with all phases enabled.
+
+\begin{figure}[h]
+\centering
+\fbox{\parbox{0.9\textwidth}{\centering
+\vspace{1cm}
+\textbf{[FIGURE 3.8: Full Integrated Pipeline]}\\[0.5cm]
+\textit{Show complete dataflow diagram:}\\[0.3cm]
+\textbf{Input Image}\\
+→ \textbf{SCLIP Encoder (CSA)}\\
+→ \textbf{Phase 2A (CLIPtrase + CLIP-RC)} [optional]\\
+→ \textbf{Phase 1 (LoftUp → ResCLIP RCS + SFR)} [optional]\\
+→ \textbf{Dense Similarity} (with Phase 2B optimized templates)\\
+→ \textbf{Phase 1 (DenseCRF)} [optional]\\
+→ \textbf{Phase 2C (Hierarchical + Calibration)} [optional]\\
+→ \textbf{Final Segmentation}\\[0.3cm]
+\textit{Use different colors for each phase. Include toggle switches showing modular design.}
+\vspace{1cm}
+}}
+\caption{Integrated pipeline with all enhancement phases. Each phase can be independently enabled for ablation studies.}
+\label{fig:full_pipeline}
+\end{figure}
+
+\section{Implementation and Computational Considerations}
+
+\subsection{Modular Design}
+
+Our implementation allows independent control of each phase:
+
+\begin{verbatim}
+config = {
+    'use_loftup': True,
+    'use_resclip_rcs': True,
+    'use_resclip_sfr': True,
+    'use_densecrf': True,
+    'use_cliptrase': False,  # Enable for human parsing
+    'use_cliprc': False,
+    'template_strategy': 'top7',  # or 'adaptive'
+    'use_hierarchical': False,  # Phase 2C
+}
+\end{verbatim}
+
+\subsection{Computational Cost}
+
+\textbf{Baseline SCLIP:} ~8-10s per image on GTX 1060 6GB
+
+\textbf{Phase 1 (all):} ~12-15s per image (+30-50\% overhead)
+\begin{itemize}
+\item LoftUp: +1s (learned upsampling)
+\item ResCLIP: +2-4s (multi-scale refinement)
+\item DenseCRF: +1s (mean-field inference)
+\end{itemize}
+
+\textbf{Phase 2A:} +2-3s per image (correlation matrix computation)
+
+\textbf{Phase 2B:} \textit{Reduces} time by 5-7s (fewer text encodings)
+
+\textbf{Total (all phases):} ~15-20s per image (still practical for offline evaluation)
+
+\subsection{Memory Requirements}
+
+\textbf{Peak GPU memory (GTX 1060 6GB):}
+\begin{itemize}
+\item Baseline SCLIP: ~4.5GB
+\item +LoftUp: ~5.0GB (larger feature maps)
+\item +ResCLIP: ~5.8GB (multi-scale features)
+\item +DenseCRF: CPU-only, no GPU overhead
+\end{itemize}
+
+All phases fit within 6GB VRAM constraint through careful memory management.
+
+\section{Summary}
+
+This chapter presented our systematic approach to enhancing SCLIP-based open-vocabulary segmentation:
 
 \begin{itemize}
-    \item \textbf{MotoGP:} ["motorcycle", "rider", "track", "tire barrier", "Valentino Rossi"]
-    \item \textbf{NBA:} ["basketball player", "basketball", "court", "hoop", "Stephen Curry", "LeBron James"]
+\item \textbf{Phase 1:} Spatial enhancement (LoftUp, ResCLIP, DenseCRF) → +11-19\% mIoU
+\item \textbf{Phase 2A:} Human parsing (CLIPtrase, CLIP-RC) → +7-12\% mIoU overall, +13-22\% for person
+\item \textbf{Phase 2B:} Prompt engineering → +3-5\% mIoU with 3-11× speedup
+\item \textbf{Phase 2C:} Confidence sharpening (in progress) → +5-8\% mIoU
 \end{itemize}
 
-The system successfully tracks these objects through camera motion, pose changes, and partial occlusions, demonstrating the robustness of SAM2's memory-based approach when initialized with semantically meaningful CLIP-guided prompts.
+\textbf{Expected cumulative improvement:} +17-32\% mIoU over baseline SCLIP (22.77\%), targeting 40-48\% on COCO-Stuff-164k.
 
-This video extension enables applications such as:
-\begin{itemize}
-    \item Automated sports highlights generation (tracking specific players/teams)
-    \item Video surveillance (detecting and tracking people/vehicles by description)
-    \item Content-based video retrieval (finding frames containing described objects)
-    \item Video dataset annotation (semi-automated labeling with human verification)
-\end{itemize}
-
-\subsection{Generative Editing Integration}
-
-Once refined segmentation masks are obtained from images, we optionally integrate Stable Diffusion v2 Inpainting \cite{rombach2022high} for text-driven image modification. The inpainting model operates in the latent space of a variational autoencoder (VAE), enabling high-resolution generation with computational efficiency.
-
-We employ several techniques to ensure coherent results:
-\begin{itemize}
-    \item \textbf{Mask dilation:} Expand mask boundaries by 5-10 pixels for smoother blending
-    \item \textbf{Classifier-free guidance:} Use guidance scale of 7.5 to balance prompt following and realism
-    \item \textbf{Prompt engineering:} Reformulate user queries into detailed prompts suitable for the diffusion model
-\end{itemize}
-
-This completes our CLIP-guided prompting pipeline, enabling fully annotation-free open-vocabulary segmentation with high-quality boundaries and massive efficiency gains through intelligent semantic guidance.
+Chapter 4 presents experimental validation of these improvements through comprehensive ablation studies.
