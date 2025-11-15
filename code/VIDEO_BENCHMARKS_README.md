@@ -67,13 +67,37 @@ data/video_benchmarks/
 
 ## Installation
 
-Install required dependencies:
+### 1. Install Required Dependencies
 
 ```bash
 pip install opencv-python scipy
 ```
 
 All other dependencies are already included in the main project.
+
+### 2. Download Datasets
+
+Use the provided download script:
+
+```bash
+# Download DAVIS 2017 (recommended for quick start)
+cd benchmarks
+./download_video_datasets.sh davis-2017
+
+# Download DAVIS 2016
+./download_video_datasets.sh davis-2016
+
+# Download YouTube-VOS (requires manual registration)
+./download_video_datasets.sh youtube-vos
+
+# Download all datasets
+./download_video_datasets.sh all
+
+# Verify existing downloads
+./download_video_datasets.sh verify
+```
+
+**Note**: YouTube-VOS requires manual registration at https://youtube-vos.org/. Download the files and place them in `data/video_benchmarks/youtube-vos-2019/`, then run the script to extract.
 
 ## Usage
 
