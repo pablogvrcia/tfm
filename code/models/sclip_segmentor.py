@@ -1460,11 +1460,23 @@ class SCLIPSegmentor:
                 clip_features, self.mhqr_scales
             )
 
-            refined_masks = self.mhqr_mask_decoder.refine_masks_hierarchical(
-                masks_pyramid=masks_pyramid,
-                clip_features_pyramid=clip_features_pyramid,
+            # Add batch dimension (B=1) to masks and features for decoder
+            # Decoder expects: masks (B, N, H, W), features (B, H, W, D)
+            masks_pyramid_batched = {
+                scale: masks.unsqueeze(0) for scale, masks in masks_pyramid.items()
+            }
+            clip_features_pyramid_batched = {
+                scale: feats.unsqueeze(0) for scale, feats in clip_features_pyramid.items()
+            }
+
+            refined_masks_batched = self.mhqr_mask_decoder.refine_masks_hierarchical(
+                masks_pyramid=masks_pyramid_batched,
+                clip_features_pyramid=clip_features_pyramid_batched,
                 original_size=(H, W)
             )
+
+            # Remove batch dimension
+            refined_masks = refined_masks_batched.squeeze(0)
 
             if self.verbose:
                 print(f"  Hierarchical refinement: {refined_masks.shape}")
