@@ -68,6 +68,8 @@ pascal_voc
 
 results
 
+cityscapes
+
 coco_stuff
 MaskCLIP
 clipseg
@@ -87,3 +89,4 @@ DiffSynth-Studio
 *.pyc
 *.pyo
 *.pyd
+code/final_results/*
