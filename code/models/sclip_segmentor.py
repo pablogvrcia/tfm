@@ -252,8 +252,8 @@ class SCLIPSegmentor:
         else:
             self.pamr = None
 
-        # Initialize SAM if hybrid mode or MHQR enabled (MHQR requires SAM for hierarchical masks)
-        if use_sam or use_mhqr:
+        # Initialize SAM for hybrid mode
+        if use_sam:
             self.sam_generator = SAM2MaskGenerator(
                 device=device,
                 use_fp16=use_fp16,
@@ -261,12 +261,22 @@ class SCLIPSegmentor:
                 batch_prompts=batch_prompts,
             )
             if verbose:
-                if use_mhqr:
-                    print("  SAM generator initialized for MHQR hierarchical masking")
-                else:
-                    print("  SAM generator initialized with 2025 optimizations")
+                print("  SAM generator initialized with 2025 optimizations")
         else:
             self.sam_generator = None
+
+        # Initialize separate SAM for MHQR (if needed)
+        self.mhqr_sam_generator = None
+        if use_mhqr:
+            # MHQR uses SAM differently - generates masks at CLIP feature resolution
+            self.mhqr_sam_generator = SAM2MaskGenerator(
+                device=device,
+                use_fp16=use_fp16,
+                use_compile=use_compile,
+                batch_prompts=batch_prompts,
+            )
+            if verbose:
+                print("  MHQR SAM generator initialized (feature-resolution masking)")
 
         # Initialize ResCLIP if enabled (Phase 1)
         self.resclip_module = None
@@ -1434,70 +1444,91 @@ class SCLIPSegmentor:
                 print("  No queries generated, returning dense prediction")
             return dense_pred
 
-        # Step 3: Hierarchical SAM2 mask generation
-        if self.sam_generator is not None:
-            hierarchical_result = self.sam_generator.segment_with_points_hierarchical(
+        # Step 3: Generate SAM2 masks at image resolution
+        if self.mhqr_sam_generator is not None:
+            # Use standard point prompting (not hierarchical)
+            sam_masks = self.mhqr_sam_generator.segment_with_points(
                 image=image,
                 points=[(int(x), int(y)) for x, y in point_coords],
-                point_labels=point_labels.tolist(),
-                point_classes=point_classes.tolist(),
-                output_scales=self.mhqr_scales
+                point_labels=point_labels.tolist()
             )
 
-            masks_pyramid = hierarchical_result['masks_pyramid']
-            scores = hierarchical_result['scores']
+            if self.verbose:
+                print(f"  Generated {len(sam_masks)} SAM masks at image resolution")
+
+            # Convert to tensors and organize by query
+            masks_list = []
+            scores_list = []
+            for i, mask_candidate in enumerate(sam_masks):
+                if i >= len(point_coords):  # Limit to number of queries
+                    break
+                masks_list.append(torch.from_numpy(mask_candidate.mask.astype(np.float32)))
+                scores_list.append(mask_candidate.predicted_iou)
+
+            if len(masks_list) == 0:
+                if self.verbose:
+                    print("  No valid masks generated, returning dense prediction")
+                return dense_pred
+
+            masks_full = torch.stack(masks_list).to(self.device)  # (N, H_img, W_img)
+            scores = torch.tensor(scores_list).to(self.device)  # (N,)
 
             if self.verbose:
-                print(f"  Hierarchical masks generated:")
-                for scale, masks in masks_pyramid.items():
-                    print(f"    Scale {scale}: {masks.shape}")
+                print(f"  Masks tensor: {masks_full.shape}")
         else:
             if self.verbose:
-                print("  WARNING: SAM not available, falling back to dense prediction")
+                print("  WARNING: MHQR SAM not available, falling back to dense prediction")
             return dense_pred
 
-        # Step 4: Hierarchical mask refinement (if enabled)
-        if self.mhqr_mask_decoder is not None and self.mhqr_hierarchical_decoder:
-            # Build CLIP features pyramid at matching scales
-            clip_features_pyramid = self._build_clip_features_pyramid(
-                clip_features, self.mhqr_scales
-            )
+        # Step 4: Downsample masks to CLIP feature resolution for refinement
+        H_clip, W_clip, D = clip_features.shape  # Typically 14x14x512
 
-            # Add batch dimension (B=1) to masks and features for decoder
-            # Decoder expects: masks (B, N, H, W), features (B, H, W, D)
+        # Resize masks to CLIP resolution (N, H_img, W_img) -> (N, H_clip, W_clip)
+        masks_clip_res = F.interpolate(
+            masks_full.unsqueeze(1),  # (N, 1, H_img, W_img)
+            size=(H_clip, W_clip),
+            mode='bilinear',
+            align_corners=False
+        ).squeeze(1)  # (N, H_clip, W_clip)
+
+        if self.verbose:
+            print(f"  Downsampled masks to CLIP resolution: {masks_clip_res.shape}")
+
+        # Step 5: Hierarchical mask refinement at CLIP resolution (if enabled)
+        if self.mhqr_mask_decoder is not None and self.mhqr_hierarchical_decoder:
+            # Create single-scale pyramid at CLIP resolution
             masks_pyramid_batched = {
-                scale: masks.unsqueeze(0) for scale, masks in masks_pyramid.items()
+                1.0: masks_clip_res.unsqueeze(0)  # (1, N, H_clip, W_clip)
             }
             clip_features_pyramid_batched = {
-                scale: feats.unsqueeze(0) for scale, feats in clip_features_pyramid.items()
+                1.0: clip_features.unsqueeze(0)  # (1, H_clip, W_clip, D)
             }
 
             refined_masks_batched = self.mhqr_mask_decoder.refine_masks_hierarchical(
                 masks_pyramid=masks_pyramid_batched,
                 clip_features_pyramid=clip_features_pyramid_batched,
-                original_size=(H, W)
+                original_size=(H_clip, W_clip)  # Stay at CLIP resolution
             )
 
-            # Remove batch dimension
-            refined_masks = refined_masks_batched.squeeze(0)
+            refined_masks_clip = refined_masks_batched.squeeze(0)  # (N, H_clip, W_clip)
 
             if self.verbose:
-                print(f"  Hierarchical refinement: {refined_masks.shape}")
+                print(f"  Hierarchical refinement at CLIP res: {refined_masks_clip.shape}")
         else:
-            # Use masks at original resolution directly
-            finest_scale = max(masks_pyramid.keys())
-            refined_masks = masks_pyramid[finest_scale]
+            refined_masks_clip = masks_clip_res
 
-            # Resize to original size if needed
-            if refined_masks.shape[-2:] != (H, W):
-                refined_masks = F.interpolate(
-                    refined_masks.unsqueeze(0) if refined_masks.dim() == 3 else refined_masks,
-                    size=(H, W),
-                    mode='bilinear',
-                    align_corners=False
-                ).squeeze(0) if refined_masks.dim() == 3 else refined_masks.squeeze(0)
+        # Step 6: Upsample refined masks back to image resolution
+        refined_masks = F.interpolate(
+            refined_masks_clip.unsqueeze(1),  # (N, 1, H_clip, W_clip)
+            size=(H, W),
+            mode='bilinear',
+            align_corners=False
+        ).squeeze(1)  # (N, H, W)
 
-        # Step 5: Semantic-guided mask merging (if enabled)
+        if self.verbose:
+            print(f"  Upsampled masks to image resolution: {refined_masks.shape}")
+
+        # Step 7: Semantic-guided mask merging (if enabled)
         if self.mhqr_mask_merger is not None and self.mhqr_semantic_merging:
             merge_result = self.mhqr_mask_merger.merge_masks_semantic(
                 masks=refined_masks,
@@ -1518,7 +1549,7 @@ class SCLIPSegmentor:
             merged_class_ids = point_classes
             merged_scores = scores
 
-        # Step 6: Convert masks to segmentation map
+        # Step 8: Convert masks to segmentation map
         final_segmentation = np.zeros((H, W), dtype=np.int32)
 
         # Sort masks by score (highest first) to give priority to confident predictions
