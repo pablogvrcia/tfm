@@ -252,8 +252,8 @@ class SCLIPSegmentor:
         else:
             self.pamr = None
 
-        # Initialize SAM if hybrid mode with 2025 optimizations
-        if use_sam:
+        # Initialize SAM if hybrid mode or MHQR enabled (MHQR requires SAM for hierarchical masks)
+        if use_sam or use_mhqr:
             self.sam_generator = SAM2MaskGenerator(
                 device=device,
                 use_fp16=use_fp16,
@@ -261,7 +261,10 @@ class SCLIPSegmentor:
                 batch_prompts=batch_prompts,
             )
             if verbose:
-                print("  SAM generator initialized with 2025 optimizations")
+                if use_mhqr:
+                    print("  SAM generator initialized for MHQR hierarchical masking")
+                else:
+                    print("  SAM generator initialized with 2025 optimizations")
         else:
             self.sam_generator = None
 
