@@ -13,7 +13,7 @@ Performance: SCLIP achieves 22.77% mIoU on COCO-Stuff164k
 import numpy as np
 import torch
 import torch.nn.functional as F
-from typing import List, Tuple, Optional
+from typing import List, Tuple, Optional, Dict
 from PIL import Image
 import cv2
 
