@@ -20,6 +20,7 @@ import cv2
 from models.sclip_features import SCLIPFeatureExtractor
 from models.pamr import PAMR
 from models.sam2_segmentation import SAM2MaskGenerator
+from utils.sclip_descriptors import parse_sclip_descriptors, map_logits_to_classes
 
 # Phase 1 improvements (2025)
 try:
@@ -71,12 +72,15 @@ class SCLIPSegmentor:
         slide_crop: int = 224,  # SCLIP paper: crop=224
         slide_stride: int = 112,  # SCLIP paper: stride=112
         verbose: bool = True,
+        # SCLIP multi-descriptor support
+        descriptor_file: Optional[str] = None,  # Path to cls_voc21.txt or similar
         # 2025 optimization parameters
         use_fp16: bool = True,
         use_compile: bool = False,
         batch_prompts: bool = True,
         # Phase 1 improvements (ICCV/CVPR 2025 papers)
         use_loftup: bool = False,  # LoftUp feature upsampling (+2-4% mIoU)
+        loftup_mode: str = "fast",  # "fast" (2x upsample) or "accurate" (full SCLIP approach)
         use_resclip: bool = False,  # ResCLIP residual attention (+8-13% mIoU)
         use_densecrf: bool = False,  # DenseCRF boundary refinement (+1-2% mIoU, +3-5% boundary F1)
         # Phase 2A improvements (2025 - training-free for human parsing)
@@ -134,6 +138,7 @@ class SCLIPSegmentor:
         self.use_compile = use_compile
         self.batch_prompts = batch_prompts
         self.use_loftup = use_loftup
+        self.loftup_mode = loftup_mode if use_loftup else None
         self.use_resclip = use_resclip
         self.use_densecrf = use_densecrf
         self.use_cliptrase = use_cliptrase
@@ -141,6 +146,23 @@ class SCLIPSegmentor:
         self.template_strategy = template_strategy
         self.use_confidence_sharpening = use_confidence_sharpening
         self.use_hierarchical_prediction = use_hierarchical_prediction
+
+        # Multi-descriptor support (SCLIP's cls_voc21.txt approach)
+        self.descriptor_file = descriptor_file
+        self.query_words = None
+        self.query_idx = None
+        self.use_multi_descriptor = descriptor_file is not None
+
+        if self.use_multi_descriptor:
+            # Parse descriptor file
+            self.query_words, query_idx_list = parse_sclip_descriptors(descriptor_file)
+            self.query_idx = torch.tensor(query_idx_list, dtype=torch.long, device=device)
+            self.num_classes = max(query_idx_list) + 1
+            self.num_descriptors = len(self.query_words)
+
+            if verbose:
+                print(f"  Multi-descriptor mode: Loaded {self.num_descriptors} descriptors for {self.num_classes} classes")
+                print(f"    Expansion ratio: {self.num_descriptors/self.num_classes:.2f}x")
 
         # Text feature cache to avoid recomputing for same classes
         self._text_feature_cache = {}
@@ -150,7 +172,10 @@ class SCLIPSegmentor:
             print(f"  Mode: {'Hybrid (SAM + SCLIP)' if use_sam else 'Dense (SCLIP only)'}")
             print(f"  PAMR: {'Enabled' if use_pamr else 'Disabled'}")
             print(f"  Slide inference: {'Enabled' if slide_inference else 'Disabled'}")
-            print(f"  Phase 1: LoftUp={'Enabled' if use_loftup else 'Disabled'}, "
+            loftup_status = 'Disabled'
+            if use_loftup:
+                loftup_status = f'Enabled ({loftup_mode} mode)'
+            print(f"  Phase 1: LoftUp={loftup_status}, "
                   f"ResCLIP={'Enabled' if use_resclip else 'Disabled'}, "
                   f"DenseCRF={'Enabled' if use_densecrf else 'Disabled'}")
             if use_cliptrase or use_clip_rc:
@@ -162,14 +187,39 @@ class SCLIPSegmentor:
                       f"Hierarchical={'Enabled' if use_hierarchical_prediction else 'Disabled'}")
 
         # Initialize SCLIP feature extractor with optimizations
+        # Note: Feature extractor only uses LoftUp in "fast" mode (2x upsampling)
+        # "accurate" mode runs LoftUp in sliding window (below)
+        use_loftup_in_extractor = use_loftup and loftup_mode == "fast"
+
         self.clip_extractor = SCLIPFeatureExtractor(
             model_name=model_name,
             device=device,
             use_fp16=use_fp16,
             use_compile=use_compile,
-            use_loftup=use_loftup,
+            use_loftup=use_loftup_in_extractor,
             template_strategy=template_strategy,  # Phase 2B: Prompt engineering
         )
+
+        # Initialize LoftUp upsampler for accurate mode (runs in sliding window)
+        self.loftup_upsampler = None
+        if use_loftup and loftup_mode == "accurate":
+            try:
+                from models.loftup_upsampler import LoftUpUpsampler
+                self.loftup_upsampler = LoftUpUpsampler(
+                    model_name="loftup_clip",
+                    backbone=model_name,
+                    device=device,
+                    use_fp16=use_fp16,
+                    use_pretrained=True
+                )
+                if verbose:
+                    print(f"  LoftUp (accurate mode): Initialized for sliding window inference")
+            except Exception as e:
+                if verbose:
+                    print(f"  WARNING: LoftUp accurate mode initialization failed: {e}")
+                    print(f"  Falling back to fast mode")
+                self.loftup_mode = "fast"
+                self.use_loftup = False
 
         # Initialize PAMR if enabled
         if use_pamr and pamr_steps > 0:
@@ -286,22 +336,43 @@ class SCLIPSegmentor:
         if verbose:
             print("[SCLIP Segmentor] Ready!\n")
 
-    def _get_text_features(self, class_names: List[str]) -> torch.Tensor:
+    def _get_text_features(self, class_names: List[str]) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
         """
         Get text features with caching to avoid recomputing.
+
+        In multi-descriptor mode, returns features for all descriptors.
+        Otherwise, returns features for each class.
 
         Args:
             class_names: List of class names
 
         Returns:
-            Text features tensor (num_classes, D)
+            tuple: (text_features, query_idx)
+                - text_features: (num_descriptors, D) if multi-descriptor, else (num_classes, D)
+                - query_idx: Mapping to classes if multi-descriptor, else None
         """
+        # Multi-descriptor mode: use query_words instead of class_names
+        if self.use_multi_descriptor:
+            cache_key = ('multi_descriptor', self.descriptor_file)
+
+            if cache_key not in self._text_feature_cache:
+                # Extract features for all descriptors
+                text_features = self.clip_extractor.extract_text_features(
+                    self.query_words,
+                    use_prompt_ensemble=True,
+                    template_strategy=self.template_strategy
+                )
+                self._text_feature_cache[cache_key] = text_features
+
+            return self._text_feature_cache[cache_key], self.query_idx
+
+        # Standard mode: one feature per class
         # Create cache key from class names
         cache_key = tuple(class_names)
 
         # Return cached features if available
         if cache_key in self._text_feature_cache:
-            return self._text_feature_cache[cache_key]
+            return self._text_feature_cache[cache_key], None
 
         # Compute text features
         text_features = self.clip_extractor.extract_text_features(
@@ -316,7 +387,7 @@ class SCLIPSegmentor:
         if self.verbose:
             print(f"[Cache] Encoded {len(class_names)} text prompts (cached for reuse)")
 
-        return text_features
+        return text_features, None
 
     @torch.no_grad()
     def predict_dense(
@@ -993,7 +1064,7 @@ class SCLIPSegmentor:
                 )  # (H, W, D)
 
                 # Get text features
-                text_features = self._get_text_features(class_names)  # (num_classes, D)
+                text_features, query_idx = self._get_text_features(class_names)
 
                 # Apply SFR (Semantic Feedback Refinement)
                 # This computes multi-scale similarity maps
@@ -1001,10 +1072,15 @@ class SCLIPSegmentor:
                     enhanced_features,
                     text_features,
                     original_size=image.shape[:2]
-                )  # (num_classes, H, W)
+                )  # (num_descriptors or num_classes, H, W)
+
+                # Map multi-descriptor logits to classes if needed
+                if query_idx is not None:
+                    num_classes = len(class_names)
+                    similarities = map_logits_to_classes(similarities, query_idx, num_classes)
             else:
                 # Compute similarities directly from Phase 2A enhanced features
-                text_features = self._get_text_features(class_names)
+                text_features, query_idx = self._get_text_features(class_names)
 
                 # Reshape features for similarity computation
                 H, W, D = dense_features.shape
@@ -1014,7 +1090,18 @@ class SCLIPSegmentor:
 
                 # Compute similarities
                 similarities = features_norm @ text_norm.to(features_norm.dtype).T
-                similarities = similarities.T.reshape(len(class_names), H, W)
+
+                # Reshape based on multi-descriptor mode
+                if query_idx is not None:
+                    # Multi-descriptor: similarities shape is (H*W, num_descriptors)
+                    num_descriptors = text_features.shape[0]
+                    similarities = similarities.T.reshape(num_descriptors, H, W)
+                    # Map to classes using max pooling
+                    num_classes = len(class_names)
+                    similarities = map_logits_to_classes(similarities, query_idx, num_classes)
+                else:
+                    # Standard: similarities shape is (H*W, num_classes)
+                    similarities = similarities.T.reshape(len(class_names), H, W)
         else:
             # Standard SCLIP approach (no Phase 1 or Phase 2A)
             similarities = self.clip_extractor.compute_dense_similarity(
@@ -1057,10 +1144,14 @@ class SCLIPSegmentor:
         image_tensor = image_tensor.unsqueeze(0)  # (1, 3, H, W)
 
         # Get text features (cached for efficiency)
-        text_features = self._get_text_features(class_names)  # (num_classes, D)
+        text_features, query_idx = self._get_text_features(class_names)
+
+        # Determine number of outputs (descriptors in multi-descriptor mode, else classes)
+        num_outputs = text_features.shape[0]  # num_descriptors or num_classes
+        is_multi_descriptor = query_idx is not None
 
         # Initialize accumulators on CPU to save GPU memory
-        logits_sum = torch.zeros((1, num_classes, H, W), dtype=torch.float32)
+        logits_sum = torch.zeros((1, num_outputs, H, W), dtype=torch.float32)
         count_mat = torch.zeros((1, 1, H, W), dtype=torch.float32)
 
         # Compute grid
@@ -1092,33 +1183,65 @@ class SCLIPSegmentor:
                 features = features[:, 1:]  # (1, num_patches, D)
                 features = features / features.norm(dim=-1, keepdim=True)
 
-                # Compute logits: features @ text_features^T
-                # Ensure both tensors have the same dtype (important for FP16 mixed precision)
-                crop_logits = features @ text_features.to(features.dtype).T  # (1, num_patches, num_classes)
-
-                # Reshape to spatial: (1, num_classes, h_patches, w_patches)
+                # Get crop dimensions and patch info
                 patch_size = self.clip_extractor.model.visual.patch_size
                 crop_h, crop_w = y2 - y1, x2 - x1
                 h_patches = crop_h // patch_size
                 w_patches = crop_w // patch_size
-                crop_logits = crop_logits.permute(0, 2, 1).reshape(1, num_classes, h_patches, w_patches)
 
-                # Upsample logits to crop size
-                crop_logits = F.interpolate(
-                    crop_logits,
-                    size=(crop_h, crop_w),
-                    mode='bilinear',
-                    align_corners=False
-                )
+                # SCLIP's accurate LoftUp mode: Upsample features to full crop size BEFORE similarity
+                if self.loftup_mode == "accurate" and self.loftup_upsampler is not None and crop_h == crop_size and crop_w == crop_size:
+                    # Reshape features to spatial format for LoftUp
+                    features_spatial = features.permute(0, 2, 1).reshape(1, -1, h_patches, w_patches)
+
+                    # Apply LoftUp upsampling to FULL crop size (14x14 -> 224x224)
+                    hr_features = self.loftup_upsampler(
+                        features_spatial,
+                        target_size=(crop_h, crop_w),
+                        original_image=crop_tensor
+                    )  # (1, D, crop_h, crop_w)
+
+                    # Normalize upsampled features
+                    hr_features = hr_features / hr_features.norm(dim=1, keepdim=True)
+
+                    # Reshape to (H*W, D) for similarity computation
+                    hr_features_flat = hr_features.flatten(2).permute(0, 2, 1)  # (1, H*W, D)
+
+                    # Compute similarity at HIGH resolution
+                    crop_logits = hr_features_flat @ text_features.to(hr_features.dtype).T  # (1, H*W, num_outputs)
+
+                    # Reshape to spatial
+                    crop_logits = crop_logits.permute(0, 2, 1).reshape(1, num_outputs, crop_h, crop_w)
+
+                else:
+                    # Standard or fast mode: Compute similarity at low res, then upsample
+                    crop_logits = features @ text_features.to(features.dtype).T  # (1, num_patches, num_outputs)
+
+                    # Reshape to spatial: (1, num_outputs, h_patches, w_patches)
+                    crop_logits = crop_logits.permute(0, 2, 1).reshape(1, num_outputs, h_patches, w_patches)
+
+                    # Upsample logits to crop size
+                    crop_logits = F.interpolate(
+                        crop_logits,
+                        size=(crop_h, crop_w),
+                        mode='bilinear',
+                        align_corners=False
+                    )
 
                 # Accumulate (move to CPU to save GPU memory)
                 logits_sum[:, :, y1:y2, x1:x2] += crop_logits.cpu()
                 count_mat[:, :, y1:y2, x1:x2] += 1
 
         # Average overlapping predictions
-        logits = logits_sum / count_mat
+        logits = logits_sum / count_mat  # (1, num_outputs, H, W)
 
-        return logits.squeeze(0).to(self.device)  # (num_classes, H, W)
+        # Map multi-descriptor logits to classes if needed
+        if is_multi_descriptor:
+            logits = logits.squeeze(0)  # (num_outputs, H, W)
+            logits = map_logits_to_classes(logits, query_idx, num_classes)
+            return logits.to(self.device)  # (num_classes, H, W)
+        else:
+            return logits.squeeze(0).to(self.device)  # (num_classes, H, W)
 
     def _extract_masked_region(
         self,

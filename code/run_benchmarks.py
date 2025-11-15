@@ -184,12 +184,18 @@ def parse_args():
     # Phase 1 improvements (ICCV/CVPR 2025 papers for mIoU improvement)
     parser.add_argument('--use-loftup', action='store_true', default=False,
                         help='Enable LoftUp feature upsampling (+2-4%% mIoU, ICCV 2025)')
+    parser.add_argument('--loftup-mode', type=str, default='fast', choices=['fast', 'accurate'],
+                        help='LoftUp mode: fast (2x upsample, faster) or accurate (full SCLIP approach, +2%% mIoU)')
     parser.add_argument('--use-resclip', action='store_true', default=False,
                         help='Enable ResCLIP residual attention (+8-13%% mIoU, CVPR 2025)')
     parser.add_argument('--use-densecrf', action='store_true', default=False,
                         help='Enable DenseCRF boundary refinement (+1-2%% mIoU, +3-5%% boundary F1)')
     parser.add_argument('--use-all-phase1', action='store_true', default=False,
                         help='Enable all Phase 1 improvements (LoftUp + ResCLIP + DenseCRF)')
+
+    # Multi-descriptor support (SCLIP's cls_voc21.txt approach)
+    parser.add_argument('--descriptor-file', type=str, default=None,
+                        help='Path to SCLIP descriptor file (e.g., configs/cls_voc21.txt)')
 
     # Phase 2A improvements (2025 - training-free for human parsing)
     parser.add_argument('--use-cliptrase', action='store_true', default=False,
@@ -400,12 +406,15 @@ def main():
         slide_crop=args.slide_crop,
         slide_stride=args.slide_stride,
         verbose=True,
+        # Multi-descriptor support
+        descriptor_file=args.descriptor_file,
         # 2025 optimization parameters
         use_fp16=args.use_fp16,
         use_compile=args.use_compile,
         batch_prompts=args.batch_prompts,
         # Phase 1 improvements (ICCV/CVPR 2025 for mIoU)
         use_loftup=use_loftup,
+        loftup_mode=args.loftup_mode,
         use_resclip=use_resclip,
         use_densecrf=use_densecrf,
         # Phase 2A improvements (2025 - training-free human parsing)

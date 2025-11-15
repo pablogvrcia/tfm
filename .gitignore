@@ -68,6 +68,8 @@ pascal_voc
 
 results
 
+cityscapes
+
 coco_stuff
 MaskCLIP
 clipseg

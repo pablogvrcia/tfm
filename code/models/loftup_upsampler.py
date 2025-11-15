@@ -104,7 +104,7 @@ class LoftUpUpsampler(nn.Module):
         original_image: Optional[torch.Tensor] = None
     ) -> torch.Tensor:
         """
-        Upsample features from low-resolution to high-resolution.
+        Upsample features from low-resolution to high-resolution using LoftUp.
 
         Args:
             features: Low-resolution features (B, C, H_low, W_low) or (B, N, C)
@@ -119,46 +119,61 @@ class LoftUpUpsampler(nn.Module):
             return self._bilinear_upsample(features, target_size)
 
         # Use LoftUp's coordinate-based upsampling
-        with torch.amp.autocast(device_type='cuda', enabled=self.use_fp16):
-            try:
-                # LoftUp expects features in (B, N, C) format (sequence format)
-                # where N = H_low * W_low
+        try:
+            # Ensure features are in (B, C, H, W) format
+            if features.dim() == 3:
+                # Convert from (B, N, C) to (B, C, H, W)
+                B, N, C = features.shape
+                H = W = int(np.sqrt(N))
+                features = features.transpose(1, 2).reshape(B, C, H, W)
 
-                if features.dim() == 4:
-                    # Convert from (B, C, H, W) to (B, N, C)
-                    B, C, H, W = features.shape
-                    features = features.flatten(2).transpose(1, 2)  # (B, H*W, C)
+            # Ensure features are on the correct device and contiguous
+            features = features.to(self.device).contiguous()
 
-                # Call LoftUp upsampler
-                # Note: Different LoftUp variants may have different APIs
-                # Try the most common pattern
-                if hasattr(self.upsampler, 'upsample'):
-                    upsampled = self.upsampler.upsample(
-                        features,
-                        target_size=target_size,
-                        image=original_image
-                    )
-                elif callable(self.upsampler):
-                    upsampled = self.upsampler(
-                        features,
-                        target_size=target_size
-                    )
-                else:
-                    # Fallback
-                    return self._bilinear_upsample(features, target_size)
+            # Ensure both inputs are 4D tensors
+            if features.dim() != 4:
+                raise ValueError(f"Features must be 4D after reshaping, got {features.dim()}D")
 
-                # Ensure output is in (B, C, H, W) format
-                if upsampled.dim() == 3:
-                    # (B, N, C) -> (B, C, H, W)
-                    B, N, C = upsampled.shape
-                    H_target, W_target = target_size
-                    upsampled = upsampled.transpose(1, 2).reshape(B, C, H_target, W_target)
-
-                return upsampled
-
-            except Exception as e:
-                warnings.warn(f"LoftUp forward failed: {e}. Falling back to bilinear.")
+            if original_image is None:
+                # No image guidance - use bilinear upsampling
                 return self._bilinear_upsample(features, target_size)
+
+            # Ensure image is on correct device and is 4D
+            original_image = original_image.to(self.device).contiguous()
+            if original_image.dim() != 4:
+                raise ValueError(f"Image must be 4D, got {original_image.dim()}D: shape {original_image.shape}")
+
+            # Convert to float32 to avoid autocast issues with sparse tensors
+            features_fp32 = features.float()
+            image_fp32 = original_image.float()
+
+            # Call LoftUp without autocast (it has issues with sparse tensors)
+            # API: upsampler(low_res_features, high_res_image)
+            # LoftUp returns features at the same spatial resolution as the input image
+            # Input:  features_fp32 (B, C, H_lr, W_lr), image_fp32 (B, 3, H_hr, W_hr)
+            # Output: upsampled (B, C, H_hr, W_hr) where H_hr, W_hr match image_fp32 size
+            upsampled = self.upsampler(features_fp32, image_fp32)
+
+            # LoftUp always returns (B, C, H, W) format
+            # The output size matches the image size
+            B, C, H_out, W_out = upsampled.shape
+            if (H_out, W_out) != target_size:
+                # Resize to target if needed (should rarely happen)
+                # This only occurs if target_size differs from image size
+                upsampled = F.interpolate(
+                    upsampled,
+                    size=target_size,
+                    mode='bilinear',
+                    align_corners=False
+                )
+
+            return upsampled
+
+        except Exception as e:
+            import traceback
+            error_details = traceback.format_exc()
+            warnings.warn(f"LoftUp forward failed: {e}\n{error_details}\nFalling back to bilinear.")
+            return self._bilinear_upsample(features, target_size)
 
     def _bilinear_upsample(
         self,

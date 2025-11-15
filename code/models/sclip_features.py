@@ -240,7 +240,8 @@ class SCLIPFeatureExtractor:
         self,
         texts: List[str],
         use_prompt_ensemble: bool = True,
-        normalize: bool = True
+        normalize: bool = True,
+        template_strategy: Optional[str] = None
     ) -> torch.Tensor:
         """
         Extract text embeddings using SCLIP's approach with optimized inference.
@@ -258,8 +259,11 @@ class SCLIPFeatureExtractor:
         Returns:
             Text embeddings (N, D)
         """
+        # Use provided template_strategy or fall back to instance default
+        strategy = template_strategy if template_strategy is not None else self.template_strategy
+
         # Check cache (include template_strategy in cache key)
-        cache_key = (tuple(texts), use_prompt_ensemble, normalize, self.template_strategy)
+        cache_key = (tuple(texts), use_prompt_ensemble, normalize, strategy)
         if cache_key in self.text_embedding_cache:
             return self.text_embedding_cache[cache_key]
 
@@ -271,12 +275,12 @@ class SCLIPFeatureExtractor:
 
                 for text in texts:
                     # Select templates based on strategy
-                    if self.template_strategy == "adaptive":
+                    if strategy == "adaptive":
                         # Adaptive: Select templates based on class type (stuff vs thing)
                         templates = get_adaptive_templates(text)
                     else:
                         # Fixed strategy: Use predefined template set
-                        templates = get_templates_for_strategy(self.template_strategy)
+                        templates = get_templates_for_strategy(strategy)
 
                     # Generate all templated prompts
                     templated_prompts = [template(text) for template in templates]
