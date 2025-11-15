@@ -9,6 +9,7 @@ Reference: Ravi et al., "SAM 2: Segment Anything in Images and Videos", 2024
 
 import numpy as np
 import torch
+import torch.nn.functional as F
 from typing import List, Dict, Tuple, Optional
 from dataclasses import dataclass
 import cv2
@@ -296,6 +297,150 @@ class SAM2MaskGenerator:
     def segment_automatic(self, image: np.ndarray) -> List[MaskCandidate]:
         """Alias for generate_masks for consistent API."""
         return self.generate_masks(image)
+
+    def segment_with_points_hierarchical(
+        self,
+        image: np.ndarray,
+        points: List[Tuple[int, int]],
+        point_labels: List[int],
+        point_classes: Optional[List[int]] = None,
+        output_scales: List[float] = [0.25, 0.5, 1.0]
+    ) -> Dict[str, any]:
+        """
+        Segment image using point prompts and return hierarchical multi-scale masks.
+
+        This method generates masks at multiple scales and organizes them into
+        a pyramid structure for hierarchical refinement.
+
+        Args:
+            image: RGB image array (H, W, 3)
+            points: List of (x, y) point coordinates
+            point_labels: List of labels (1=foreground, 0=background)
+            point_classes: Optional class IDs for each point
+            output_scales: Scales for mask pyramid (e.g., [0.25, 0.5, 1.0])
+
+        Returns:
+            Dictionary with:
+                - 'masks_pyramid': Dict[scale -> (N, H_s, W_s) mask tensor]
+                - 'scores': (N,) predicted IoU scores
+                - 'point_coords': (N, 2) point coordinates
+                - 'point_classes': (N,) class assignments (if provided)
+        """
+        if not hasattr(self, 'sam2_model') or self.sam2_model is None:
+            # Fallback: return single-scale masks
+            masks = self.segment_with_points(image, points, point_labels)
+            H, W = image.shape[:2]
+            masks_single = np.array([m.mask for m in masks])
+
+            return {
+                'masks_pyramid': {1.0: torch.from_numpy(masks_single).float()},
+                'scores': torch.tensor([m.predicted_iou for m in masks]),
+                'point_coords': np.array(points),
+                'point_classes': np.array(point_classes) if point_classes else None
+            }
+
+        try:
+            from sam2.sam2_image_predictor import SAM2ImagePredictor
+
+            # Create predictor if not exists
+            if not hasattr(self, 'predictor'):
+                self.predictor = SAM2ImagePredictor(self.sam2_model)
+
+            # Set the image
+            self.predictor.set_image(image)
+
+            H, W = image.shape[:2]
+
+            # Prepare batch inputs
+            point_coords_batch = np.array([[p[0], p[1]] for p in points])
+            point_labels_batch = np.array(point_labels)
+
+            # Use autocast for mixed precision
+            with torch.amp.autocast(device_type='cuda', enabled=self.use_fp16):
+                # Get masks with multimask_output (3 masks per point)
+                masks_batch, scores_batch, _ = self.predictor.predict(
+                    point_coords=point_coords_batch,
+                    point_labels=point_labels_batch,
+                    multimask_output=True  # Returns 3 masks: coarse, medium, fine
+                )
+
+            # Organize masks into hierarchical pyramid
+            # SAM2 multimask_output returns 3 masks per point:
+            # - Mask 0: Coarse (larger region)
+            # - Mask 1: Medium
+            # - Mask 2: Fine (smaller, more precise)
+
+            N = len(points)
+            masks_pyramid = {}
+
+            for scale_idx, scale in enumerate(output_scales):
+                # Compute target size for this scale
+                H_s = int(H * scale)
+                W_s = int(W * scale)
+
+                # For each point, select appropriate mask based on scale
+                scale_masks = []
+
+                for point_idx in range(N):
+                    # Get the 3 masks for this point
+                    point_masks = masks_batch[point_idx]  # (3, H, W)
+                    point_scores = scores_batch[point_idx]  # (3,)
+
+                    # Select mask based on scale:
+                    # - Coarse scale (0.25): Use largest mask (index 0)
+                    # - Medium scale (0.5): Use medium mask (index 1)
+                    # - Fine scale (1.0): Use finest mask (index 2)
+                    if scale <= 0.3:
+                        mask_idx = 0  # Coarse
+                    elif scale <= 0.7:
+                        mask_idx = 1  # Medium
+                    else:
+                        mask_idx = 2  # Fine
+
+                    selected_mask = point_masks[mask_idx]
+
+                    # Resize to target scale
+                    mask_tensor = torch.from_numpy(selected_mask.astype(np.float32)).unsqueeze(0).unsqueeze(0)
+                    mask_resized = F.interpolate(
+                        mask_tensor,
+                        size=(H_s, W_s),
+                        mode='bilinear',
+                        align_corners=False
+                    ).squeeze()
+
+                    scale_masks.append(mask_resized)
+
+                # Stack into tensor (N, H_s, W_s)
+                masks_pyramid[scale] = torch.stack(scale_masks).to(self.device)
+
+            # Collect best scores (use highest score among 3 masks per point)
+            best_scores = []
+            for point_idx in range(N):
+                best_score = scores_batch[point_idx].max()
+                best_scores.append(best_score)
+
+            result = {
+                'masks_pyramid': masks_pyramid,
+                'scores': torch.tensor(best_scores).to(self.device),
+                'point_coords': point_coords_batch,
+                'point_classes': np.array(point_classes) if point_classes else None
+            }
+
+            return result
+
+        except Exception as e:
+            print(f"WARNING: Hierarchical segmentation failed: {e}")
+            # Fallback to single-scale
+            masks = self.segment_with_points(image, points, point_labels)
+            H, W = image.shape[:2]
+            masks_single = np.array([m.mask for m in masks[:N]])  # Limit to N
+
+            return {
+                'masks_pyramid': {1.0: torch.from_numpy(masks_single).float()},
+                'scores': torch.tensor([m.predicted_iou for m in masks[:N]]),
+                'point_coords': np.array(points),
+                'point_classes': np.array(point_classes) if point_classes else None
+            }
 
     def _mask_to_bbox(self, mask: np.ndarray) -> Tuple[int, int, int, int]:
         """Convert binary mask to bounding box (x, y, w, h)."""
