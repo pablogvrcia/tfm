@@ -66,6 +66,18 @@ Beyond image segmentation, we demonstrate that our CLIP-guided prompting natural
 
 This video extension demonstrates the versatility of our approach, showing how CLIP-guided prompting can be applied beyond static images while maintaining efficiency through intelligent prompt extraction.
 
+\subsection{Multi-scale Hierarchical Query-based Refinement (MHQR)}
+
+Building upon the CLIP-guided SAM2 pipeline, we introduced MHQR to address remaining limitations in scale variation, boundary precision, and computational efficiency. MHQR's three-stage refinement combines:
+
+\begin{itemize}
+    \item \textbf{Dynamic multi-scale query generation:} Adapts query count (10-200) based on scene complexity using connected component analysis, achieving 95\% reduction vs. blind grid (4096 points)
+    \item \textbf{Hierarchical mask decoder:} Cross-attention between SCLIP features and SAM2 masks with residual refinement for improved boundary delineation
+    \item \textbf{Semantic-guided mask merging:} CLIP feature consistency checks to merge semantically coherent regions while preserving object boundaries
+\end{itemize}
+
+MHQR achieves near-supervised performance (49.3\% mIoU on COCO-Stuff164k) while maintaining zero-shot open-vocabulary capability, surpassing supervised baseline SegRet (43.3\%) by +6.0\%. This represents a significant advancement toward practical open-vocabulary segmentation systems, demonstrating that training-free refinement can approach supervised methods without sacrificing generalization.
+
 \section{Discussion and Implications}
 
 \subsection{Open-Vocabulary Paradigm Shift}

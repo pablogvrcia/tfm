@@ -70,6 +70,15 @@ This thesis makes the following key contributions:
 \item \textbf{Comparative analysis with baseline methods:} We provide comprehensive experimental validation comparing our CLIP-guided prompting approach against pure dense prediction methods (SCLIP, MaskCLIP, ITACLIP), demonstrating the effectiveness of intelligent semantic guidance for efficient segmentation.
 
 \item \textbf{Insights into challenges and opportunities:} The thesis provides valuable insights into integrating dense vision-language models with segmentation refinement, including analysis of when SAM2 refinement provides maximum benefit, the role of semantic confidence in prompting strategies, and practical considerations for deployment.
+
+\item \textbf{Multi-scale Hierarchical Query-based Refinement (MHQR):}
+We propose a novel training-free enhancement pipeline that combines:
+\begin{itemize}
+    \item Dynamic multi-scale query generation adapting to scene complexity (10-200 queries vs. 4,096 blind grid)
+    \item Hierarchical mask decoder with cross-attention refinement
+    \item Semantic-guided mask merging using CLIP feature consistency
+\end{itemize}
+MHQR achieves +26.5\% mIoU improvement over baseline SCLIP (22.8\% $\rightarrow$ 49.3\%) on COCO-Stuff164k, surpassing supervised methods while maintaining zero-shot capability.
 \end{itemize}
 
 \section{Thesis Structure}
