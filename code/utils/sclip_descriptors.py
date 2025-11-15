@@ -94,20 +94,32 @@ def map_logits_to_classes(
     # Ensure query_idx is on the same device as logits
     query_idx = query_idx.to(logits.device)
 
-    # Create one-hot encoding: (num_classes, num_queries)
-    # cls_index[i, j] = 1 if descriptor j maps to class i
-    cls_index = nn.functional.one_hot(query_idx, num_classes=num_classes)
-    cls_index = cls_index.T.to(logits.dtype).to(logits.device)  # (num_classes, num_queries)
+    # Validate: descriptor file must match dataset classes
+    num_descriptor_classes = query_idx.max().item() + 1
+    if num_descriptor_classes != num_classes:
+        raise ValueError(
+            f"Descriptor file mismatch: descriptor file has {num_descriptor_classes} classes "
+            f"but dataset has {num_classes} classes. "
+            f"Please use the correct descriptor file for this dataset or remove --descriptor-file."
+        )
 
-    # Expand to spatial dimensions: (num_classes, num_queries, 1, 1)
-    cls_index = cls_index.view(num_classes, num_queries, 1, 1)
+    # Memory-efficient implementation: process class by class
+    # This avoids creating the huge (num_classes, num_queries, H, W) tensor
+    class_logits = torch.zeros(num_classes, H, W, dtype=logits.dtype, device=logits.device)
 
-    # Expand logits: (1, num_queries, H, W)
-    logits = logits.unsqueeze(0)
+    for class_idx in range(num_classes):
+        # Find all descriptors for this class
+        descriptor_mask = (query_idx == class_idx)
 
-    # Multiply and take max across descriptors
-    # Shape: (num_classes, num_queries, H, W) -> max over dim=1 -> (num_classes, H, W)
-    class_logits = (logits * cls_index).max(dim=1)[0]
+        if descriptor_mask.any():
+            # Get logits for all descriptors of this class
+            class_descriptors = logits[descriptor_mask]  # (num_class_descriptors, H, W)
+
+            # Take max across descriptors (element-wise max)
+            class_logits[class_idx] = class_descriptors.max(dim=0)[0]
+        else:
+            # No descriptors for this class - leave as zeros (will get low probability)
+            pass
 
     return class_logits
 
