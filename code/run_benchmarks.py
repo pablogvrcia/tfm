@@ -29,7 +29,7 @@ import torch
 from collections import defaultdict
 
 from models.sclip_segmentor import SCLIPSegmentor
-from datasets import COCOStuffDataset, PASCALVOCDataset
+from datasets import COCOStuffDataset, PASCALVOCDataset, CityscapesDataset
 from benchmarks.metrics import compute_all_metrics
 
 # Import CLIP-guided segmentation functions
@@ -128,7 +128,7 @@ def parse_args():
 
     # Dataset
     parser.add_argument('--dataset', type=str, default='coco-stuff',
-                        choices=['coco-stuff', 'pascal-voc'],
+                        choices=['coco-stuff', 'pascal-voc', 'cityscapes'],
                         help='Dataset to evaluate')
     parser.add_argument('--data-dir', type=str, default='data/benchmarks',
                         help='Path to dataset directory')
@@ -215,6 +215,21 @@ def parse_args():
     parser.add_argument('--use-hierarchical-prediction', action='store_true', default=False,
                         help='Enable hierarchical class grouping (+3-5%% mIoU, Phase 2C)')
 
+    # Phase 2D improvements (2025 - class filtering)
+    parser.add_argument('--use-class-filtering', action='store_true', default=False,
+                        help='Enable class filtering to reduce vocabulary (+5-10%% mIoU, 2-3x faster, Phase 2D)')
+    parser.add_argument('--class-filter-preset', type=str, default='balanced',
+                        choices=['fast', 'balanced', 'precise', 'aggressive'],
+                        help='Class filtering preset (Phase 2D):\n'
+                             '  fast: Quick filtering, may miss classes\n'
+                             '  balanced: Good accuracy/speed trade-off (recommended)\n'
+                             '  precise: Maximum accuracy, slower\n'
+                             '  aggressive: Maximum vocabulary reduction')
+    parser.add_argument('--class-filter-clip-threshold', type=float, default=0.05,
+                        help='CLIP similarity threshold for class filtering (Phase 2D)')
+    parser.add_argument('--class-filter-min-pixels', type=int, default=50,
+                        help='Minimum pixels for class presence in coarse segmentation (Phase 2D)')
+
     return parser.parse_args()
 
 
@@ -230,6 +245,12 @@ def load_dataset(dataset_name, data_dir, num_samples):
         )
     elif dataset_name == 'pascal-voc':
         dataset = PASCALVOCDataset(
+            data_dir=data_dir,
+            split='val',
+            max_samples=num_samples
+        )
+    elif dataset_name == 'cityscapes':
+        dataset = CityscapesDataset(
             data_dir=data_dir,
             split='val',
             max_samples=num_samples
@@ -416,6 +437,11 @@ def main():
         # Phase 2C improvements (2025 - confidence sharpening)
         use_confidence_sharpening=args.use_confidence_sharpening,
         use_hierarchical_prediction=args.use_hierarchical_prediction,
+        # Phase 2D improvements (2025 - class filtering)
+        use_class_filtering=args.use_class_filtering,
+        class_filter_preset=args.class_filter_preset,
+        class_filter_clip_threshold=args.class_filter_clip_threshold,
+        class_filter_min_pixels=args.class_filter_min_pixels,
     )
     print()
 

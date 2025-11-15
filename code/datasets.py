@@ -247,6 +247,283 @@ class COCOStuffDataset:
         }
 
 
+class CityscapesDataset:
+    """
+    Cityscapes Dataset Loader.
+
+    Cityscapes is a large-scale dataset for semantic urban scene understanding.
+    - 19 classes (+ 1 void/unlabeled class)
+    - High-resolution images (1024 x 2048)
+    - Focus on urban driving scenes
+
+    Paper: https://arxiv.org/abs/1604.01685
+    """
+
+    # Cityscapes 19 classes (standard evaluation classes)
+    CLASSES = [
+        'road', 'sidewalk', 'building', 'wall', 'fence', 'pole',
+        'traffic light', 'traffic sign', 'vegetation', 'terrain', 'sky',
+        'person', 'rider', 'car', 'truck', 'bus', 'train', 'motorcycle',
+        'bicycle'
+    ]
+
+    # Cityscapes RGB color to train ID mapping (for color-coded labels)
+    # Format: (R, G, B) -> train_id
+    COLOR_TO_TRAIN_ID = {
+        (128, 64, 128): 0,   # road
+        (244, 35, 232): 1,   # sidewalk
+        (70, 70, 70): 2,     # building
+        (102, 102, 156): 3,  # wall
+        (190, 153, 153): 4,  # fence
+        (153, 153, 153): 5,  # pole
+        (250, 170, 30): 6,   # traffic light
+        (220, 220, 0): 7,    # traffic sign
+        (107, 142, 35): 8,   # vegetation
+        (152, 251, 152): 9,  # terrain
+        (70, 130, 180): 10,  # sky
+        (220, 20, 60): 11,   # person
+        (255, 0, 0): 12,     # rider
+        (0, 0, 142): 13,     # car
+        (0, 0, 70): 14,      # truck
+        (0, 60, 100): 15,    # bus
+        (0, 80, 100): 16,    # train
+        (0, 0, 230): 17,     # motorcycle
+        (119, 11, 32): 18,   # bicycle
+    }
+
+    # Cityscapes label IDs to train IDs mapping (for labelIds format)
+    # Label IDs: original IDs in the dataset (0-33, with gaps)
+    # Train IDs: contiguous IDs for training (0-18, 255 for ignore)
+    LABEL_ID_TO_TRAIN_ID = {
+        0: 255,  # unlabeled
+        1: 255,  # ego vehicle
+        2: 255,  # rectification border
+        3: 255,  # out of roi
+        4: 255,  # static
+        5: 255,  # dynamic
+        6: 255,  # ground
+        7: 0,    # road
+        8: 1,    # sidewalk
+        9: 255,  # parking
+        10: 255, # rail track
+        11: 2,   # building
+        12: 3,   # wall
+        13: 4,   # fence
+        14: 255, # guard rail
+        15: 255, # bridge
+        16: 255, # tunnel
+        17: 5,   # pole
+        18: 255, # polegroup
+        19: 6,   # traffic light
+        20: 7,   # traffic sign
+        21: 8,   # vegetation
+        22: 9,   # terrain
+        23: 10,  # sky
+        24: 11,  # person
+        25: 12,  # rider
+        26: 13,  # car
+        27: 14,  # truck
+        28: 15,  # bus
+        29: 255, # caravan
+        30: 255, # trailer
+        31: 16,  # train
+        32: 17,  # motorcycle
+        33: 18,  # bicycle
+        -1: 255  # license plate (from cityscapesscripts)
+    }
+
+    def __init__(self, data_dir: Path, split='val', max_samples: Optional[int] = None):
+        """
+        Initialize Cityscapes dataset.
+
+        Args:
+            data_dir: Root directory containing datasets (e.g., ./data/benchmarks)
+            split: Dataset split ('train', 'val', 'test')
+            max_samples: Maximum number of samples to load (None = all)
+        """
+        self.data_dir = Path(data_dir) / "cityscapes"
+        self.split = split
+        self.num_classes = 19
+        self.class_names = self.CLASSES
+
+        # Try official Cityscapes structure first
+        # cityscapes/
+        #   leftImg8bit/
+        #     val/
+        #       frankfurt/
+        #         frankfurt_000000_000294_leftImg8bit.png
+        #   gtFine/
+        #     val/
+        #       frankfurt/
+        #         frankfurt_000000_000294_gtFine_labelIds.png
+
+        official_images_dir = self.data_dir / "leftImg8bit" / split
+        official_labels_dir = self.data_dir / "gtFine" / split
+
+        # Try simplified structure
+        # cityscapes/
+        #   val/
+        #     img/
+        #       val100.png
+        #     label/
+        #       val100.png
+
+        simple_images_dir = self.data_dir / split / "img"
+        simple_labels_dir = self.data_dir / split / "label"
+
+        # Determine which structure is used
+        if official_images_dir.exists() and official_labels_dir.exists():
+            # Official Cityscapes structure
+            self.images_dir = official_images_dir
+            self.labels_dir = official_labels_dir
+            self.is_official_structure = True
+
+            # Get all image files (organized by city)
+            self.image_files = []
+            for city_dir in sorted(self.images_dir.glob("*")):
+                if city_dir.is_dir():
+                    city_images = sorted(city_dir.glob("*_leftImg8bit.png"))
+                    self.image_files.extend(city_images)
+
+        elif simple_images_dir.exists() and simple_labels_dir.exists():
+            # Simplified structure
+            self.images_dir = simple_images_dir
+            self.labels_dir = simple_labels_dir
+            self.is_official_structure = False
+
+            # Get all image files
+            self.image_files = sorted(list(self.images_dir.glob("*.png")))
+
+        else:
+            raise FileNotFoundError(
+                f"Cityscapes dataset not found. Tried:\n"
+                f"  Official: {official_images_dir}\n"
+                f"  Simplified: {simple_images_dir}\n"
+                f"Neither structure found."
+            )
+
+        if len(self.image_files) == 0:
+            raise ValueError(f"No images found in {self.images_dir}")
+
+        if max_samples is not None:
+            self.image_files = self.image_files[:max_samples]
+
+    def __len__(self):
+        return len(self.image_files)
+
+    def __getitem__(self, idx):
+        if isinstance(idx, slice):
+            # Handle slicing
+            start, stop, step = idx.indices(len(self))
+            new_dataset = CityscapesDataset.__new__(CityscapesDataset)
+            new_dataset.data_dir = self.data_dir
+            new_dataset.split = self.split
+            new_dataset.num_classes = self.num_classes
+            new_dataset.class_names = self.class_names
+            new_dataset.images_dir = self.images_dir
+            new_dataset.labels_dir = self.labels_dir
+            new_dataset.image_files = self.image_files[idx]
+            return new_dataset
+
+        if idx >= len(self):
+            raise IndexError(f"Index {idx} out of range for dataset of size {len(self)}")
+
+        # Load image
+        img_path = self.image_files[idx]
+        image = np.array(Image.open(img_path).convert('RGB'))
+
+        # Construct label path based on structure
+        if self.is_official_structure:
+            # Official structure:
+            # frankfurt_000000_000294_leftImg8bit.png ->
+            # frankfurt_000000_000294_gtFine_labelIds.png
+            img_name = img_path.stem.replace('_leftImg8bit', '_gtFine_labelIds')
+            city_name = img_path.parent.name
+            label_path = self.labels_dir / city_name / f"{img_name}.png"
+        else:
+            # Simplified structure: same filename in label directory
+            label_path = self.labels_dir / img_path.name
+
+        if not label_path.exists():
+            # If label doesn't exist, create ignore mask
+            mask = np.full(image.shape[:2], 255, dtype=np.uint8)
+        else:
+            # Load label
+            label_img = Image.open(label_path)
+            label_data = np.array(label_img)
+
+            # Check if it's color-coded (RGB) or label IDs (grayscale)
+            if len(label_data.shape) == 3:
+                # Convert BGR to RGB (PIL loads as RGB but data might be stored as BGR)
+                # Check if we need to swap channels by testing against known Cityscapes colors
+                # Sample a few pixels to detect format
+                sample_colors = label_data[:10, :10].reshape(-1, 3)
+
+                # Test if this looks more like BGR by checking common colors
+                # Road is (128,64,128) in RGB, would be (128,64,128) in BGR too (symmetric)
+                # But Sky (70,130,180) RGB would be (180,130,70) BGR - very different!
+                bgr_score = 0
+                rgb_score = 0
+
+                for pixel in sample_colors[:100]:  # Check first 100 pixels
+                    # Check distance to BGR-interpreted colors
+                    for (r, g, b), _ in self.COLOR_TO_TRAIN_ID.items():
+                        bgr_dist = abs(pixel[0] - b) + abs(pixel[1] - g) + abs(pixel[2] - r)
+                        rgb_dist = abs(pixel[0] - r) + abs(pixel[1] - g) + abs(pixel[2] - b)
+                        if bgr_dist < rgb_dist:
+                            bgr_score += 1
+                        elif rgb_dist < bgr_dist:
+                            rgb_score += 1
+
+                # If BGR format is detected, convert to RGB
+                if bgr_score > rgb_score:
+                    label_data = label_data[:, :, ::-1]  # Swap B and R channels
+                # RGB color-coded labels - decode RGB to class ID
+                h, w = label_data.shape[:2]
+                mask = np.full((h, w), 255, dtype=np.uint8)
+
+                # Flatten for vectorized operations
+                rgb_flat = label_data.reshape(-1, 3).astype(np.int16)
+                mask_flat = np.full(h * w, 255, dtype=np.uint8)
+
+                # Convert RGB to train IDs using nearest neighbor assignment
+                # (handles JPEG compression artifacts by finding closest match)
+
+                # Build array of all Cityscapes colors
+                color_list = list(self.COLOR_TO_TRAIN_ID.keys())
+                train_id_list = list(self.COLOR_TO_TRAIN_ID.values())
+                colors_array = np.array(color_list, dtype=np.int16)  # Shape: (19, 3)
+
+                # For each pixel, find the nearest Cityscapes color
+                # Compute distances to all colors at once
+                distances = np.abs(rgb_flat[:, np.newaxis, :] - colors_array[np.newaxis, :, :])
+                distances = distances.sum(axis=2)  # Manhattan distance, shape: (num_pixels, 19)
+
+                # Find nearest color for each pixel
+                nearest_idx = distances.argmin(axis=1)
+
+                # Assign train IDs based on nearest color
+                # Only assign if distance is reasonable (threshold=100 to handle JPEG compression)
+                # Based on analysis: 99th percentile distance = 100, captures 99% of pixels
+                min_distances = distances.min(axis=1)
+                mask_flat = np.array([train_id_list[idx] if dist <= 100 else 255
+                                     for idx, dist in zip(nearest_idx, min_distances)], dtype=np.uint8)
+
+                mask = mask_flat.reshape(h, w)
+            else:
+                # Grayscale label IDs - convert using ID mapping
+                mask = np.full_like(label_data, 255, dtype=np.uint8)
+                for label_id, train_id in self.LABEL_ID_TO_TRAIN_ID.items():
+                    mask[label_data == label_id] = train_id
+
+        return {
+            'image': image,
+            'mask': mask,
+            'class_names': self.class_names,
+            'image_id': img_path.stem
+        }
+
+
 class ADE20KDataset:
     """
     ADE20K Dataset Loader (Placeholder).
@@ -358,7 +635,7 @@ def load_dataset(dataset_name: str, data_dir: Path, max_samples: Optional[int] =
     Factory function to load any dataset by name.
 
     Args:
-        dataset_name: Name of dataset ('pascal-voc', 'coco-stuff', 'ade20k', 'coco-open')
+        dataset_name: Name of dataset ('pascal-voc', 'coco-stuff', 'cityscapes', 'ade20k', 'coco-open')
         data_dir: Root directory containing datasets
         max_samples: Maximum number of samples to load
 
@@ -371,6 +648,7 @@ def load_dataset(dataset_name: str, data_dir: Path, max_samples: Optional[int] =
     dataset_map = {
         'pascal-voc': PASCALVOCDataset,
         'coco-stuff': COCOStuffDataset,
+        'cityscapes': CityscapesDataset,
         'ade20k': ADE20KDataset,
         'coco-open': COCOOpenDataset,
     }
@@ -385,6 +663,8 @@ def load_dataset(dataset_name: str, data_dir: Path, max_samples: Optional[int] =
         return dataset_class(data_dir, split='val', max_samples=max_samples)
     elif dataset_name == 'coco-stuff':
         return dataset_class(data_dir, split='val2017', max_samples=max_samples)
+    elif dataset_name == 'cityscapes':
+        return dataset_class(data_dir, split='val', max_samples=max_samples)
     elif dataset_name == 'ade20k':
         return dataset_class(data_dir, split='validation', max_samples=max_samples)
     elif dataset_name == 'coco-open':

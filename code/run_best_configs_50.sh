@@ -1,19 +1,66 @@
 #!/bin/bash
 # Run comprehensive hyperparameter sweep for COCO-Stuff 50 samples
 # Based on analysis of 10-sample results
+#
+# BEST 10-SAMPLE RESULT: 30.65% mIoU with adaptive templates
+# Config: min_conf=0.15, region_size=5, iou=0.1, adaptive templates
 
 echo "======================================================================"
 echo "COCO-STUFF: Comprehensive Hyperparameter Sweep (50 samples)"
 echo "======================================================================"
 echo ""
+echo "Best 10-sample result: 30.65% mIoU (adaptive templates)"
+echo ""
 
 BASE_ARGS="--dataset coco-stuff --num-samples 50 --save-vis --use-fp16 --batch-prompts"
 
-# Config 1: Current Best (from 10-sample analysis)
+# Config 1: BEST FROM 10-SAMPLE (30.65% mIoU) - Adaptive Templates
 echo "----------------------------------------------------------------------"
-echo "[1/12] Running: Current Best Configuration"
-echo "  - CLIP-guided SAM with optimal hyperparameters"
+echo "[1/15] Running: BEST Configuration (30.65% mIoU on 10 samples)"
+echo "  - Adaptive templates (per-class optimization)"
 echo "  - min_confidence=0.15, min_region_size=5, iou_threshold=0.1"
+echo "  - Expected: 28-32% mIoU on 50 samples"
+echo "----------------------------------------------------------------------"
+python3 run_benchmarks.py $BASE_ARGS \
+    --use-clip-guided-sam \
+    --min-confidence 0.15 \
+    --min-region-size 5 \
+    --iou-threshold 0.1 \
+    --logit-scale 40.0 \
+    --template-strategy adaptive \
+    --slide-inference --slide-crop 224 --slide-stride 112 \
+    --use-all-phase1 \
+    --use-all-phase2a \
+    --output-dir benchmarks/results/coco-50/best-adaptive
+
+echo ""
+
+# Config 2: Best + CLIP-RC (human parsing boost)
+echo "----------------------------------------------------------------------"
+echo "[2/15] Running: Best + CLIP-RC"
+echo "  - Adaptive templates + CLIP-RC for better person segmentation"
+echo "  - Expected: +3-5% on person class"
+echo "----------------------------------------------------------------------"
+python3 run_benchmarks.py $BASE_ARGS \
+    --use-clip-guided-sam \
+    --min-confidence 0.15 \
+    --min-region-size 5 \
+    --iou-threshold 0.1 \
+    --logit-scale 40.0 \
+    --template-strategy adaptive \
+    --slide-inference --slide-crop 224 --slide-stride 112 \
+    --use-all-phase1 \
+    --use-all-phase2a \
+    --use-clip-rc \
+    --output-dir benchmarks/results/coco-50/best-adaptive-clip-rc
+
+echo ""
+
+# Config 3: ImageNet80 Templates (for comparison)
+echo "----------------------------------------------------------------------"
+echo "[3/15] Running: ImageNet80 Templates"
+echo "  - Same config as best, but with imagenet80 templates"
+echo "  - Compare: adaptive (30.65%) vs imagenet80 (27.33%)"
 echo "----------------------------------------------------------------------"
 python3 run_benchmarks.py $BASE_ARGS \
     --use-clip-guided-sam \
@@ -25,14 +72,14 @@ python3 run_benchmarks.py $BASE_ARGS \
     --slide-inference --slide-crop 224 --slide-stride 112 \
     --use-all-phase1 \
     --use-all-phase2a \
-    --output-dir benchmarks/results/coco-50/best
+    --output-dir benchmarks/results/coco-50/imagenet80
 
 echo ""
 
-# Config 2: Top7 Templates (faster)
+# Config 4: Top7 Templates (faster)
 echo "----------------------------------------------------------------------"
-echo "[2/12] Running: Top7 Templates"
-echo "  - 3-4x faster, expected +2-3% mIoU"
+echo "[4/15] Running: Top7 Templates"
+echo "  - 3-4x faster, expected similar or better than imagenet80"
 echo "----------------------------------------------------------------------"
 python3 run_benchmarks.py $BASE_ARGS \
     --use-clip-guided-sam \
@@ -48,10 +95,10 @@ python3 run_benchmarks.py $BASE_ARGS \
 
 echo ""
 
-# Config 3: Top3 Templates (ultra-fast)
+# Config 5: Top3 Templates (ultra-fast)
 echo "----------------------------------------------------------------------"
-echo "[3/12] Running: Top3 Templates"
-echo "  - 5x faster than baseline"
+echo "[5/15] Running: Top3 Templates"
+echo "  - 5x faster than imagenet80"
 echo "----------------------------------------------------------------------"
 python3 run_benchmarks.py $BASE_ARGS \
     --use-clip-guided-sam \
@@ -64,25 +111,6 @@ python3 run_benchmarks.py $BASE_ARGS \
     --use-all-phase1 \
     --use-all-phase2a \
     --output-dir benchmarks/results/coco-50/top3
-
-echo ""
-
-# Config 4: Adaptive Templates
-echo "----------------------------------------------------------------------"
-echo "[4/12] Running: Adaptive Templates"
-echo "  - Per-class templates, expected +3-5% mIoU"
-echo "----------------------------------------------------------------------"
-python3 run_benchmarks.py $BASE_ARGS \
-    --use-clip-guided-sam \
-    --min-confidence 0.15 \
-    --min-region-size 5 \
-    --iou-threshold 0.1 \
-    --logit-scale 40.0 \
-    --template-strategy adaptive \
-    --slide-inference --slide-crop 224 --slide-stride 112 \
-    --use-all-phase1 \
-    --use-all-phase2a \
-    --output-dir benchmarks/results/coco-50/adaptive
 
 echo ""
 
