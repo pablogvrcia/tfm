@@ -231,33 +231,40 @@ class SAM2MaskGenerator:
             all_masks = []
 
             # Batch processing optimization (inspired by EfficientViT-SAM 2024)
+            batch_success = False
             if self.batch_prompts and len(points) > 1:
-                # Process all points in batch for ~2-3x speedup
-                point_coords_batch = np.array([[p[0], p[1]] for p in points])  # Shape: (N, 2)
-                point_labels_batch = np.array(point_labels)  # Shape: (N,)
+                try:
+                    # Process all points in batch for ~2-3x speedup
+                    point_coords_batch = np.array([[p[0], p[1]] for p in points])  # Shape: (N, 2)
+                    point_labels_batch = np.array(point_labels)  # Shape: (N,)
 
-                # Use autocast for mixed precision
-                with torch.amp.autocast(device_type='cuda', enabled=self.use_fp16):
-                    # Batch predict - process all points at once
-                    masks_batch, scores_batch, _ = self.predictor.predict(
-                        point_coords=point_coords_batch,
-                        point_labels=point_labels_batch,
-                        multimask_output=True  # Get 3 masks per point
-                    )
-
-                # Convert batch results to MaskCandidate objects
-                for i, (masks, scores) in enumerate(zip(masks_batch, scores_batch)):
-                    for mask, score in zip(masks, scores):
-                        candidate = MaskCandidate(
-                            mask=mask.astype(np.uint8),
-                            bbox=self._mask_to_bbox(mask),
-                            area=int(mask.sum()),
-                            predicted_iou=float(score),
-                            stability_score=float(score),
-                            point_coords=point_coords_batch[i:i+1]
+                    # Use autocast for mixed precision
+                    with torch.amp.autocast(device_type='cuda', enabled=self.use_fp16):
+                        # Batch predict - process all points at once
+                        masks_batch, scores_batch, _ = self.predictor.predict(
+                            point_coords=point_coords_batch,
+                            point_labels=point_labels_batch,
+                            multimask_output=True  # Get 3 masks per point
                         )
-                        all_masks.append(candidate)
-            else:
+
+                    # Convert batch results to MaskCandidate objects
+                    for i, (masks, scores) in enumerate(zip(masks_batch, scores_batch)):
+                        for mask, score in zip(masks, scores):
+                            candidate = MaskCandidate(
+                                mask=mask.astype(np.uint8),
+                                bbox=self._mask_to_bbox(mask),
+                                area=int(mask.sum()),
+                                predicted_iou=float(score),
+                                stability_score=float(score),
+                                point_coords=point_coords_batch[i:i+1]
+                            )
+                            all_masks.append(candidate)
+                    batch_success = True
+                except Exception as batch_error:
+                    print(f"  WARNING: Batch processing failed ({batch_error}), falling back to sequential")
+                    all_masks = []  # Reset
+
+            if not batch_success:
                 # Sequential processing (original method)
                 for point, label in zip(points, point_labels):
                     point_coords = np.array([[point[0], point[1]]])  # Shape: (1, 2)
