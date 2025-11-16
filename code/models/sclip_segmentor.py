@@ -1452,7 +1452,7 @@ class SCLIPSegmentor:
             probs_np = probs.permute(1, 2, 0).cpu().numpy()  # (H, W, K)
             prompts = extract_prompt_points_from_clip(
                 dense_pred, probs_np, class_names,
-                min_confidence=0.7,
+                min_confidence=0.3,  # Match clip_guided_sam baseline (was 0.7!)
                 min_region_size=100
             )
 
