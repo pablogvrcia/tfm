@@ -1453,7 +1453,7 @@ class SCLIPSegmentor:
             prompts = extract_prompt_points_from_clip(
                 dense_pred, probs_np, class_names,
                 min_confidence=0.3,  # Match clip_guided_sam baseline (was 0.7!)
-                min_region_size=100
+                min_region_size=50  # Reduced from 100 - less restrictive filtering
             )
 
             point_coords = np.array([p['point'] for p in prompts])
