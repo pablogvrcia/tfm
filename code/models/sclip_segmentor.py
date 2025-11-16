@@ -269,7 +269,9 @@ class SCLIPSegmentor:
         self.mhqr_sam_generator = None
         if use_mhqr:
             # MHQR uses SAM differently - generates masks at CLIP feature resolution
+            # Use large model for best quality (same as clip_guided_sam baseline)
             self.mhqr_sam_generator = SAM2MaskGenerator(
+                model_type="sam2_hiera_large",  # Match clip_guided_sam baseline
                 device=device,
                 use_fp16=use_fp16,
                 use_compile=use_compile,
