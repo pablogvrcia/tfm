@@ -375,9 +375,9 @@ class SCLIPSegmentor:
         self.mhqr_mask_merger = None
 
         if use_mhqr:
-            try:
-                # Dynamic Multi-Scale Query Generator
-                if mhqr_dynamic_queries:
+            # Dynamic Multi-Scale Query Generator (REQUIRED for simplified MHQR)
+            if mhqr_dynamic_queries:
+                try:
                     from models.dynamic_query_generator import DynamicMultiScaleQueryGenerator
                     self.mhqr_query_generator = DynamicMultiScaleQueryGenerator(
                         scales=self.mhqr_scales,
@@ -388,9 +388,14 @@ class SCLIPSegmentor:
                     )
                     if verbose:
                         print(f"  MHQR Query Generator: Initialized (adaptive, scales={self.mhqr_scales})")
+                except Exception as e:
+                    if verbose:
+                        print(f"  WARNING: MHQR Query Generator failed to initialize: {e}")
+                        print(f"  Will use fallback prompt extraction from clip_guided_segmentation")
 
-                # Hierarchical Mask Decoder
-                if mhqr_hierarchical_decoder:
+            # Hierarchical Mask Decoder (OPTIONAL - not used in simplified MHQR)
+            if mhqr_hierarchical_decoder:
+                try:
                     from models.hierarchical_mask_decoder import HierarchicalMaskDecoder
                     self.mhqr_mask_decoder = HierarchicalMaskDecoder(
                         scales=self.mhqr_scales,
@@ -402,9 +407,14 @@ class SCLIPSegmentor:
                     )
                     if verbose:
                         print(f"  MHQR Mask Decoder: Initialized (hierarchical refinement)")
+                except Exception as e:
+                    if verbose:
+                        print(f"  WARNING: MHQR Mask Decoder failed: {e} (not needed for simplified MHQR)")
+                    self.mhqr_mask_decoder = None
 
-                # Semantic-Guided Mask Merger
-                if mhqr_semantic_merging:
+            # Semantic-Guided Mask Merger (OPTIONAL - not used in simplified MHQR)
+            if mhqr_semantic_merging:
+                try:
                     from models.semantic_mask_merger import SemanticMaskMerger
                     self.mhqr_mask_merger = SemanticMaskMerger(
                         semantic_similarity_threshold=0.7,
@@ -415,36 +425,31 @@ class SCLIPSegmentor:
                     )
                     if verbose:
                         print(f"  MHQR Mask Merger: Initialized (semantic-aware)")
-
-                # LoftUp Feature Upsampler for higher resolution processing
-                self.mhqr_loftup = None
-                try:
-                    from models.loftup_upsampler import LoftUpUpsampler
-                    self.mhqr_loftup = LoftUpUpsampler(
-                        model_name="loftup_clip",
-                        backbone=model_name,
-                        device=device,
-                        use_fp16=use_fp16,
-                        use_pretrained=False  # Use bilinear fallback for now
-                    )
-                    if verbose:
-                        print(f"  MHQR LoftUp: Initialized (14×14 → 56×56 upsampling)")
                 except Exception as e:
                     if verbose:
-                        print(f"  MHQR LoftUp: Not available (using bilinear), {e}")
-                    self.mhqr_loftup = None
+                        print(f"  WARNING: MHQR Mask Merger failed: {e} (not needed for simplified MHQR)")
+                    self.mhqr_mask_merger = None
 
+            # LoftUp Feature Upsampler (OPTIONAL - not used in simplified MHQR)
+            self.mhqr_loftup = None
+            try:
+                from models.loftup_upsampler import LoftUpUpsampler
+                self.mhqr_loftup = LoftUpUpsampler(
+                    model_name="loftup_clip",
+                    backbone=model_name,
+                    device=device,
+                    use_fp16=use_fp16,
+                    use_pretrained=False  # Use bilinear fallback for now
+                )
                 if verbose:
-                    print(f"  MHQR Pipeline: Fully initialized (+8-15% mIoU expected)")
-
+                    print(f"  MHQR LoftUp: Initialized (14×14 → 56×56 upsampling)")
             except Exception as e:
                 if verbose:
-                    print(f"  WARNING: MHQR initialization failed: {e}")
-                    print(f"  Continuing without MHQR...")
-                self.use_mhqr = False
-                self.mhqr_query_generator = None
-                self.mhqr_mask_decoder = None
-                self.mhqr_mask_merger = None
+                    print(f"  WARNING: MHQR LoftUp not available: {e} (not needed for simplified MHQR)")
+                self.mhqr_loftup = None
+
+            if verbose:
+                print(f"  MHQR Pipeline (Simplified): Ready - using dynamic queries + SAM + direct class assignment")
 
         if verbose:
             print("[SCLIP Segmentor] Ready!\n")

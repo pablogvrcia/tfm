@@ -226,10 +226,10 @@ def parse_args():
                         help='Enable full MHQR pipeline (+8-15%% mIoU expected, Phase 3)')
     parser.add_argument('--mhqr-dynamic-queries', action='store_true', default=True,
                         help='Use dynamic multi-scale query generation (Phase 3, default: True)')
-    parser.add_argument('--mhqr-hierarchical-decoder', action='store_true', default=True,
-                        help='Use hierarchical mask decoder (Phase 3, default: True)')
-    parser.add_argument('--mhqr-semantic-merging', action='store_true', default=True,
-                        help='Use semantic-guided mask merging (Phase 3, default: True)')
+    parser.add_argument('--mhqr-hierarchical-decoder', action='store_true', default=False,
+                        help='Use hierarchical mask decoder (Phase 3, default: False - simplified MHQR does not use this)')
+    parser.add_argument('--mhqr-semantic-merging', action='store_true', default=False,
+                        help='Use semantic-guided mask merging (Phase 3, default: False - simplified MHQR does not use this)')
     parser.add_argument('--mhqr-scales', type=float, nargs='+', default=[0.25, 0.5, 1.0],
                         help='Multi-scale pyramid scales (Phase 3, default: [0.25, 0.5, 1.0])')
     parser.add_argument('--use-all-phase3', action='store_true', default=False,
