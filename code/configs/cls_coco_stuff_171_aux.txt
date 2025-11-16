@@ -1,0 +1,171 @@
+person, child, girl, boy, woman, man, people, children, girls, boys, women, men, lady, guy, ladies, guys
+bicycle, bicycles, bike, bikes
+car, cars
+motorcycle, motorcycles
+airplane, airplanes
+bus, buses
+train, trains, locomotive, locomotives, freight train
+truck, trucks
+boat, boats
+traffic light
+fire hydrant
+stop sign
+parking meter
+bench, benches
+bird, birds
+cat, cats, kitties, kitty
+dog, dogs, puppy, puppies
+horse, horses, foal
+sheep
+cow, cows, calf
+elephant, elephants
+bear, bears
+zebra, zebras
+giraffe, giraffes
+backpack, backpacks
+umbrella, umbrellas
+handbag, handbags
+tie
+suitcase, suitcases
+frisbee
+skis
+snowboard
+sports ball
+kite, kites
+baseball bat
+baseball glove
+skateboard
+surfboard
+tennis racket
+bottle, bottles, water bottle
+wine glass, wine glasses, wineglass
+cup, cups, water cup, water glass
+fork, forks
+knife, knives
+spoon, spoons
+bowl, bowls
+banana, bananas
+apple, apples, apple fruit
+sandwich, sandwiches
+orange, oranges, orange fruit
+broccoli
+carrot, carrots
+hot dog
+pizza
+donut, donuts
+cake, cakes
+chair, chairs
+couch, sofa, sofas
+potted plant, potted plants, pottedplant, pottedplants, planter, planters
+bed, beds
+dining table, dining tables, diningtable, diningtables, plate, plates
+toilet
+tv
+laptop
+mouse
+remote, tv remote, remote control
+keyboard
+cell phone, mobile
+microwave
+oven, ovens
+toaster
+sink, sinks
+refrigerator, fridge
+book, books
+clock
+vase, vases
+scissors, scissor
+teddy bear, teddy bears
+hair drier
+toothbrush, toothbrushes
+banner, banners
+blanket, blankets
+branch
+bridge
+building, buildings
+bush, bushes
+cabinet, cabinets
+cage, cages
+cardboard
+carpet, carpets
+ceiling, ceiling
+ceiling tile
+cloth
+clothes
+clouds
+counter
+cupboard, cupboards
+curtain, curtains
+desk, desks
+dirt
+door, doors
+fence, fences
+marble floor, floor marble
+floor
+stone floor, floor stone
+tile floor, floor tile
+wood floor, floor wood
+flower, flowers
+fog
+food, food
+fruit, fruits
+furniture, furniture
+grass
+gravel
+ground, ground
+hill
+house
+leaves
+light
+mat
+metal
+mirror
+moss
+mountain, mountains
+mud
+napkin
+net
+paper
+pavement
+pillow, pillows
+plant
+plastic
+platform
+playingfield, tennis court, baseball field, soccer field, tennis field
+railing
+railroad
+river
+road
+rock
+roof
+rug
+salad
+sand
+sea, sea wave, wave, waves
+shelf
+sky
+skyscraper
+snow
+solid
+stairs
+stone
+straw
+structural
+table
+tent
+textile
+towel
+tree, trees, palm tree
+vegetable
+brick wall, wall brick
+concrete wall, wall concrete
+wall
+wall panel, panel wall
+stone wall, wall stone
+wall tile, tile wall
+wood wall, wall wood
+water
+waterdrops
+window blind
+window
+wood

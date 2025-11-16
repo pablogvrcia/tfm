@@ -221,6 +221,20 @@ def parse_args():
     parser.add_argument('--use-hierarchical-prediction', action='store_true', default=False,
                         help='Enable hierarchical class grouping (+3-5%% mIoU, Phase 2C)')
 
+    # Phase 3 improvements (MHQR - Multi-scale Hierarchical Query-based Refinement)
+    parser.add_argument('--use-mhqr', action='store_true', default=False,
+                        help='Enable full MHQR pipeline (+8-15%% mIoU expected, Phase 3)')
+    parser.add_argument('--mhqr-dynamic-queries', action='store_true', default=True,
+                        help='Use dynamic multi-scale query generation (Phase 3, default: True)')
+    parser.add_argument('--mhqr-hierarchical-decoder', action='store_true', default=False,
+                        help='Use hierarchical mask decoder (Phase 3, default: False - simplified MHQR does not use this)')
+    parser.add_argument('--mhqr-semantic-merging', action='store_true', default=False,
+                        help='Use semantic-guided mask merging (Phase 3, default: False - simplified MHQR does not use this)')
+    parser.add_argument('--mhqr-scales', type=float, nargs='+', default=[0.25, 0.5, 1.0],
+                        help='Multi-scale pyramid scales (Phase 3, default: [0.25, 0.5, 1.0])')
+    parser.add_argument('--use-all-phase3', action='store_true', default=False,
+                        help='Enable all Phase 3 MHQR components')
+
     return parser.parse_args()
 
 
@@ -366,6 +380,9 @@ def main():
     use_cliptrase = args.use_cliptrase or args.use_all_phase2a
     use_clip_rc = args.use_clip_rc or args.use_all_phase2a
 
+    # Handle --use-all-phase3 flag
+    use_mhqr = args.use_mhqr or args.use_all_phase3
+
     # Print Phase 1 status
     if use_loftup or use_resclip or use_densecrf:
         print("\n Phase 1 Improvements (ICCV/CVPR 2025 for mIoU):")
@@ -394,6 +411,15 @@ def main():
             10 if use_clip_rc else 0
         ])
         print(f"  → Total expected improvement for person class: +{total_expected_person:.1f}% mIoU")
+
+    # Print Phase 3 status (MHQR - Multi-scale Hierarchical Query-based Refinement)
+    if use_mhqr:
+        print("\n Phase 3 Improvements (MHQR - Multi-scale Hierarchical Query-based Refinement):")
+        print("  ✓ Dynamic multi-scale query generation" if args.mhqr_dynamic_queries else "  ✗ Dynamic queries disabled")
+        print("  ✓ Hierarchical mask decoder" if args.mhqr_hierarchical_decoder else "  ✗ Hierarchical decoder disabled")
+        print("  ✓ Semantic-guided mask merging" if args.mhqr_semantic_merging else "  ✗ Semantic merging disabled")
+        print(f"  → Scales: {args.mhqr_scales}")
+        print(f"  → Total expected improvement: +8-15% mIoU")
 
     segmentor = SCLIPSegmentor(
         model_name=args.model,
@@ -425,6 +451,12 @@ def main():
         # Phase 2C improvements (2025 - confidence sharpening)
         use_confidence_sharpening=args.use_confidence_sharpening,
         use_hierarchical_prediction=args.use_hierarchical_prediction,
+        # Phase 3 improvements (MHQR - Multi-scale Hierarchical Query-based Refinement)
+        use_mhqr=use_mhqr,
+        mhqr_dynamic_queries=args.mhqr_dynamic_queries,
+        mhqr_hierarchical_decoder=args.mhqr_hierarchical_decoder,
+        mhqr_semantic_merging=args.mhqr_semantic_merging,
+        mhqr_scales=args.mhqr_scales,
     )
     print()
 

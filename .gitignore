@@ -90,3 +90,6 @@ DiffSynth-Studio
 *.pyo
 *.pyd
 code/final_results/*
+
+video_benchmarks
+video_results
