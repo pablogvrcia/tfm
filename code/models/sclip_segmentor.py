@@ -1517,26 +1517,15 @@ class SCLIPSegmentor:
         else:
             refined_masks_clip = masks_clip_res
 
-        # Step 6: Semantic-guided mask merging at CLIP resolution (if enabled)
-        if self.mhqr_mask_merger is not None and self.mhqr_semantic_merging:
-            merge_result = self.mhqr_mask_merger.merge_masks_semantic(
-                masks=refined_masks_clip,  # At CLIP resolution (N, 14, 14)
-                class_ids=point_classes,
-                class_embeddings=text_features,
-                clip_features=clip_features,  # At CLIP resolution (14, 14, D)
-                scores=scores
-            )
+        # Step 6: Skip semantic merging (doesn't work at 14×14 CLIP resolution)
+        # Problem: At 14×14, almost all masks overlap → everything merges to 1 mask
+        # Solution: Skip merging, use refined masks directly
+        if self.verbose and self.mhqr_semantic_merging:
+            print(f"  Semantic merging: DISABLED (over-merges at low resolution)")
 
-            merged_masks_clip = merge_result['merged_masks']
-            merged_class_ids = merge_result['merged_class_ids']
-            merged_scores = merge_result['merged_scores']
-
-            if self.verbose:
-                print(f"  Semantic merging at CLIP res: {len(refined_masks_clip)} → {len(merged_masks_clip)} masks")
-        else:
-            merged_masks_clip = refined_masks_clip
-            merged_class_ids = point_classes
-            merged_scores = scores
+        merged_masks_clip = refined_masks_clip
+        merged_class_ids = point_classes
+        merged_scores = scores
 
         # Step 7: Upsample merged masks to image resolution
         merged_masks = F.interpolate(
@@ -1551,6 +1540,13 @@ class SCLIPSegmentor:
 
         # Step 8: Convert masks to segmentation map
         final_segmentation = np.zeros((H, W), dtype=np.int32)
+
+        # Debug: Check class distribution
+        if self.verbose:
+            unique_pred_classes, counts = np.unique(merged_class_ids, return_counts=True)
+            print(f"  Class distribution in predictions:")
+            for cls, cnt in zip(unique_pred_classes[:10], counts[:10]):  # Show top 10
+                print(f"    Class {cls} ({class_names[cls] if cls < len(class_names) else 'unknown'}): {cnt} masks")
 
         # Sort masks by score (highest first) to give priority to confident predictions
         if len(merged_masks) > 0:
