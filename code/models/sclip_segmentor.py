@@ -416,6 +416,24 @@ class SCLIPSegmentor:
                     if verbose:
                         print(f"  MHQR Mask Merger: Initialized (semantic-aware)")
 
+                # LoftUp Feature Upsampler for higher resolution processing
+                self.mhqr_loftup = None
+                try:
+                    from models.loftup_upsampler import LoftUpUpsampler
+                    self.mhqr_loftup = LoftUpUpsampler(
+                        model_name="loftup_clip",
+                        backbone=model_name,
+                        device=device,
+                        use_fp16=use_fp16,
+                        use_pretrained=False  # Use bilinear fallback for now
+                    )
+                    if verbose:
+                        print(f"  MHQR LoftUp: Initialized (14×14 → 56×56 upsampling)")
+                except Exception as e:
+                    if verbose:
+                        print(f"  MHQR LoftUp: Not available (using bilinear), {e}")
+                    self.mhqr_loftup = None
+
                 if verbose:
                     print(f"  MHQR Pipeline: Fully initialized (+8-15% mIoU expected)")
 
@@ -1480,56 +1498,96 @@ class SCLIPSegmentor:
                 print("  WARNING: MHQR SAM not available, falling back to dense prediction")
             return dense_pred
 
-        # Step 4: Downsample masks to CLIP feature resolution for refinement
-        H_clip, W_clip, D = clip_features.shape  # Typically 14x14x512
+        # Step 4: Upsample CLIP features for higher-resolution processing
+        H_clip_orig, W_clip_orig, D = clip_features.shape  # Typically 14×14×512
 
-        # Resize masks to CLIP resolution (N, H_img, W_img) -> (N, H_clip, W_clip)
-        masks_clip_res = F.interpolate(
+        # Use LoftUp to upsample to 56×56 (4× upsampling reduces overlap issues)
+        target_res = 56  # Standard 4× upsampling from 14×14
+
+        if self.mhqr_loftup is not None:
+            # Upsample using LoftUp (or bilinear fallback)
+            # LoftUp expects (B, C, H, W) format
+            clip_features_spatial = clip_features.permute(2, 0, 1).unsqueeze(0)  # (1, D, H, W)
+            clip_features_upsampled = self.mhqr_loftup(
+                clip_features_spatial,
+                target_size=(target_res, target_res)
+            )  # (1, D, 56, 56)
+
+            # Convert back to (H, W, D) format
+            clip_features_hr = clip_features_upsampled.squeeze(0).permute(1, 2, 0)  # (56, 56, D)
+            H_work, W_work = target_res, target_res
+
+            if self.verbose:
+                print(f"  Upsampled CLIP features: {H_clip_orig}×{W_clip_orig} → {H_work}×{W_work}")
+        else:
+            # Fallback: work at original CLIP resolution
+            clip_features_hr = clip_features
+            H_work, W_work = H_clip_orig, W_clip_orig
+            if self.verbose:
+                print(f"  Working at original CLIP resolution: {H_work}×{W_work}")
+
+        # Downsample masks to working resolution (N, H_img, W_img) -> (N, H_work, W_work)
+        masks_work_res = F.interpolate(
             masks_full.unsqueeze(1),  # (N, 1, H_img, W_img)
-            size=(H_clip, W_clip),
+            size=(H_work, W_work),
             mode='bilinear',
             align_corners=False
-        ).squeeze(1)  # (N, H_clip, W_clip)
+        ).squeeze(1)  # (N, H_work, W_work)
 
         if self.verbose:
-            print(f"  Downsampled masks to CLIP resolution: {masks_clip_res.shape}")
+            print(f"  Downsampled masks to working resolution: {masks_work_res.shape}")
 
-        # Step 5: Hierarchical mask refinement at CLIP resolution (if enabled)
+        # Step 5: Hierarchical mask refinement at working resolution (if enabled)
         if self.mhqr_mask_decoder is not None and self.mhqr_hierarchical_decoder:
-            # Create single-scale pyramid at CLIP resolution
+            # Create single-scale pyramid at working resolution
             masks_pyramid_batched = {
-                1.0: masks_clip_res.unsqueeze(0)  # (1, N, H_clip, W_clip)
+                1.0: masks_work_res.unsqueeze(0)  # (1, N, H_work, W_work)
             }
             clip_features_pyramid_batched = {
-                1.0: clip_features.unsqueeze(0)  # (1, H_clip, W_clip, D)
+                1.0: clip_features_hr.unsqueeze(0)  # (1, H_work, W_work, D)
             }
 
             refined_masks_batched = self.mhqr_mask_decoder.refine_masks_hierarchical(
                 masks_pyramid=masks_pyramid_batched,
                 clip_features_pyramid=clip_features_pyramid_batched,
-                original_size=(H_clip, W_clip)  # Stay at CLIP resolution
+                original_size=(H_work, W_work)
             )
 
-            refined_masks_clip = refined_masks_batched.squeeze(0)  # (N, H_clip, W_clip)
+            refined_masks_work = refined_masks_batched.squeeze(0)  # (N, H_work, W_work)
 
             if self.verbose:
-                print(f"  Hierarchical refinement at CLIP res: {refined_masks_clip.shape}")
+                print(f"  Hierarchical refinement at {H_work}×{W_work}: {refined_masks_work.shape}")
         else:
-            refined_masks_clip = masks_clip_res
+            refined_masks_work = masks_work_res
 
-        # Step 6: Skip semantic merging (doesn't work at 14×14 CLIP resolution)
-        # Problem: At 14×14, almost all masks overlap → everything merges to 1 mask
-        # Solution: Skip merging, use refined masks directly
-        if self.verbose and self.mhqr_semantic_merging:
-            print(f"  Semantic merging: DISABLED (over-merges at low resolution)")
+        # Step 6: Semantic-guided mask merging at working resolution (re-enabled at 56×56)
+        if self.mhqr_mask_merger is not None and self.mhqr_semantic_merging and H_work >= 56:
+            # Only enable merging at 56×56 or higher (less overlap than 14×14)
+            merge_result = self.mhqr_mask_merger.merge_masks_semantic(
+                masks=refined_masks_work,  # At working resolution (N, 56, 56)
+                class_ids=point_classes,
+                class_embeddings=text_features,
+                clip_features=clip_features_hr,  # At working resolution (56, 56, D)
+                scores=scores
+            )
 
-        merged_masks_clip = refined_masks_clip
-        merged_class_ids = point_classes
-        merged_scores = scores
+            merged_masks_work = merge_result['merged_masks']
+            merged_class_ids = merge_result['merged_class_ids']
+            merged_scores = merge_result['merged_scores']
+
+            if self.verbose:
+                print(f"  Semantic merging at {H_work}×{W_work}: {len(refined_masks_work)} → {len(merged_masks_work)} masks")
+        else:
+            if self.verbose and self.mhqr_semantic_merging:
+                print(f"  Semantic merging: DISABLED (resolution {H_work}×{W_work} too low)")
+
+            merged_masks_work = refined_masks_work
+            merged_class_ids = point_classes
+            merged_scores = scores
 
         # Step 7: Upsample merged masks to image resolution
         merged_masks = F.interpolate(
-            merged_masks_clip.unsqueeze(1),  # (M, 1, H_clip, W_clip)
+            merged_masks_work.unsqueeze(1),  # (M, 1, H_work, W_work)
             size=(H, W),
             mode='bilinear',
             align_corners=False
