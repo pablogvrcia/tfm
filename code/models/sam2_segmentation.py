@@ -266,6 +266,7 @@ class SAM2MaskGenerator:
 
             if not batch_success:
                 # Sequential processing (original method)
+                point_idx = 0
                 for point, label in zip(points, point_labels):
                     point_coords = np.array([[point[0], point[1]]])  # Shape: (1, 2)
                     point_labels_arr = np.array([label])  # Shape: (1,)
@@ -279,7 +280,12 @@ class SAM2MaskGenerator:
                             multimask_output=True  # Get 3 masks per point
                         )
 
+                    # Debug: Check shapes
+                    if point_idx == 0:
+                        print(f"    [DEBUG] Sequential SAM output: masks.shape={masks.shape}, scores.shape={scores.shape}")
+
                     # Convert to MaskCandidate objects
+                    masks_for_point = 0
                     for mask, score in zip(masks, scores):
                         candidate = MaskCandidate(
                             mask=mask.astype(np.uint8),
@@ -290,6 +296,12 @@ class SAM2MaskGenerator:
                             point_coords=point_coords
                         )
                         all_masks.append(candidate)
+                        masks_for_point += 1
+
+                    if point_idx == 0:
+                        print(f"    [DEBUG] Created {masks_for_point} MaskCandidates for point 0")
+
+                    point_idx += 1
 
             # Sort by predicted IoU (best first)
             all_masks.sort(key=lambda x: x.predicted_iou, reverse=True)

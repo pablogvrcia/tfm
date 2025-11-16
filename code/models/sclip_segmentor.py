@@ -1481,6 +1481,9 @@ class SCLIPSegmentor:
                 point_labels=labels_list
             )
 
+            if self.verbose:
+                print(f"    [DEBUG] Received {len(mask_candidates)} MaskCandidates from SAM (expected {len(points_list) * 3})")
+
             # segment_with_points returns 3 MaskCandidate objects per point
             # We need to pick the best mask for each query point
             results = []
