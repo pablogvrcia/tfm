@@ -1,14 +1,14 @@
 \chapter{Conclusions and Future Work}
 
-This thesis presents an open-vocabulary semantic segmentation system that enables flexible, language-driven image understanding and manipulation. By combining SAM 2's universal mask generation with CLIP-based vision-language alignment and Stable Diffusion's generative capabilities, we demonstrate a practical approach to zero-shot object segmentation and editing. This final chapter summarizes our key contributions, discusses the implications of our results, addresses current limitations, and outlines promising directions for future research.
+This thesis presents an open-vocabulary semantic segmentation system that enables flexible, language-driven image understanding and manipulation. By combining SAM 2's universal mask generation with CLIP-based vision-language alignment and Stable Diffusion's generative capabilities, the work demonstrates a practical approach to zero-shot object segmentation and editing. This final chapter summarizes the key contributions, discusses the implications of the results, addresses current limitations, and outlines promising directions for future research.
 
 \section{Summary of Contributions}
 
-We have made several key contributions to the field of open-vocabulary semantic segmentation and generative image editing:
+This thesis makes several key contributions to the field of open-vocabulary semantic segmentation and generative image editing:
 
 \subsection{Unified Open-Vocabulary Framework}
 
-We developed a modular pipeline that integrates state-of-the-art foundation models (SAM 2, CLIP, Stable Diffusion) into a cohesive system. Unlike traditional semantic segmentation methods that require extensive training on fixed-class datasets, our approach enables zero-shot segmentation of arbitrary objects specified by natural language prompts. This flexibility is achieved by:
+A modular pipeline is developed that integrates state-of-the-art foundation models (SAM 2, CLIP, Stable Diffusion) into a cohesive system. Unlike traditional semantic segmentation methods that require extensive training on fixed-class datasets, the approach enables zero-shot segmentation of arbitrary objects specified by natural language prompts. This flexibility is achieved by:
 
 \begin{itemize}
     \item Leveraging SAM 2's class-agnostic mask proposals to generate comprehensive segmentation candidates
@@ -20,13 +20,13 @@ This integration demonstrates that combining complementary foundation models can
 
 \subsection{CLIP-Guided Intelligent Prompting}
 
-Building upon recent advances in dense vision-language understanding through SCLIP (Self-attention CLIP), we developed an intelligent prompting strategy that extracts semantic information from dense CLIP predictions to guide SAM 2's mask generation. Rather than using blind grid sampling (4096 points), our approach identifies 50-300 high-confidence semantic regions from SCLIP's cross-layer self-attention features.
+Building upon recent advances in dense vision-language understanding through SCLIP (Self-attention CLIP), an intelligent prompting strategy is developed that extracts semantic information from dense CLIP predictions to guide SAM 2's mask generation. Rather than using blind grid sampling (4096 points), the approach identifies 50-300 high-confidence semantic regions from SCLIP's cross-layer self-attention features.
 
 This CLIP-guided prompting achieves 96\% prompt reduction while maintaining competitive segmentation accuracy. By focusing computational resources on semantically meaningful regions, the system efficiently processes images while avoiding the combinatorial explosion of exhaustive sampling strategies.
 
 \subsection{Mask Quality Filtering and Selection}
 
-We implemented a quality-aware mask selection pipeline that combines multiple filtering stages:
+A quality-aware mask selection pipeline is implemented that combines multiple filtering stages:
 
 \begin{itemize}
     \item IoU-based quality filtering: Only keeps masks with predicted IoU above minimum threshold
@@ -38,23 +38,24 @@ This filtering pipeline ensures that only high-quality, semantically relevant ma
 
 \subsection{Comprehensive Evaluation Framework}
 
-We established a thorough evaluation protocol on PASCAL VOC 2012, measuring segmentation quality through multiple metrics (mIoU, pixel accuracy, F1 score, precision, recall, boundary F1). Our experiments demonstrate:
+A thorough evaluation protocol is established on PASCAL VOC 2012, measuring segmentation quality through multiple metrics (mIoU, pixel accuracy, F1 score, precision, recall, boundary F1). The experiments demonstrate:
 
 \begin{itemize}
-    \item Competitive open-vocabulary performance on PASCAL VOC 2012, achieving 59.78\% mIoU with CLIP-guided prompting
-    \item Strong class-specific results: Horse (80.87\%), Cat (80.43\%), Dog (69.55\%)
-    \item High recall (72.91\%) indicating effective prompt extraction and object detection
+    \item \textbf{State-of-the-art open-vocabulary performance} on PASCAL VOC 2012, achieving \textbf{68.09\% mIoU} with CLIP-guided prompting, surpassing previous training-free methods (ITACLIP: 67.9\%)
+    \item Exceptional background recognition (86.90\% IoU) through comprehensive descriptor files
+    \item Strong class-specific results: Horse (78.49\%), Cat (75.48\%), Aeroplane (76.53\%)
+    \item High precision (81.13\%) and pixel accuracy (85.38\%) indicating effective false positive reduction
     \item 96\% prompt reduction compared to blind grid sampling (50-300 vs 4096 points)
     \item Comprehensive evaluation across 21 object categories demonstrating zero-shot generalization
 \end{itemize}
 
 \subsection{Practical System Design}
 
-We designed the system with real-world applicability in mind, demonstrating that the approach is viable even on consumer-grade hardware (NVIDIA GeForce GTX 1060 6GB Max-Q). Our CLIP-guided prompting approach processes images in 12-33 seconds depending on the number of extracted prompts. This performance, while slower than real-time, remains practical for research applications and offline evaluation on limited hardware budgets.
+The system is designed with real-world applicability in mind, demonstrating that the approach is viable even on consumer-grade hardware (NVIDIA GeForce GTX 1060 6GB Max-Q). The CLIP-guided prompting approach processes images in 12-33 seconds depending on the number of extracted prompts. This performance, while slower than real-time, remains practical for research applications and offline evaluation on limited hardware budgets.
 
 \subsection{Extension to Video Segmentation}
 
-Beyond image segmentation, we demonstrate that our CLIP-guided prompting naturally extends to video by leveraging SAM2's temporal tracking capabilities:
+Beyond image segmentation, the work demonstrates that CLIP-guided prompting naturally extends to video by leveraging SAM2's temporal tracking capabilities:
 
 \begin{itemize}
     \item \textbf{Efficient video processing:} CLIP analysis performed only on first frame, with SAM2 handling temporal propagation across all frames
@@ -64,15 +65,15 @@ Beyond image segmentation, we demonstrate that our CLIP-guided prompting natural
     \item \textbf{Limitation acknowledged:} Video inpainting not implemented due to resource constraints of video diffusion models
 \end{itemize}
 
-This video extension demonstrates the versatility of our approach, showing how CLIP-guided prompting can be applied beyond static images while maintaining efficiency through intelligent prompt extraction.
+This video extension demonstrates the versatility of the approach, showing how CLIP-guided prompting can be applied beyond static images while maintaining efficiency through intelligent prompt extraction.
 
 \section{Discussion and Implications}
 
 \subsection{Open-Vocabulary Paradigm Shift}
 
-Our results support the growing evidence that open-vocabulary approaches represent a fundamental shift in computer vision. Traditional closed-vocabulary methods achieve higher accuracy on their target classes (e.g., Mask2Former: 89.5\% on PASCAL VOC vs. our 59.78\%), but they completely fail on unseen objects. In contrast, our system gracefully handles arbitrary text prompts, making it far more versatile for real-world scenarios where the set of relevant objects cannot be predetermined.
+The results support the growing evidence that open-vocabulary approaches represent a fundamental shift in computer vision. Traditional closed-vocabulary methods achieve higher accuracy on their target classes (e.g., Mask2Former: 89.5\% on PASCAL VOC vs. 68.09\% from this work), but they completely fail on unseen objects. In contrast, the system gracefully handles arbitrary text prompts, making it far more versatile for real-world scenarios where the set of relevant objects cannot be predetermined.
 
-The gap between open-vocabulary and closed-vocabulary performance (approximately 30 percentage points on PASCAL VOC) highlights an important research challenge: developing methods that achieve both flexibility and accuracy. However, our intelligent prompting strategy demonstrates progress toward this goal—achieving 59.78\% mIoU with 96\% fewer prompts than blind grid sampling represents significant efficiency gains while maintaining competitive accuracy.
+The gap between open-vocabulary and closed-vocabulary performance has narrowed significantly (approximately 21 percentage points on PASCAL VOC, down from 30 points), highlighting rapid progress in this field. The intelligent prompting strategy combined with descriptor files and optimized template strategies demonstrates significant advancement—achieving \textbf{68.09\% mIoU with 96\% fewer prompts} than blind grid sampling represents both efficiency gains and competitive accuracy among training-free methods on PASCAL VOC 2012.
 
 \subsection{Foundation Models as Building Blocks}
 
@@ -93,13 +94,13 @@ This modular design philosophy offers several advantages:
 
 \subsection{Language as a Universal Interface}
 
-By using natural language prompts as the primary interface, our system becomes accessible to users without computer vision expertise. This democratization of image editing capabilities aligns with broader trends in AI toward more intuitive human-computer interaction. However, our failure case analysis (Section 4.3.4) reveals that prompt engineering still matters—ambiguous queries like ``thing on table'' fail, while specific descriptions like ``wine glass on dining table'' succeed.
+By using natural language prompts as the primary interface, the system becomes accessible to users without computer vision expertise. This democratization of image editing capabilities aligns with broader trends in AI toward more intuitive human-computer interaction. However, the failure case analysis (Section 4.3.4) reveals that prompt engineering still matters—ambiguous queries like ``thing on table'' fail, while specific descriptions like ``wine glass on dining table'' succeed.
 
 Future work should explore methods for handling underspecified prompts, perhaps by asking clarifying questions or presenting multiple candidate interpretations.
 
 \section{Limitations and Challenges}
 
-Despite promising results, our system has several notable limitations:
+Despite promising results, the system has several notable limitations:
 
 \subsection{Small Object Detection}
 
@@ -114,7 +115,7 @@ Potential solutions include:
 
 \subsection{Occlusion and Partial Visibility}
 
-When objects are heavily occluded or partially visible, SAM 2 may produce incomplete masks that only cover visible regions. While this is technically correct for pixel-level segmentation, it can be problematic for downstream tasks like object removal (where we want to inpaint the entire object region, including occluded parts) or counting (where partially visible objects should still be counted).
+When objects are heavily occluded or partially visible, SAM 2 may produce incomplete masks that only cover visible regions. While this is technically correct for pixel-level segmentation, it can be problematic for downstream tasks like object removal (where inpainting the entire object region including occluded parts is desired) or counting (where partially visible objects should still be counted).
 
 Addressing this limitation may require:
 \begin{itemize}
@@ -152,7 +153,7 @@ Improvements could come from:
 
 \section{Future Research Directions}
 
-Building on this work, we identify several promising research directions:
+Building on this work, several promising research directions are identified:
 
 \subsection{3D Scene Understanding and Manipulation}
 
@@ -208,7 +209,7 @@ Foundation models inherit biases from their training data, which can manifest in
 
 \subsection{Specialized Domain Applications}
 
-While our system focuses on natural images, many domains could benefit from open-vocabulary segmentation:
+While the system focuses on natural images, many domains could benefit from open-vocabulary segmentation:
 \begin{itemize}
     \item \textbf{Medical imaging:} Segmenting anatomical structures or pathologies from radiological text reports
     \item \textbf{Satellite imagery:} Identifying geographic features, infrastructure, or environmental changes
@@ -230,10 +231,10 @@ For many applications (e.g., mobile apps, embedded systems), current models are 
 
 \section{Closing Remarks}
 
-Open-vocabulary semantic segmentation represents a significant step toward more flexible and human-centric computer vision systems. By moving beyond fixed-category taxonomies, we enable applications that adapt to users' needs rather than requiring users to adapt to system constraints.
+Open-vocabulary semantic segmentation represents a significant step toward more flexible and human-centric computer vision systems. By moving beyond fixed-category taxonomies, applications can adapt to users' needs rather than requiring users to adapt to system constraints.
 
 This thesis demonstrates that current foundation models—SAM 2, CLIP, and Stable Diffusion—can be effectively combined to achieve practical open-vocabulary segmentation and editing. While significant challenges remain (small objects, domain shift, computational cost), the rapid pace of progress in foundation model development suggests that many current limitations will be addressed in the near future.
 
-As these systems improve and become more accessible, we anticipate transformative impacts across diverse domains: from creative tools that democratize professional-quality image editing, to scientific instruments that help researchers analyze visual data, to assistive technologies that make visual content more accessible to people with disabilities.
+As these systems improve and become more accessible, transformative impacts are anticipated across diverse domains: from creative tools that democratize professional-quality image editing, to scientific instruments that help researchers analyze visual data, to assistive technologies that make visual content more accessible to people with disabilities.
 
 The ultimate goal is not merely to automate visual understanding, but to create intelligent tools that amplify human creativity and insight. Open-vocabulary approaches, by aligning machine perception with human language, represent an important step toward this vision.

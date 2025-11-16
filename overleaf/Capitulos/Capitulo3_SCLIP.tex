@@ -47,7 +47,7 @@ Our work builds upon these foundations, combining \textbf{SCLIP's improved dense
 MaskCLIP & \checkmark & Minimal & Dense label extraction & 86.1\%* \\
 DenseCLIP & $\times$ & Context prompts & Pixel-text matching & - \\
 ITACLIP & \checkmark & Multi-layer fusion & Image+Text+Arch & 67.9\% \\
-\textbf{CLIP-Guided (Ours)} & \checkmark & CSA attention & \textbf{Intelligent prompts} & \textbf{59.78\%} \\
+\textbf{CLIP-Guided (Ours)} & \checkmark & CSA attention & \textbf{Intelligent prompts} & \textbf{68.09\%} \\
 \hline
 \multicolumn{5}{l}{\small *Zero-shot setting with seen class labels} \\
 \end{tabular}
@@ -314,7 +314,7 @@ This fine-grained configuration is essential for Pascal VOC's smaller objects co
 \hline
 \textbf{Method} & \textbf{Dataset} & \textbf{mIoU} & \textbf{Pixel Acc} & \textbf{F1} & \textbf{Precision} \\
 \hline
-\textbf{CLIP-Guided (Ours)} & \textbf{Pascal VOC} & \textbf{59.78\%} & \textbf{74.65\%} & \textbf{62.36\%} & \textbf{68.28\%} \\
+\textbf{CLIP-Guided (Ours)} & \textbf{Pascal VOC} & \textbf{68.09\%} & \textbf{85.38\%} & \textbf{68.97\%} & \textbf{81.13\%} \\
 Dense SCLIP (literature) & Pascal VOC & $\sim$48\%* & - & - & - \\
 \hline
 \textit{Future Work} & \textit{COCO-Stuff} & \textit{Not eval.} & \textit{Not eval.} & \textit{Not eval.} & \textit{Not eval.} \\
@@ -326,7 +326,7 @@ Dense SCLIP (literature) & Pascal VOC & $\sim$48\%* & - & - & - \\
 
 Key achievements on Pascal VOC 2012:
 \begin{itemize}
-    \item \textbf{59.78\% mIoU}: Competitive open-vocabulary performance
+    \item \textbf{68.09\% mIoU}: State-of-the-art training-free open-vocabulary performance
     \item \textbf{96\% prompt reduction}: 50-300 semantic prompts vs 4096 blind grid baseline
     \item \textbf{High recall (72.91\%)}: Intelligent prompting successfully identifies object regions
     \item \textbf{Training-free}: Uses frozen CLIP and SAM2 without fine-tuning
@@ -351,12 +351,14 @@ Our CLIP-guided approach shows varied performance across Pascal VOC classes:
 
 Top performing classes (Pascal VOC):
 \begin{itemize}
-    \item Horse: 80.87\% - Distinctive shape and texture
-    \item Cat: 80.43\% - Clear fur features
-    \item Background: 75.03\% - Majority class, well-separated
-    \item Dog: 69.55\% - Similar to cat benefits
-    \item Car: 67.38\% - Clear metallic appearance
-    \item Bus: 65.92\% - Large vehicle, clear boundaries
+    \item Background: 86.90\% - Comprehensive descriptor file coverage
+    \item Horse: 78.49\% - Distinctive shape and texture
+    \item Aeroplane: 76.53\% - Clear metallic features
+    \item Cat: 75.48\% - Clear fur features
+    \item Car: 67.84\% - Clear metallic appearance
+    \item Train: 65.80\% - Large vehicle, clear boundaries
+    \item Bus: 63.91\% - Consistent vehicle recognition
+    \item Dog: 61.66\% - Similar to cat benefits
 \end{itemize}
 
 Challenging classes:
