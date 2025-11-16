@@ -1440,6 +1440,11 @@ class SCLIPSegmentor:
                 if 'metadata' in query_result:
                     meta = query_result['metadata']
                     print(f"    Per-scale: {meta.get('queries_per_scale', {})}")
+
+                # Debug: Show class distribution of queries
+                unique_classes, counts = np.unique(point_classes, return_counts=True)
+                class_distribution = {class_names[int(c)]: int(count) for c, count in zip(unique_classes, counts)}
+                print(f"    Query classes: {class_distribution}")
         else:
             # Fallback: extract prompts like clip_guided_sam does
             from clip_guided_segmentation import extract_prompt_points_from_clip
@@ -1567,6 +1572,13 @@ class SCLIPSegmentor:
 
         if self.verbose:
             print(f"  After merging: {len(kept_results)} masks (removed {len(results) - len(kept_results)} overlaps)")
+
+            # Debug: Show class distribution of final masks
+            if len(kept_results) > 0:
+                final_classes = [r['class_idx'] for r in kept_results]
+                unique_final, counts_final = np.unique(final_classes, return_counts=True)
+                final_class_dist = {class_names[int(c)]: int(count) for c, count in zip(unique_final, counts_final)}
+                print(f"    Final mask classes: {final_class_dist}")
 
         # Step 5: Paint final segmentation (EXACTLY like clip_guided_sam)
         final_seg = np.zeros((H, W), dtype=np.int32)
