@@ -1385,16 +1385,15 @@ class SCLIPSegmentor:
         class_names: List[str]
     ) -> np.ndarray:
         """
-        MHQR Pipeline: Multi-scale Hierarchical Query-based Refinement (Phase 3).
+        MHQR: Multi-scale Hierarchical Query-based Refinement (SIMPLIFIED).
 
-        Full pipeline:
-        1. Dense SCLIP prediction → confidence maps
-        2. Dynamic multi-scale query generation (adaptive to scene complexity)
-        3. SAM2 hierarchical mask generation at multiple scales
-        4. Hierarchical mask refinement with cross-scale fusion
-        5. Semantic-guided mask merging
-
-        Expected improvement: +8-15% mIoU over baseline SCLIP+SAM
+        This is the CORRECT implementation that mirrors the working clip_guided_sam approach:
+        1. Dense CLIP prediction
+        2. Dynamic query generation (ONLY improvement over baseline)
+        3. SAM at each query → best mask
+        4. CRITICAL: Assign CLIP class from query location
+        5. Merge overlaps (same class, high IoU threshold)
+        6. Paint final map (confidence sorted)
 
         Args:
             image: Input image (H, W, 3)
@@ -1407,30 +1406,16 @@ class SCLIPSegmentor:
         num_classes = len(class_names)
 
         if self.verbose:
-            print("[MHQR Pipeline] Starting multi-scale hierarchical refinement...")
+            print("[MHQR Pipeline] Starting (simplified, correct approach)...")
 
-        # Step 1: Get dense SCLIP predictions and confidence maps
+        # Step 1: Dense SCLIP prediction
         dense_pred, logits = self.predict_dense(image, class_names, return_logits=True)
-
-        # Convert logits to probabilities
         probs = torch.softmax(logits * self.logit_scale, dim=0)  # (K, H, W)
 
-        # Get CLIP features for semantic guidance
-        _, clip_features = self.clip_extractor.extract_image_features(
-            image,
-            return_dense=True,
-            use_csa=True,
-            normalize=True
-        )  # (H_feat, W_feat, D)
-
-        # Get text embeddings for semantic merging
-        text_features, _ = self._get_text_features(class_names)
-
         if self.verbose:
-            print(f"  Dense prediction: {H}x{W}, {num_classes} classes")
-            print(f"  CLIP features: {clip_features.shape}")
+            print(f"  Dense prediction: {H}×{W}, {num_classes} classes")
 
-        # Step 2: Dynamic multi-scale query generation
+        # Step 2: Dynamic query generation (THE ONLY MHQR INNOVATION)
         if self.mhqr_query_generator is not None:
             query_result = self.mhqr_query_generator.generate_queries(
                 confidence_maps=probs.permute(1, 2, 0),  # (H, W, K)
@@ -1444,186 +1429,133 @@ class SCLIPSegmentor:
             point_classes = query_result['point_classes']
 
             if self.verbose:
-                print(f"  Generated {len(point_coords)} adaptive queries")
+                print(f"  Dynamic queries: {len(point_coords)} points")
                 if 'metadata' in query_result:
                     meta = query_result['metadata']
-                    print(f"    Queries per scale: {meta.get('queries_per_scale', {})}")
-                    print(f"    Total queries: {meta.get('total_queries', 0)}")
+                    print(f"    Per-scale: {meta.get('queries_per_scale', {})}")
         else:
-            # Fallback: use simple point extraction
-            point_coords, point_labels, point_classes = self._extract_all_points_simple(
-                dense_pred, class_names, num_points_per_class=16
+            # Fallback: extract prompts like clip_guided_sam does
+            from clip_guided_segmentation import extract_prompt_points_from_clip
+            probs_np = probs.permute(1, 2, 0).cpu().numpy()  # (H, W, K)
+            prompts = extract_prompt_points_from_clip(
+                dense_pred, probs_np, class_names,
+                min_confidence=0.7,
+                min_region_size=100
             )
+
+            point_coords = np.array([p['point'] for p in prompts])
+            point_labels = np.ones(len(prompts))
+            point_classes = np.array([p['class_idx'] for p in prompts])
+
             if self.verbose:
-                print(f"  Fallback query generation: {len(point_coords)} points")
+                print(f"  Fallback queries: {len(point_coords)} points")
 
         if len(point_coords) == 0:
             if self.verbose:
-                print("  No queries generated, returning dense prediction")
+                print("  No queries, returning dense prediction")
             return dense_pred
 
-        # Step 3: Generate SAM2 masks at image resolution
-        if self.mhqr_sam_generator is not None:
-            # Use standard point prompting (not hierarchical)
-            sam_masks = self.mhqr_sam_generator.segment_with_points(
-                image=image,
-                points=[(int(x), int(y)) for x, y in point_coords],
-                point_labels=point_labels.tolist()
-            )
-
+        # Step 3: SAM masks at each query (EXACTLY like clip_guided_sam)
+        if self.mhqr_sam_generator is None:
             if self.verbose:
-                print(f"  Generated {len(sam_masks)} SAM masks at image resolution")
+                print("  No SAM, returning dense prediction")
+            return dense_pred
 
-            # Convert to tensors and organize by query
-            masks_list = []
-            scores_list = []
-            for i, mask_candidate in enumerate(sam_masks):
-                if i >= len(point_coords):  # Limit to number of queries
-                    break
-                masks_list.append(torch.from_numpy(mask_candidate.mask.astype(np.float32)))
-                scores_list.append(mask_candidate.predicted_iou)
+        results = []
+        for i in range(len(point_coords)):
+            x, y = int(point_coords[i][0]), int(point_coords[i][1])
 
-            if len(masks_list) == 0:
+            # Get SAM masks (3 per point)
+            try:
+                point_np = np.array([[x, y]])
+                label_np = np.array([1])
+
+                # Set image if needed
+                if not hasattr(self.mhqr_sam_generator.predictor, '_is_image_set') or not self.mhqr_sam_generator.predictor._is_image_set:
+                    self.mhqr_sam_generator.predictor.set_image(image)
+
+                masks, scores, _ = self.mhqr_sam_generator.predictor.predict(
+                    point_coords=point_np,
+                    point_labels=label_np,
+                    multimask_output=True
+                )
+
+                # Pick best mask
+                best_idx = np.argmax(scores)
+                mask = masks[best_idx]
+                score = scores[best_idx]
+
+                # CRITICAL: Assign class from CLIP prediction at query location
+                class_idx = point_classes[i]
+
+                results.append({
+                    'mask': mask,
+                    'class_idx': int(class_idx),
+                    'score': float(score),
+                    'confidence': float(probs[class_idx, y, x].cpu())
+                })
+
+            except Exception as e:
                 if self.verbose:
-                    print("  No valid masks generated, returning dense prediction")
-                return dense_pred
+                    print(f"  WARNING: Query {i} failed: {e}")
+                continue
 
-            masks_full = torch.stack(masks_list).to(self.device)  # (N, H_img, W_img)
-            scores = torch.tensor(scores_list).to(self.device)  # (N,)
-
+        if len(results) == 0:
             if self.verbose:
-                print(f"  Masks tensor: {masks_full.shape}")
-        else:
-            if self.verbose:
-                print("  WARNING: MHQR SAM not available, falling back to dense prediction")
+                print("  No valid masks, returning dense prediction")
             return dense_pred
 
-        # Step 4: Upsample CLIP features for higher-resolution processing
-        H_clip_orig, W_clip_orig, D = clip_features.shape  # Typically 14×14×512
+        if self.verbose:
+            print(f"  Generated {len(results)} SAM masks")
 
-        # Use LoftUp to upsample to 56×56 (4× upsampling reduces overlap issues)
-        target_res = 56  # Standard 4× upsampling from 14×14
+        # Step 4: Merge overlapping masks (SAME class only, like clip_guided_sam)
+        # Sort by confidence (keep highest)
+        results = sorted(results, key=lambda x: x['confidence'], reverse=True)
 
-        if self.mhqr_loftup is not None:
-            # Upsample using LoftUp (or bilinear fallback)
-            # LoftUp expects (B, C, H, W) format
-            clip_features_spatial = clip_features.permute(2, 0, 1).unsqueeze(0)  # (1, D, H, W)
-            clip_features_upsampled = self.mhqr_loftup(
-                clip_features_spatial,
-                target_size=(target_res, target_res)
-            )  # (1, D, 56, 56)
+        kept_results = []
+        iou_threshold = 0.8  # Only merge very high overlap
 
-            # Convert back to (H, W, D) format
-            clip_features_hr = clip_features_upsampled.squeeze(0).permute(1, 2, 0)  # (56, 56, D)
-            H_work, W_work = target_res, target_res
+        for result in results:
+            mask = result['mask']
+            class_idx = result['class_idx']
 
-            if self.verbose:
-                print(f"  Upsampled CLIP features: {H_clip_orig}×{W_clip_orig} → {H_work}×{W_work}")
-        else:
-            # Fallback: work at original CLIP resolution
-            clip_features_hr = clip_features
-            H_work, W_work = H_clip_orig, W_clip_orig
-            if self.verbose:
-                print(f"  Working at original CLIP resolution: {H_work}×{W_work}")
+            should_keep = True
+            for kept in kept_results:
+                if kept['class_idx'] != class_idx:
+                    continue  # Only check same class
 
-        # Downsample masks to working resolution (N, H_img, W_img) -> (N, H_work, W_work)
-        masks_work_res = F.interpolate(
-            masks_full.unsqueeze(1),  # (N, 1, H_img, W_img)
-            size=(H_work, W_work),
-            mode='bilinear',
-            align_corners=False
-        ).squeeze(1)  # (N, H_work, W_work)
+                # Calculate IoU
+                kept_mask = kept['mask']
+                intersection = (mask & kept_mask).sum()
+                union = (mask | kept_mask).sum()
+                iou = intersection / union if union > 0 else 0
+
+                if iou > iou_threshold:
+                    should_keep = False
+                    break
+
+            if should_keep:
+                kept_results.append(result)
 
         if self.verbose:
-            print(f"  Downsampled masks to working resolution: {masks_work_res.shape}")
+            print(f"  After merging: {len(kept_results)} masks (removed {len(results) - len(kept_results)} overlaps)")
 
-        # Step 5: Hierarchical mask refinement at working resolution (if enabled)
-        if self.mhqr_mask_decoder is not None and self.mhqr_hierarchical_decoder:
-            # Create single-scale pyramid at working resolution
-            masks_pyramid_batched = {
-                1.0: masks_work_res.unsqueeze(0)  # (1, N, H_work, W_work)
-            }
-            clip_features_pyramid_batched = {
-                1.0: clip_features_hr.unsqueeze(0)  # (1, H_work, W_work, D)
-            }
+        # Step 5: Paint final segmentation (EXACTLY like clip_guided_sam)
+        final_seg = np.zeros((H, W), dtype=np.int32)
 
-            refined_masks_batched = self.mhqr_mask_decoder.refine_masks_hierarchical(
-                masks_pyramid=masks_pyramid_batched,
-                clip_features_pyramid=clip_features_pyramid_batched,
-                original_size=(H_work, W_work)
-            )
+        # Sort by confidence (lower first, so higher overwrites)
+        kept_results = sorted(kept_results, key=lambda x: x['confidence'])
 
-            refined_masks_work = refined_masks_batched.squeeze(0)  # (N, H_work, W_work)
-
-            if self.verbose:
-                print(f"  Hierarchical refinement at {H_work}×{W_work}: {refined_masks_work.shape}")
-        else:
-            refined_masks_work = masks_work_res
-
-        # Step 6: Semantic-guided mask merging at working resolution (re-enabled at 56×56)
-        if self.mhqr_mask_merger is not None and self.mhqr_semantic_merging and H_work >= 56:
-            # Only enable merging at 56×56 or higher (less overlap than 14×14)
-            merge_result = self.mhqr_mask_merger.merge_masks_semantic(
-                masks=refined_masks_work,  # At working resolution (N, 56, 56)
-                class_ids=point_classes,
-                class_embeddings=text_features,
-                clip_features=clip_features_hr,  # At working resolution (56, 56, D)
-                scores=scores
-            )
-
-            merged_masks_work = merge_result['merged_masks']
-            merged_class_ids = merge_result['merged_class_ids']
-            merged_scores = merge_result['merged_scores']
-
-            if self.verbose:
-                print(f"  Semantic merging at {H_work}×{W_work}: {len(refined_masks_work)} → {len(merged_masks_work)} masks")
-        else:
-            if self.verbose and self.mhqr_semantic_merging:
-                print(f"  Semantic merging: DISABLED (resolution {H_work}×{W_work} too low)")
-
-            merged_masks_work = refined_masks_work
-            merged_class_ids = point_classes
-            merged_scores = scores
-
-        # Step 7: Upsample merged masks to image resolution
-        merged_masks = F.interpolate(
-            merged_masks_work.unsqueeze(1),  # (M, 1, H_work, W_work)
-            size=(H, W),
-            mode='bilinear',
-            align_corners=False
-        ).squeeze(1)  # (M, H, W)
+        for result in kept_results:
+            mask = result['mask'].astype(bool)
+            class_idx = result['class_idx']
+            final_seg[mask] = class_idx
 
         if self.verbose:
-            print(f"  Upsampled masks to image resolution: {merged_masks.shape}")
+            unique = np.unique(final_seg)
+            print(f"[MHQR] Complete! Detected {len(unique)} classes")
 
-        # Step 8: Convert masks to segmentation map
-        final_segmentation = np.zeros((H, W), dtype=np.int32)
-
-        # Debug: Check class distribution
-        if self.verbose:
-            unique_pred_classes, counts = np.unique(merged_class_ids, return_counts=True)
-            print(f"  Class distribution in predictions:")
-            for cls, cnt in zip(unique_pred_classes[:10], counts[:10]):  # Show top 10
-                print(f"    Class {cls} ({class_names[cls] if cls < len(class_names) else 'unknown'}): {cnt} masks")
-
-        # Sort masks by score (highest first) to give priority to confident predictions
-        if len(merged_masks) > 0:
-            sorted_indices = torch.argsort(merged_scores, descending=True)
-
-            for idx in sorted_indices:
-                mask = merged_masks[idx].cpu().numpy()
-                class_id = merged_class_ids[idx]
-
-                # Apply mask (threshold at 0.5)
-                binary_mask = mask > 0.5
-                final_segmentation[binary_mask] = class_id
-
-        if self.verbose:
-            print(f"[MHQR Pipeline] Complete! Final segmentation: {final_segmentation.shape}")
-            unique_classes = np.unique(final_segmentation)
-            print(f"  Detected classes: {len(unique_classes)} / {num_classes}")
-
-        return final_segmentation
+        return final_seg
 
     def segment(
         self,
