@@ -1423,7 +1423,8 @@ class SCLIPSegmentor:
             print(f"  Dense prediction: {H}×{W}, {num_classes} classes")
 
         # Step 2: Dynamic query generation (THE ONLY MHQR INNOVATION)
-        if self.mhqr_query_generator is not None:
+        # TEMP: Disable to test if dynamic queries are the problem
+        if False and self.mhqr_query_generator is not None:
             query_result = self.mhqr_query_generator.generate_queries(
                 confidence_maps=probs.permute(1, 2, 0),  # (H, W, K)
                 class_names=class_names,
