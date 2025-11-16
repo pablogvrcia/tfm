@@ -1485,24 +1485,29 @@ class SCLIPSegmentor:
                 print(f"    [DEBUG] Received {len(mask_candidates)} MaskCandidates from SAM (expected {len(points_list) * 3})")
 
             # segment_with_points returns 3 MaskCandidate objects per point
-            # We need to pick the best mask for each query point
+            # BUT they're sorted by IoU, not in point order!
+            # We need to group them by point_coords and pick the best per point
             results = []
-            masks_per_point = 3  # multimask_output=True gives 3 masks
 
-            for i in range(len(points_list)):
-                # Get the 3 masks for this point
-                start_idx = i * masks_per_point
-                end_idx = start_idx + masks_per_point
-                point_masks = mask_candidates[start_idx:end_idx]
+            for i, (x, y) in enumerate(points_list):
+                # Find all masks for this specific point by matching coordinates
+                # Each mask has point_coords attribute: np.array([[x, y]])
+                point_masks = []
+                for mask_cand in mask_candidates:
+                    if mask_cand.point_coords is not None:
+                        px, py = mask_cand.point_coords[0]
+                        if abs(px - x) < 1 and abs(py - y) < 1:  # Allow small floating point diff
+                            point_masks.append(mask_cand)
 
                 if len(point_masks) == 0:
+                    if self.verbose and i < 3:
+                        print(f"      [WARNING] No masks found for point {i} at ({x}, {y})")
                     continue
 
-                # Pick mask with highest predicted_iou
+                # Pick mask with highest predicted_iou for this point
                 best_mask = max(point_masks, key=lambda m: m.predicted_iou)
 
-                # Get query location for confidence lookup
-                x, y = points_list[i]
+                # Get class assignment from query generator
                 class_idx = point_classes[i]
 
                 results.append({
@@ -1511,6 +1516,9 @@ class SCLIPSegmentor:
                     'score': float(best_mask.predicted_iou),
                     'confidence': float(probs[class_idx, y, x].cpu())
                 })
+
+            if self.verbose:
+                print(f"    [DEBUG] Matched {len(results)} points to their best masks (expected {len(points_list)})")
 
         except Exception as e:
             if self.verbose:
