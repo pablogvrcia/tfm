@@ -1461,44 +1461,54 @@ class SCLIPSegmentor:
                 print("  No SAM, returning dense prediction")
             return dense_pred
 
-        results = []
-        for i in range(len(point_coords)):
-            x, y = int(point_coords[i][0]), int(point_coords[i][1])
+        # Use the proper segment_with_points API (returns MaskCandidate objects)
+        try:
+            points_list = [(int(x), int(y)) for x, y in point_coords]
+            labels_list = [1] * len(points_list)  # All foreground points
 
-            # Get SAM masks (3 per point)
-            try:
-                point_np = np.array([[x, y]])
-                label_np = np.array([1])
+            if self.verbose:
+                print(f"  Prompting SAM with {len(points_list)} points...")
 
-                # Set image if needed
-                if not hasattr(self.mhqr_sam_generator.predictor, '_is_image_set') or not self.mhqr_sam_generator.predictor._is_image_set:
-                    self.mhqr_sam_generator.predictor.set_image(image)
+            # Get all masks at once (batch processing, more efficient)
+            mask_candidates = self.mhqr_sam_generator.segment_with_points(
+                image=image,
+                points=points_list,
+                point_labels=labels_list
+            )
 
-                masks, scores, _ = self.mhqr_sam_generator.predictor.predict(
-                    point_coords=point_np,
-                    point_labels=label_np,
-                    multimask_output=True
-                )
+            # segment_with_points returns 3 MaskCandidate objects per point
+            # We need to pick the best mask for each query point
+            results = []
+            masks_per_point = 3  # multimask_output=True gives 3 masks
 
-                # Pick best mask
-                best_idx = np.argmax(scores)
-                mask = masks[best_idx]
-                score = scores[best_idx]
+            for i in range(len(points_list)):
+                # Get the 3 masks for this point
+                start_idx = i * masks_per_point
+                end_idx = start_idx + masks_per_point
+                point_masks = mask_candidates[start_idx:end_idx]
 
-                # CRITICAL: Assign class from CLIP prediction at query location
+                if len(point_masks) == 0:
+                    continue
+
+                # Pick mask with highest predicted_iou
+                best_mask = max(point_masks, key=lambda m: m.predicted_iou)
+
+                # Get query location for confidence lookup
+                x, y = points_list[i]
                 class_idx = point_classes[i]
 
                 results.append({
-                    'mask': mask,
+                    'mask': best_mask.mask.astype(bool),
                     'class_idx': int(class_idx),
-                    'score': float(score),
+                    'score': float(best_mask.predicted_iou),
                     'confidence': float(probs[class_idx, y, x].cpu())
                 })
 
-            except Exception as e:
-                if self.verbose:
-                    print(f"  WARNING: Query {i} failed: {e}")
-                continue
+        except Exception as e:
+            if self.verbose:
+                print(f"  WARNING: SAM point prompting failed: {e}")
+                print("  Falling back to dense prediction")
+            return dense_pred
 
         if len(results) == 0:
             if self.verbose:
