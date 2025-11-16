@@ -3,110 +3,100 @@
 
 \section{Motivation}
 
-Traditional semantic segmentation models are constrained by closed vocabularies, recognizing only objects from predefined categories. This limitation hinders real-world deployment where novel concepts frequently arise. Open-vocabulary semantic segmentation addresses this by leveraging vision-language models like CLIP \cite{radford2021learning}, enabling segmentation of arbitrary concepts specified through natural language.
+The field of computer vision has witnessed remarkable progress in semantic segmentation, enabling machines to understand and interpret visual scenes by assigning semantic labels to individual pixels. However, traditional semantic segmentation models are often constrained by a closed vocabulary, meaning they can only recognize objects or concepts explicitly present in their training data. This limitation hinders their applicability in real-world scenarios where novel objects and concepts are frequently encountered. Imagine a self-driving car trained to recognize "car," "pedestrian," and "traffic light." It might fail to identify a "scooter" or a "delivery robot," potentially leading to hazardous situations.
 
-While CLIP demonstrates impressive zero-shot classification capabilities, adapting it for dense pixel-wise prediction poses significant challenges. CLIP's Vision Transformer backbone, trained for image-level understanding, exhibits weak spatial localization when applied directly to segmentation. Recent work has explored dense prediction from CLIP features \cite{zhou2022extract, sclip2024}, yet performance gaps persist, particularly for challenging classes like humans and complex scenes with fine-grained boundaries.
+This inherent limitation of closed-vocabulary models has fueled the exploration of open-vocabulary semantic segmentation. Open-vocabulary approaches aim to bridge the gap between visual perception and human language by leveraging the power of natural language processing and generative AI. By integrating language models like CLIP \cite{radford2021learning}, which learn to represent both text and images in a shared embedding space, these systems can interpret natural language descriptions and segment objects or concepts not seen during training. For instance, the system could understand the description "a person walking a dog" and accurately segment both the person and the dog, even if it has never encountered this specific combination before.
+
+Furthermore, the integration of generative AI models, such as Stable Diffusion \cite{rombach2022high}, allows for realistic modification of images based on the segmented objects. This capability opens up exciting possibilities in various applications. In image editing, users could describe desired changes ("make the sky blue" or "add a hat to the person"), and the system would automatically modify the image accordingly. In content creation, artists and designers could generate novel scenes by combining segmented objects from different images or by generating new objects based on textual descriptions. The potential applications are vast and span across diverse domains, including human-computer interaction, augmented reality, and robotics.
+
+\begin{figure}[h]
+\centering
+\fbox{\parbox{0.9\textwidth}{\centering
+\vspace{1cm}
+\textbf{[PLACEHOLDER: System Overview Concept]}\\[0.5cm]
+\textit{This figure should illustrate the complete capability of the proposed system:}\\[0.3cm]
+\begin{tabular}{l}
+\textbf{Show 3 example scenarios in a vertical layout:}\\[0.2cm]
+\textbf{Scenario 1 - Zero-Shot Segmentation:}\\
+\quad Input image (living room) + Text: "vintage lamp on side table"\\
+\quad → System segments lamp (never seen during training)\\
+\quad → Highlighted mask overlay showing successful segmentation\\[0.2cm]
+\textbf{Scenario 2 - Object Removal:}\\
+\quad Same input + Text: "remove the lamp"\\
+\quad → System segments lamp → Inpaints background naturally\\
+\quad → Output: Lamp removed, table surface filled realistically\\[0.2cm]
+\textbf{Scenario 3 - Object Replacement:}\\
+\quad Same input + Text: "replace lamp with modern floor lamp"\\
+\quad → System segments old lamp → Generates new lamp via Stable Diffusion\\
+\quad → Output: Modern lamp in place, matching lighting and style\\[0.3cm]
+\end{tabular}
+\textit{Use arrows between steps and annotations highlighting key capabilities:}\\
+\textit{- "Open-Vocabulary" - "Zero-Shot" - "Natural Language" - "Realistic Generation"}\\
+\textit{Include small icons representing SAM 2, CLIP, and Stable Diffusion at relevant stages.}
+\vspace{1cm}
+}}
+\caption{Overview of the proposed open-vocabulary semantic segmentation and generative editing system. The system combines vision-language understanding (CLIP), precise segmentation (SAM 2), and realistic generation (Stable Diffusion) to enable flexible, language-driven image manipulation.}
+\label{fig:system_overview}
+\end{figure}
 
 \section{Problem Statement}
 
-This thesis addresses three fundamental limitations of CLIP-based open-vocabulary segmentation:
-
-\begin{enumerate}
-\item \textbf{Weak spatial localization:} CLIP's Vision Transformer produces coarse 14×14 feature grids for 224×224 images, limiting pixel-level precision. Existing methods suffer from blurry boundaries and poor small-object detection.
-
-\item \textbf{Poor human/person segmentation:} CLIP's global feature aggregation struggles with articulated poses, clothing variations, and body part delineation, resulting in fragmented masks for the person class—critical for real-world applications.
-
-\item \textbf{Computational inefficiency:} Dense prediction methods require extensive template ensembling (80+ prompts) and high-resolution processing, making real-time deployment infeasible on consumer hardware.
-\end{enumerate}
-
-To address these challenges, we systematically integrate recent advances from computer vision literature into a unified training-free framework, achieving substantial improvements over baseline SCLIP \cite{sclip2024} performance.
-
-
-\section{Contributions}
-
-This thesis makes the following contributions by systematically integrating state-of-the-art methods into a unified SCLIP-based framework:
-
-\subsection{Phase 1: Spatial Enhancement and Boundary Refinement}
-
-We integrate three complementary techniques to address CLIP's weak spatial localization:
+This thesis tackles the challenge of developing an open-vocabulary semantic segmentation system that seamlessly integrates with a generative AI model. The system aims to overcome the limitations of traditional closed-vocabulary methods by achieving the following objectives:
 
 \begin{itemize}
-\item \textbf{LoftUp feature upsampling:} Adapting recent work from ICCV 2025, we upsample CLIP features from 14×14 to 28×28 while preserving semantic content, achieving +2-4\% mIoU improvement.
-
-\item \textbf{ResCLIP residual attention:} We implement Residual Cross-correlation Self-Attention (RCS) and Semantic Feedback Refinement (SFR) from CVPR 2025, enhancing spatial coherence through multi-scale feature aggregation (+8-13\% mIoU).
-
-\item \textbf{DenseCRF boundary refinement:} Classical Conditional Random Field post-processing ensures appearance consistency and smooth object boundaries (+1-2\% mIoU, +3-5\% boundary F1).
+\item \textbf{Segmenting unseen objects and concepts:} The system should accurately segment objects and concepts that were not explicitly present in the training data, enabling it to generalize to novel scenarios and handle a wider range of visual inputs. This objective is crucial for real-world applications where encountering unseen objects is inevitable. For instance, a robot navigating a cluttered environment should be able to segment and identify various objects, even if it has not been explicitly trained on them.
+\item \textbf{Interpreting natural language descriptions:} The system should be able to understand and interpret natural language descriptions, allowing users to specify the objects or concepts they want to segment using human-readable language. This objective enhances the user-friendliness and flexibility of the system. Instead of relying on predefined categories or labels, users can express their segmentation intentions in natural language, making the system more intuitive and accessible.
+\item \textbf{Realistically modifying images:} The system should seamlessly integrate with a generative AI model to modify images based on the segmented objects. This capability enables realistic inpainting \cite{yu2018generative}, object manipulation, and other creative applications. By combining the segmentation output with the generative power of AI models, the system can realistically fill in missing parts of an image, replace objects with different ones, or even generate entirely new objects based on textual descriptions.
 \end{itemize}
 
-\textbf{Expected Phase 1 improvement:} +11-19\% mIoU over baseline SCLIP (22.77\% baseline).
 
-\subsection{Phase 2A: Training-Free Human Parsing Enhancement}
+\section{Contribution}
 
-To address poor person-class segmentation, we integrate recent training-free methods:
+This thesis makes the following key contributions:
 
 \begin{itemize}
-\item \textbf{CLIPtrase self-correlation recalibration:} Following ECCV 2024 work, we recalibrate CLIP's self-attention through correlation matrix enhancement, improving local feature awareness (+5-10\% mIoU for person class).
+\item \textbf{Novel SAM2-based mask refinement layer for dense prediction:} We build upon SCLIP's \cite{sclip2024} Cross-layer Self-Attention (CSA) mechanism and introduce a novel SAM2-based refinement layer that intelligently combines dense semantic predictions with high-quality boundaries. Our refinement uses prompted segmentation guided by SCLIP's confidence scores and majority voting to achieve superior results in fully annotation-free settings.
 
-\item \textbf{CLIP-RC regional clue extraction:} We implement regional feature extraction from CVPR 2024 to combat CLIP's global feature dominance, preserving fine-grained body part details (+8-12\% mIoU for person class).
+\item \textbf{Prompted SAM2 segmentation guided by semantic confidence:} We develop a novel prompting strategy that extracts representative points from SCLIP's high-confidence regions to guide SAM2's mask generation. This semantic-aware prompting achieves 2× speedup over automatic mask generation while maintaining quality, demonstrating efficient integration of vision-language understanding with segmentation.
+
+\item \textbf{Comprehensive dense prediction system:} We implement the complete SCLIP dense prediction pipeline including Cross-layer Self-Attention feature extraction, sliding window inference for high-resolution images, and text feature caching for 41\% inference speedup, demonstrating practical deployment optimizations for real-world applications.
+
+\item \textbf{Integration with generative AI for text-driven editing:} The dense segmentation system is seamlessly integrated with Stable Diffusion v2 \cite{rombach2022high}, enabling realistic image modification based on natural language descriptions. This integration demonstrates practical applications including inpainting, object replacement, and style transfer.
+
+\item \textbf{Extension to video segmentation:} We demonstrate that our CLIP-guided prompting approach naturally extends to video by leveraging SAM2's temporal tracking capabilities. CLIP analysis on the first frame combined with SAM2's memory-based propagation enables efficient video segmentation with person-specific tracking, demonstrated on sports footage (MotoGP, NBA).
+
+\item \textbf{Rigorous evaluation on PASCAL VOC 2012:} The system's performance is thoroughly evaluated on PASCAL VOC 2012, achieving 59.78\% mIoU in the open-vocabulary setting. The evaluation includes comprehensive metrics (mIoU, pixel accuracy, F1, precision, recall) and per-class analysis across 21 object categories.
+
+\item \textbf{Comparative analysis with baseline methods:} We provide comprehensive experimental validation comparing our CLIP-guided prompting approach against pure dense prediction methods (SCLIP, MaskCLIP, ITACLIP), demonstrating the effectiveness of intelligent semantic guidance for efficient segmentation.
+
+\item \textbf{Insights into challenges and opportunities:} The thesis provides valuable insights into integrating dense vision-language models with segmentation refinement, including analysis of when SAM2 refinement provides maximum benefit, the role of semantic confidence in prompting strategies, and practical considerations for deployment.
 \end{itemize}
-
-\textbf{Expected Phase 2A improvement:} +7-12\% overall mIoU, +13-22\% for person class specifically.
-
-\subsection{Phase 2B: Prompt Engineering and Template Optimization}
-
-We replace generic ImageNet classification templates with task-specific dense prediction prompts:
-
-\begin{itemize}
-\item \textbf{Top-7 template strategy:} Curated from PixelCLIP research, achieving +2-3\% mIoU with 11.4× speedup over 80-template ensembles.
-
-\item \textbf{Adaptive template selection:} Class-type aware prompts (stuff vs things) tailored to object characteristics (+3-5\% mIoU).
-
-\item \textbf{Material-aware templates:} Specialized handling for compound classes (wall-brick, floor-marble), improving texture-based segmentation.
-\end{itemize}
-
-\textbf{Expected Phase 2B improvement:} +3-5\% mIoU with 3-11× computational speedup.
-
-\subsection{Phase 2C: Confidence Sharpening (In Progress)}
-
-To address flat prediction distributions where multiple classes have similar confidence:
-
-\begin{itemize}
-\item \textbf{Hierarchical class grouping:} Two-stage prediction reduces classification complexity (stuff vs things, then specific classes).
-
-\item \textbf{Confidence calibration:} Sharpen predictions for uncertain pixels using temperature scaling and entropy-based filtering.
-\end{itemize}
-
-\textbf{Expected Phase 2C improvement:} +5-8\% mIoU.
-
-\subsection{System-Level Contributions}
-
-\begin{itemize}
-\item \textbf{Comprehensive benchmark framework:} Rigorous evaluation infrastructure for COCO-Stuff-164k and PASCAL VOC 2012 with extensive ablation studies.
-
-\item \textbf{Modular implementation:} Each phase can be enabled/disabled independently, facilitating systematic performance analysis.
-
-\item \textbf{Integration with generative AI:} Optional Stable Diffusion v2 integration for text-driven image editing applications.
-\end{itemize}
-
-\textbf{Expected cumulative improvement:} +17-32\% mIoU over baseline SCLIP, targeting 40-48\% on COCO-Stuff-164k.
 
 \section{Thesis Structure}
 
-\begin{itemize}
-\item \textbf{Chapter 2:} Reviews related work in open-vocabulary segmentation, CLIP-based dense prediction (MaskCLIP, SCLIP, CLIPSeg), and relevant enhancement techniques. Detailed transformer/attention mechanisms are moved to the annex for conciseness.
+The remainder of this thesis is structured as follows:
 
-\item \textbf{Chapter 3:} Presents our methodology, structured around the four improvement phases:
 \begin{itemize}
-\item Baseline SCLIP architecture and Cross-layer Self-Attention
-\item Phase 1 spatial enhancements (LoftUp, ResCLIP, DenseCRF)
-\item Phase 2A human parsing improvements (CLIPtrase, CLIP-RC)
-\item Phase 2B prompt engineering strategies
-\item Phase 2C confidence sharpening (in progress)
+\item \textbf{Chapter 2 (Background and Related Work):} Provides a comprehensive review of the relevant background literature, laying the foundation for the research presented in this thesis. This chapter covers the following key areas:
+\begin{itemize}
+\item \textbf{Semantic Segmentation:} Explores the fundamentals of semantic segmentation, including different architectures (e.g., encoder-decoder, fully convolutional networks), commonly used datasets (e.g., COCO, PASCAL VOC), and traditional closed-vocabulary approaches. It also discusses the limitations of existing methods in handling open vocabulary and natural language input.
+\item \textbf{Language Models for Vision:} Provides an in-depth analysis of CLIP \cite{radford2021learning} and its ability to connect text and images in a shared embedding space. It explores alternative language models, such as ALIGN, and compares their strengths and weaknesses in the context of open-vocabulary semantic segmentation.
+\item \textbf{Mask Generation Models:} Discusses SAM \cite{kirillov2023segment} and SAM 2 \cite{ravi2024sam2} and their zero-shot segmentation capabilities. It analyzes other relevant mask generation models, such as Mask2Former \cite{cheng2022mask2former}, comparing their architectures and performance characteristics.
+\item \textbf{Generative AI Models for Inpainting:} Reviews inpainting techniques and discusses suitable generative models, such as Stable Diffusion \cite{rombach2022high} and LaMa. It explains how these models can be integrated with a segmentation system to achieve realistic image modification.
 \end{itemize}
 
-\item \textbf{Chapter 4:} Reports experimental results with ablation studies for each phase, benchmark performance on COCO-Stuff and PASCAL VOC 2012, and analysis of per-class improvements (particularly person class).
+\item \textbf{Chapter 3 (Methodology):} Details the methodology employed in this thesis, providing a comprehensive description of the proposed open-vocabulary semantic segmentation system. This chapter covers the following aspects:
+\begin{itemize}
+\item \textbf{System Architecture:} Presents a detailed overview of the system's architecture, including the integration of CLIP for language processing, SAM2 for mask generation, and a generative AI model for inpainting. It explains how these components interact to achieve open-vocabulary segmentation and image modification.
+\item \textbf{Implementation Details:} Provides specific implementation details, such as the choice of CLIP and SAM2 variants, hyperparameter settings for each component, and the software libraries and hardware used for development and evaluation.
+\end{itemize}
 
-\item \textbf{Chapter 5:} Concludes with contributions summary, limitations, and future work directions.
+\item \textbf{Chapter 4 (Experiments and Evaluation):} Presents the experimental setup and results, demonstrating the effectiveness of the proposed system. This chapter includes:
+\begin{itemize}
+\item \textbf{Dataset Selection:} Describes the datasets used for evaluating the system, justifying their selection based on their suitability for open-vocabulary and zero-shot learning. It considers including specialized datasets and potentially creating a custom dataset for specific scenarios.
+\item \textbf{Evaluation Metrics:} Defines the metrics used to evaluate both the segmentation and generation aspects of the system. It explains how these metrics measure accuracy, quality, and efficiency, ensuring a comprehensive evaluation of the system's performance.
+\item \textbf{Results and Analysis:} Presents the experimental results, including quantitative and qualitative analysis. It compares the system's performance to existing methods, discussing its strengths and limitations in detail.
+\end{itemize}
 
-\item \textbf{Annex:} Contains detailed technical background on Vision Transformers, self-attention mechanisms, and implementation details moved from the main chapters for improved readability.
+\item \textbf{Chapter 5 (Conclusions and Future Work):} Concludes the thesis by summarizing the key contributions, discussing the limitations of the current system, and outlining potential future research directions. This chapter provides a concluding perspective on the research presented in the thesis and suggests avenues for further exploration and development in the field of open-vocabulary semantic segmentation.
 \end{itemize}
