@@ -1517,37 +1517,37 @@ class SCLIPSegmentor:
         else:
             refined_masks_clip = masks_clip_res
 
-        # Step 6: Upsample refined masks back to image resolution
-        refined_masks = F.interpolate(
-            refined_masks_clip.unsqueeze(1),  # (N, 1, H_clip, W_clip)
-            size=(H, W),
-            mode='bilinear',
-            align_corners=False
-        ).squeeze(1)  # (N, H, W)
-
-        if self.verbose:
-            print(f"  Upsampled masks to image resolution: {refined_masks.shape}")
-
-        # Step 7: Semantic-guided mask merging (if enabled)
+        # Step 6: Semantic-guided mask merging at CLIP resolution (if enabled)
         if self.mhqr_mask_merger is not None and self.mhqr_semantic_merging:
             merge_result = self.mhqr_mask_merger.merge_masks_semantic(
-                masks=refined_masks,
+                masks=refined_masks_clip,  # At CLIP resolution (N, 14, 14)
                 class_ids=point_classes,
                 class_embeddings=text_features,
-                clip_features=clip_features,
+                clip_features=clip_features,  # At CLIP resolution (14, 14, D)
                 scores=scores
             )
 
-            merged_masks = merge_result['merged_masks']
+            merged_masks_clip = merge_result['merged_masks']
             merged_class_ids = merge_result['merged_class_ids']
             merged_scores = merge_result['merged_scores']
 
             if self.verbose:
-                print(f"  Semantic merging: {len(refined_masks)} → {len(merged_masks)} masks")
+                print(f"  Semantic merging at CLIP res: {len(refined_masks_clip)} → {len(merged_masks_clip)} masks")
         else:
-            merged_masks = refined_masks
+            merged_masks_clip = refined_masks_clip
             merged_class_ids = point_classes
             merged_scores = scores
+
+        # Step 7: Upsample merged masks to image resolution
+        merged_masks = F.interpolate(
+            merged_masks_clip.unsqueeze(1),  # (M, 1, H_clip, W_clip)
+            size=(H, W),
+            mode='bilinear',
+            align_corners=False
+        ).squeeze(1)  # (M, H, W)
+
+        if self.verbose:
+            print(f"  Upsampled masks to image resolution: {merged_masks.shape}")
 
         # Step 8: Convert masks to segmentation map
         final_segmentation = np.zeros((H, W), dtype=np.int32)
