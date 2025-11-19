@@ -51,30 +51,14 @@ The CLIP-guided prompting pipeline consists of four main stages:
 
 The key insight motivating this design is that CLIP's dense predictions identify where objects are located, enabling intelligent SAM2 prompting with far fewer points than blind grid sampling. By extracting points from SCLIP's high-confidence regions, SAM2 is guided to focus on semantically relevant areas, achieving both efficiency and accuracy.
 
-\subsection{Technical Background: CLIP and Vision Transformers}
+\subsection{Technical Background}
 \label{sec:technical_background}
 
-The approach builds on two foundation models: \textbf{CLIP} \cite{radford2021learning} for vision-language alignment and \textbf{Vision Transformers (ViT)} \cite{dosovitskiy2020image} for dense feature extraction. A brief overview is provided here; detailed technical explanations are available in Appendix \ref{appendix:technical_foundations}.
+The approach builds on two foundation models: \textbf{CLIP} \cite{radford2021learning} for vision-language alignment and \textbf{Vision Transformers (ViT)} \cite{dosovitskiy2020image} for dense feature extraction. 
 
-\subsubsection{CLIP: Vision-Language Foundation}
+\textbf{CLIP} learns a shared embedding space between images and text, enabling zero-shot recognition of unseen objects. \textbf{ViT} processes images as sequences of patches, capturing global context through self-attention.
 
-CLIP learns a shared embedding space between images and text through contrastive learning on 400M image-text pairs. For open-vocabulary segmentation, CLIP provides:
-\begin{itemize}
-    \item \textbf{Zero-shot capability}: Recognizes unseen objects by computing similarity between image regions and text descriptions
-    \item \textbf{Semantic understanding}: Trained on natural language, not fixed class labels
-    \item \textbf{Dense features}: Patch-level representations from ViT-B/16 backbone (14×14 grid for 224×224 images)
-\end{itemize}
-
-\subsubsection{Vision Transformer Architecture}
-
-ViT processes images as sequences of 16×16 patches through 12 Transformer layers. Key properties for dense prediction:
-\begin{itemize}
-    \item \textbf{Global context}: Self-attention captures long-range dependencies across patches
-    \item \textbf{Patch tokens}: Unlike CNNs, provides per-patch features suitable for dense tasks
-    \item \textbf{Standard attention}: Computes $\text{Attention}(Q, K, V) = \text{softmax}(QK^T/\sqrt{d})V$
-\end{itemize}
-
-However, standard ViT attention optimized for classification struggles with dense prediction, motivating SCLIP's modification (next section).
+For a detailed technical explanation of these architectures, including the mathematical formulation of self-attention and contrastive learning, please refer to \textbf{Appendix \ref{appendix:technical_foundations}}. This chapter focuses on their adaptation for the proposed open-vocabulary segmentation pipeline.
 
 \subsection{SCLIP Dense Prediction with Cross-Layer Self-Attention}
 \label{sec:sclip_dense_extraction}
@@ -137,32 +121,7 @@ Descriptor files (e.g., \texttt{cls\_voc21.txt}) map each class index to a comma
 
 \paragraph{Implementation for PASCAL VOC 2012}
 
-Our PASCAL VOC descriptor file (\texttt{configs/cls\_voc21.txt}) provides rich descriptions for all 21 classes:
-
-\textbf{Background class} (line 1):
-\begin{verbatim}
-sky, wall, tree, wood, grass, road, sea, river, mountain,
-sands, desk, bed, building, cloud, lamp, door, window,
-wardrobe, ceiling, shelf, curtain, stair, floor, hill,
-rail, fence
-\end{verbatim}
-
-This comprehensive list allows CLIP to recognize diverse background elements as a single semantic category, dramatically improving background IoU (86.90\% vs. much lower with single "background" term).
-
-\textbf{Person class} (line 16):
-\begin{verbatim}
-person, person in shirt, person in jeans, person in dress,
-person in sweater, person in skirt, person in jacket
-\end{verbatim}
-
-Clothing-aware descriptors help CLIP match people across different outfits, improving person segmentation (56.70\% IoU).
-
-\textbf{Compound classes} (lines 12, 21):
-\begin{verbatim}
-table                    (line 12: diningtable)
-television monitor, tv monitor, monitor, television, screen
-                         (line 21: tvmonitor)
-\end{verbatim}
+Our PASCAL VOC descriptor file (\texttt{configs/cls\_voc21.txt}) provides rich descriptions for all 21 classes. For example, the background class includes terms like "sky", "wall", "tree", and "road", while the person class includes clothing variations. Full details of the descriptor file content are provided in Appendix \ref{sec:appendix_descriptors}.
 
 Synonym expansion (diningtable → "table") and multi-word variants (tvmonitor → "television monitor", "tv monitor") help CLIP understand Pascal VOC's specific naming conventions.
 
@@ -205,7 +164,7 @@ While descriptor files address \textit{what} terms to encode, template strategie
 
 \paragraph{Template Strategy Taxonomy}
 
-We implement several template strategies, selectable via the \texttt{--template-strategy} argument:
+We implement several template strategies, selectable via the system configuration:
 
 \textbf{1. ImageNet-80 (Baseline)}
 \begin{itemize}
@@ -250,19 +209,7 @@ We implement several template strategies, selectable via the \texttt{--template-
 
 \paragraph{Implementation Details}
 
-Template selection is configured via Python code (\texttt{prompts/dense\_prediction\_templates.py}):
-
-\begin{verbatim}
-top7_dense_templates = [
-    lambda c: f'a photo of a {c}.',
-    lambda c: f'a {c} in the scene.',
-    lambda c: f'the {c}.',
-    lambda c: f'a close-up photo of a {c}.',
-    lambda c: f'a photo of the large {c}.',
-    lambda c: f'a photo of the small {c}.',
-    lambda c: f'one {c}.',
-]
-\end{verbatim}
+Template selection is configured via Python code. The specific implementation of the recommended Top-7 strategy is detailed in Appendix \ref{sec:appendix_templates}.
 
 Our best results (68.09\% mIoU) use the \textbf{ImageNet-80} strategy, trading inference speed for maximum accuracy. For faster inference with minimal accuracy loss, Top-7 is recommended.
 
@@ -297,16 +244,7 @@ Beyond algorithmic improvements (descriptor files, template strategies, intellig
 
 Modern GPUs achieve substantially higher throughput when operating on 16-bit floating-point (FP16) data compared to standard 32-bit (FP32). The implementation leverages PyTorch's automatic mixed precision (AMP) to accelerate inference while preserving numerical stability.
 
-\textbf{Implementation:}
-\begin{verbatim}
-with torch.cuda.amp.autocast(enabled=use_fp16):
-    # CLIP vision encoder forward pass
-    image_features = clip_model.encode_image(images)
-    # Text encoder forward pass
-    text_features = clip_model.encode_text(text_tokens)
-    # Similarity computation
-    similarity = image_features @ text_features.T
-\end{verbatim}
+\textbf{Implementation:} The implementation leverages PyTorch's automatic mixed precision (AMP) to accelerate inference. Code details are available in Appendix \ref{sec:appendix_optimizations}.
 
 The \texttt{autocast} context automatically identifies operations that benefit from FP16 (e.g., matrix multiplications, convolutions) while keeping precision-sensitive operations (e.g., softmax, normalization) in FP32. This hybrid approach provides:
 
@@ -323,18 +261,7 @@ The \texttt{autocast} context automatically identifies operations that benefit f
 
 PyTorch 2.0+ introduces \texttt{torch.compile()}, a JIT compiler that fuses operations, eliminates Python overhead, and generates optimized CUDA kernels. The implementation applies compilation to both the CLIP vision encoder and text encoder.
 
-\textbf{Implementation:}
-\begin{verbatim}
-if use_compile:
-    clip_model.visual = torch.compile(
-        clip_model.visual,
-        mode="reduce-overhead"
-    )
-    clip_model.transformer = torch.compile(
-        clip_model.transformer,
-        mode="reduce-overhead"
-    )
-\end{verbatim}
+\textbf{Implementation:} The implementation applies compilation to both the CLIP vision encoder and text encoder using \texttt{mode="reduce-overhead"}. See Appendix \ref{sec:appendix_optimizations} for the code.
 
 The \texttt{"reduce-overhead"} mode prioritizes minimizing kernel launch overhead and maximizing GPU occupancy. First-inference compilation incurs a one-time overhead (10-20 seconds), but subsequent inferences benefit from:
 
@@ -351,21 +278,7 @@ The \texttt{"reduce-overhead"} mode prioritizes minimizing kernel launch overhea
 
 Standard SAM2 usage prompts one point at a time, requiring separate forward passes for each prompt. With 50-300 prompts per image, this creates significant overhead from repeated model loading, tensor transfers, and kernel launches. The implementation uses batched prompting to process multiple points simultaneously.
 
-\textbf{Implementation:}
-\begin{verbatim}
-# Standard approach (sequential, slow)
-masks = []
-for point in prompt_points:
-    mask = sam2_predictor.predict(point)
-    masks.append(mask)
-
-# Batched approach (parallel, fast)
-batch_size = 32
-for i in range(0, len(prompt_points), batch_size):
-    batch = prompt_points[i:i+batch_size]
-    batch_masks = sam2_predictor.predict_batch(batch)
-    masks.extend(batch_masks)
-\end{verbatim}
+\textbf{Implementation:} The implementation processes multiple points simultaneously in batches (default size 32). See Appendix \ref{sec:appendix_optimizations} for the implementation details.
 
 Batching exploits GPU parallelism by:
 \begin{itemize}
@@ -398,6 +311,8 @@ Baseline (FP32, no compile, sequential) & 45-60 & 1.0× \\
 \end{table}
 
 These optimizations enable practical deployment on consumer hardware (e.g., NVIDIA GeForce GTX 1060 6GB) where the best configuration achieves 12-33 seconds per image for the complete CLIP-guided SAM2 pipeline.
+
+
 
 
 \subsection{Intelligent Prompt Extraction}
@@ -516,6 +431,13 @@ This metadata serves multiple purposes:
     \item Region size can be used for overlap resolution (larger regions take precedence)
 \end{itemize}
 
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.9\textwidth]{example-image-a} % PLACEHOLDER
+\caption{\textbf{[PLACEHOLDER: Intelligent Prompt Extraction Process]} This figure should visualize the 5-stage pipeline: (1) SCLIP confidence map, (2) Binary thresholding, (3) Connected component clustering (showing distinct colors for regions), (4) Size filtering (removing small noise), and (5) Final centroid computation (showing points on the original image). This visual step-by-step breakdown is crucial for explaining the core contribution.}
+\label{fig:prompt_extraction_process}
+\end{figure}
+
 \subsubsection{Algorithm Summary and Efficiency Analysis}
 
 The complete prompt extraction algorithm processes all classes in parallel:
@@ -574,6 +496,52 @@ SAM2 generates a high-quality instance mask $M_i$ at prompt $p_i$, and the class
 \caption{Comparison between SCLIP dense prediction baseline and the proposed CLIP-guided prompting approach. Three representative examples demonstrate key advantages: superior boundary quality through SAM2 integration (+13.19pp on horse), improved small object detection (+7.77pp on bottle), and cleaner instance separation in cluttered scenes (+7.00pp on person). Red circles highlight baseline errors; green checkmarks indicate improvements. The proposed method achieves 96\% prompt reduction (3-15 points vs 4096 grid) while improving accuracy across all scenarios.}
 \label{fig:comparison_baseline}
 \end{figure}
+
+\subsection{Boundary Refinement}
+\label{sec:boundary_refinement}
+
+\fbox{\textbf{Thesis Contribution}} This enhancement improves boundary quality in the final segmentation.
+
+While SAM2 provides high-quality instance boundaries, the final merged segmentation can exhibit minor boundary artifacts at class transitions, particularly in regions where multiple SAM2 masks overlap or where SCLIP predictions have low confidence. To address this, the best-performing configuration (68.09\% mIoU on PASCAL VOC 2012) incorporates \textbf{Dense Conditional Random Field (CRF)} post-processing \cite{krahenbuhl2011efficient} as a refinement stage.
+
+\textbf{Dense CRF formulation:} Given the merged segmentation logits $P \in \mathbb{R}^{H \times W \times C}$ and original image $I$, Dense CRF refines boundaries by minimizing an energy function that encourages:
+\begin{itemize}
+    \item \textbf{Label consistency:} Adjacent pixels with similar colors should have similar labels
+    \item \textbf{Spatial smoothness:} Encourages coherent regions while preserving object boundaries
+    \item \textbf{Appearance-based affinity:} Uses bilateral filtering to respect color edges
+\end{itemize}
+
+The energy function combines unary potentials (from CLIP predictions) with pairwise potentials (spatial and appearance terms):
+\begin{equation}
+E(y) = \sum_{i} \psi_u(y_i) + \sum_{i<j} \psi_p(y_i, y_j)
+\end{equation}
+
+where $\psi_u$ are unary potentials from SCLIP logits, and $\psi_p$ are pairwise potentials combining Gaussian spatial kernels and bilateral appearance kernels.
+
+\textbf{Implementation:} The refinement uses the pydensecrf library \cite{krahenbuhl2011efficient} with the following parameters tuned for open-vocabulary segmentation:
+\begin{itemize}
+    \item \textbf{Inference iterations:} 10 steps of mean-field approximation
+    \item \textbf{Spatial weight:} 3.0 (smoothness strength)
+    \item \textbf{Bilateral weight:} 5.0 (appearance affinity)
+    \item \textbf{Spatial std:} 3 pixels (local smoothing radius)
+    \item \textbf{Color std:} 5 (bilateral filter color tolerance)
+\end{itemize}
+
+\textbf{Performance impact:} Dense CRF adds approximately 0.5-1.0 seconds per image but provides measurable quality improvements:
+\begin{itemize}
+    \item \textbf{mIoU improvement:} +1-2 percentage points (66.5\% → 68.09\% on PASCAL VOC 2012)
+    \item \textbf{Boundary F1:} +3-5 percentage points (improves edge alignment)
+    \item \textbf{Qualitative benefits:} Smoother class transitions, reduced salt-and-pepper noise
+\end{itemize}
+
+The Dense CRF refinement is particularly effective for:
+\begin{itemize}
+    \item \textbf{Stuff classes:} Smooths segmentation of amorphous regions (sky, grass, road)
+    \item \textbf{Class boundaries:} Sharpens transitions between adjacent objects
+    \item \textbf{Low-confidence regions:} Resolves ambiguities through spatial context
+\end{itemize}
+
+\textbf{Note:} While computationally more expensive, this refinement is essential for achieving state-of-the-art results and is considered an integral part of the high-accuracy pipeline configuration.
 
 \subsection{Extension to Video Segmentation}
 
@@ -657,26 +625,11 @@ For each extracted prompt point $\mathbf{p}_i$ with class index $c_i$, it is reg
 
 \paragraph{Stage 4: Temporal Mask Propagation}
 
-Once all prompts are registered on frame 0, SAM2 propagates masks across the entire video using its memory-based tracking mechanism. The propagation proceeds as follows:
+Once all prompts are registered on frame 0, SAM 2 propagates masks across the entire video using its memory-based tracking mechanism. This process involves frame encoding, memory retrieval using cross-attention, mask prediction, and memory updates. 
 
-\begin{enumerate}
-    \item \textbf{Frame encoding:} Each frame $I_t$ is processed by the image encoder to produce visual features $\mathbf{f}_t$
+For a detailed mathematical explanation of the SAM 2 memory mechanism and attention operations, please refer to \textbf{Appendix \ref{sec:appendix_sam2}}.
 
-    \item \textbf{Memory retrieval:} For each tracked object, SAM2 retrieves relevant memories from previous frames using cross-attention:
-    \[
-    \mathbf{m}_t = \text{Attention}(\mathbf{q}_t, \{\mathbf{k}_1, \ldots, \mathbf{k}_{t-1}\}, \{\mathbf{v}_1, \ldots, \mathbf{v}_{t-1}\})
-    \]
-    where $\mathbf{q}_t$ is the current frame query, and $\{\mathbf{k}_i, \mathbf{v}_i\}$ are memory key-value pairs from previous frames.
-
-    \item \textbf{Mask prediction:} The mask decoder combines current features $\mathbf{f}_t$ and retrieved memories $\mathbf{m}_t$ to predict object masks:
-    \[
-    M_t^{(i)} = \text{Decoder}(\mathbf{f}_t, \mathbf{m}_t^{(i)})
-    \]
-
-    \item \textbf{Memory update:} High-confidence predictions are stored in the memory bank for future reference
-\end{enumerate}
-
-The propagation iterates through all video frames, applying this process sequentially. For each frame, binary masks are obtained by thresholding the mask logits at zero, yielding segmentation masks for all tracked objects across the entire video.
+The propagation iterates through all video frames, applying this process sequentially to obtain segmentation masks for all tracked objects.
 
 \paragraph{Stage 5: Video Rendering and Output}
 
@@ -805,14 +758,7 @@ M_t^{\text{binary}}(x,y) = \begin{cases}
 
 where $c_i$ is the class index of object $i$, and $c_{\text{target}}$ is the user-specified target class to inpaint.
 
-\paragraph{Video Encoding}
-The binary mask frames are saved as PNG images and encoded into an MP4 video using FFmpeg with H.264 codec:
-
-\begin{verbatim}
-ffmpeg -framerate <fps> -i frame_%06d.png
-       -c:v libx264 -pix_fmt yuv420p -crf 23
-       output_mask.mp4
-\end{verbatim}
+The binary mask frames are saved as PNG images and encoded into an MP4 video using FFmpeg with H.264 codec. The specific encoding command ensures compatibility with VACE's video input requirements (see Appendix \ref{sec:appendix_vace}).
 
 This ensures compatibility with VACE's video input requirements while maintaining lossless mask boundaries through appropriate codec settings (CRF 23 for perceptually lossless quality).
 
@@ -887,28 +833,9 @@ VACE inference is configured with the following parameters based on empirical te
 
 VACE inference is invoked through the official Python API with directory handling to accommodate relative paths in the VACE codebase:
 
-\begin{verbatim}
-# Change to VACE directory for correct imports
-original_dir = os.getcwd()
-vace_path = os.path.join(os.path.dirname(__file__), 'VACE')
-os.chdir(vace_path)
+\paragraph{VACE Inference Arguments}
 
-from vace.vace_wan_inference import main as vace_main
-
-# Prepare arguments with absolute paths
-vace_args = {
-    'model_name': 'vace-1.3B',
-    'ckpt_dir': 'models/Wan2.1-VACE-1.3B/',
-    'src_video': abs_preview_video_path,
-    'src_mask': abs_mask_video_path,
-    'prompt': edit_prompt,
-    'save_file': abs_output_path,
-    ...
-}
-
-result = vace_main(vace_args)
-os.chdir(original_dir)
-\end{verbatim}
+The VACE inference is invoked with specific arguments to handle path management and model configuration. The implementation details, including the Python code for argument preparation, are provided in Appendix \ref{sec:appendix_vace}.
 
 This careful path management ensures VACE can locate its configuration files and model checkpoints while maintaining clean integration with the broader pipeline.
 

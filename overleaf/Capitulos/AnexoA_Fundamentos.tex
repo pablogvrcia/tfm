@@ -200,3 +200,31 @@ After training on 400M image-text pairs, CLIP learns:
 \end{itemize}
 
 This enables open-vocabulary segmentation without category-specific training.
+
+\section{Segment Anything Model 2 (SAM 2) Architecture}
+\label{sec:appendix_sam2}
+
+SAM 2 \cite{ravi2024sam2} extends the original Segment Anything Model to video by introducing a memory mechanism for temporal consistency.
+
+\subsection{Memory-Based Tracking Mechanism}
+
+The core innovation of SAM 2 is its ability to maintain object states across frames using a memory bank. The propagation process involves:
+
+\begin{enumerate}
+    \item \textbf{Frame encoding:} Each frame $I_t$ is processed by the image encoder to produce visual features $\mathbf{f}_t$.
+
+    \item \textbf{Memory retrieval:} For each tracked object, SAM 2 retrieves relevant memories from previous frames using cross-attention:
+    \[
+    \mathbf{m}_t = \text{Attention}(\mathbf{q}_t, \{\mathbf{k}_1, \ldots, \mathbf{k}_{t-1}\}, \{\mathbf{v}_1, \ldots, \mathbf{v}_{t-1}\})
+    \]
+    where $\mathbf{q}_t$ is the current frame query, and $\{\mathbf{k}_i, \mathbf{v}_i\}$ are memory key-value pairs from previous frames.
+
+    \item \textbf{Mask prediction:} The mask decoder combines current features $\mathbf{f}_t$ and retrieved memories $\mathbf{m}_t$ to predict object masks:
+    \[
+    M_t^{(i)} = \text{Decoder}(\mathbf{f}_t, \mathbf{m}_t^{(i)})
+    \]
+
+    \item \textbf{Memory update:} High-confidence predictions are stored in the memory bank for future reference.
+\end{enumerate}
+
+This mechanism allows SAM 2 to track objects through occlusions and appearance changes without requiring per-frame re-initialization.

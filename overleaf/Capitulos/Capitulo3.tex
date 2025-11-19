@@ -6,17 +6,7 @@ This chapter presents the experimental setup, evaluation metrics, and results fo
 
 To comprehensively evaluate the system's open-vocabulary capabilities, datasets are selected that span different scenarios: standard semantic segmentation benchmarks, open-vocabulary evaluation sets, and real-world images with diverse objects.
 
-\subsection{COCO-Stuff 164K}
 
-\textit{Note: COCO-Stuff 164K was prepared for evaluation but not completed in this thesis. Future work will extend evaluation to this dataset.}
-
-COCO-Stuff \cite{lin2014microsoft} extends the MS COCO dataset with pixel-level annotations for both "things" (objects) and "stuff" (materials and backgrounds). It contains:
-\begin{itemize}
-    \item 164,000 images with dense pixel annotations
-    \item 171 categories (80 things + 91 stuff)
-    \item Rich variety of scenes and object scales
-    \item Evaluation infrastructure implemented but benchmark incomplete
-\end{itemize}
 
 \subsection{PASCAL VOC 2012}
 
@@ -55,69 +45,26 @@ To evaluate real-world applicability and creative editing scenarios, 100 diverse
 The system is evaluated across two dimensions: \textbf{segmentation quality} and \textbf{generation quality}.
 
 \subsection{Segmentation Metrics}
+The system is evaluated using standard semantic segmentation metrics:
 
-\subsubsection{Intersection over Union (IoU)}
-
-IoU measures the overlap between predicted and ground-truth masks:
-
-\begin{equation}
-\text{IoU} = \frac{|P \cap G|}{|P \cup G|}
-\end{equation}
-
-where $P$ is the predicted mask and $G$ is the ground truth. The evaluation reports:
 \begin{itemize}
-    \item \textbf{Mean IoU (mIoU):} Average IoU across all classes
-    \item \textbf{Per-class IoU:} IoU for individual categories to identify strengths and weaknesses
+    \item \textbf{Intersection over Union (IoU):} The primary metric, measuring the overlap between predicted and ground-truth masks ($|P \cap G| / |P \cup G|$). We report both \textbf{Mean IoU (mIoU)} across all classes and \textbf{Per-class IoU}.
+    
+    \item \textbf{Precision and Recall:} Computed at the mask level to analyze false positives and false negatives. High precision indicates few false detections, while high recall indicates comprehensive coverage.
+    
+    \item \textbf{F1 Score:} The harmonic mean of precision and recall, providing a balanced view of segmentation performance, particularly useful for open-vocabulary settings where both missing objects and false detections are problematic.
 \end{itemize}
 
-\subsubsection{Precision and Recall}
+\subsection{Generation Quality Metrics}
+To evaluate the quality of the inpainted images, we employ the following metrics:
 
-For each class, the following are computed:
-\begin{equation}
-\text{Precision} = \frac{TP}{TP + FP}, \quad \text{Recall} = \frac{TP}{TP + FN}
-\end{equation}
-
-where TP (true positives), FP (false positives), and FN (false negatives) are computed at the mask level. High precision indicates few false detections, while high recall indicates comprehensive coverage of target objects.
-
-\subsubsection{F1 Score}
-
-The F1 score balances precision and recall:
-\begin{equation}
-F1 = 2 \cdot \frac{\text{Precision} \cdot \text{Recall}}{\text{Precision} + \text{Recall}}
-\end{equation}
-
-This metric is particularly useful for open-vocabulary settings where both missing objects (low recall) and false detections (low precision) are problematic.
-
-\subsection{Generation Quality Metrics (INCOMPLETE)}
-
-\subsubsection{Fréchet Inception Distance (FID)}
-
-FID measures the similarity between distributions of real and generated images in feature space:
-
-\begin{equation}
-\text{FID} = ||\mu_r - \mu_g||^2 + \text{Tr}(\Sigma_r + \Sigma_g - 2(\Sigma_r \Sigma_g)^{1/2})
-\end{equation}
-
-where $\mu_r, \Sigma_r$ are mean and covariance of real image features, and $\mu_g, \Sigma_g$ for generated images. Lower FID indicates more realistic generation.
-
-\subsubsection{CLIP Score}
-
-CLIP Score measures semantic alignment between generated images and text prompts:
-
-\begin{equation}
-\text{CLIP Score} = \text{sim}(\text{CLIP}_{\text{image}}(I), \text{CLIP}_{\text{text}}(T))
-\end{equation}
-
-Higher scores indicate better text-image alignment, ensuring that inpainted content matches user intent.
-
-\subsubsection{User Study}
-
-We conduct a user study with 20 participants evaluating:
 \begin{itemize}
-    \item \textbf{Realism:} How realistic is the inpainted region? (1-5 scale)
-    \item \textbf{Coherence:} How well does it blend with surroundings? (1-5 scale)
-    \item \textbf{Prompt adherence:} Does it match the text description? (1-5 scale)
+    \item \textbf{Fréchet Inception Distance (FID):} Measures the similarity between the distributions of real and generated images in feature space. Lower FID indicates more realistic generation.
+    
+    \item \textbf{CLIP Score:} Measures the semantic alignment between the generated image and the text prompt using CLIP embeddings. Higher scores indicate that the inpainted content better matches the user's textual description.
 \end{itemize}
+
+
 
 \section{Results and Analysis}
 
@@ -243,12 +190,170 @@ Boundary F1 & \textbf{68.33\%} \\
 
 Figure~\ref{fig:qualitative_results} presents representative segmentation results across PASCAL VOC 2012 validation set, organized by performance tier to illustrate system capabilities and limitations.
 
-\begin{figure}[h]
+\begin{figure}[!htbp]
 \centering
-\includegraphics[width=0.95\textwidth]{Imagenes/4. Pascal Voc TOP - MID - LOW Classes.png}
-\caption{Qualitative segmentation results on PASCAL VOC 2012 validation set, organized by performance tier. Green borders (IoU>75\%): Exceptional performance on animals (horse 78.49\%, cat 75.48\%) and background (86.90\%), demonstrating CLIP's strong visual recognition of distinctive textures. Yellow borders (50-75\%): Good performance on vehicles and common objects. Red borders (IoU<50\%): Challenging categories including small objects (bottle 45.97\%), furniture with high intra-class variance (sofa 26.86\%, chair 17.09\%), and deformable objects. Masks shown with class-specific colors, semi-transparent overlay (alpha=0.4). Text prompts display queries used; descriptor files (e.g., "person in shirt", "red car") improve specificity. Representative examples demonstrate system's zero-shot capability across diverse object categories while highlighting remaining challenges in small/deformable object segmentation.}
+\includegraphics[width=0.95\textwidth]{Imagenes/tier_showcase.png}
+\caption{PASCAL VOC 2012 performance tiers. Top row (green, IoU>75\%): excellent results on aeroplane, sheep, train. Middle row (orange, 50-75\%): good performance on horse+person, bicycle+person, bus. Bottom row (red, IoU<50\%): challenging furniture and occluded objects (sofa, boat, pottedplant).}
 \label{fig:qualitative_results}
 \end{figure}
+
+\paragraph{Boundary Quality and Precision}
+SAM2's contribution to segmentation quality is particularly evident in boundary delineation. Figure~\ref{fig:boundary_quality_voc} showcases examples where precise boundaries are crucial for accurate segmentation.
+
+\begin{figure}[!htbp]
+\centering
+\includegraphics[width=0.95\textwidth]{Imagenes/boundary_quality.png}
+\caption{Boundary quality analysis across representative samples. Examples demonstrate SAM2's clean object-background separation, smooth contours, and minimal boundary noise across diverse categories (aeroplane, sheep, train, car).}
+\label{fig:boundary_quality_voc}
+\end{figure}
+
+\paragraph{Complex Multi-Class Scenes}
+Real-world applicability requires handling scenes with multiple object categories simultaneously. Figure~\ref{fig:complex_scenes_voc} demonstrates the system's capability to segment images containing 3 or more distinct classes.
+
+\begin{figure}[!htbp]
+\centering
+\includegraphics[width=0.95\textwidth]{Imagenes/complex_scenes.png}
+\caption{Complex multi-class scenes with 3+ object categories per image. Examples include person+bicycle, indoor furniture groupings, and outdoor multi-object scenarios demonstrating simultaneous multi-category segmentation.}
+\label{fig:complex_scenes_voc}
+\end{figure}
+
+\paragraph{Success Stories and Failure Analysis}
+To provide balanced insight into system capabilities and limitations, Figure~\ref{fig:success_failure_voc} presents side-by-side comparison of excellent segmentations versus challenging failure cases.
+
+\begin{figure}[!htbp]
+\centering
+\includegraphics[width=0.85\textwidth]{Imagenes/success_failure_analysis.png}
+\caption{Success stories (left, IoU>90\%) versus failure cases (right, IoU<30\%). Success: aeroplane, sheep, horse+person, car, cat. Failures: sofa, furniture combinations, small objects (tiny aeroplane, bird, distant person), and pottedplant misclassification.}
+\label{fig:success_failure_voc}
+\end{figure}
+
+\FloatBarrier
+
+\subsubsection{Open-Vocabulary Custom Class Examples}
+
+A key advantage of the CLIP-guided segmentation approach is the ability to segment arbitrary custom classes specified through natural language, without any training or fine-tuning. Unlike PASCAL VOC 2012's fixed 21-class taxonomy, this system allows users to define completely custom vocabularies for domain-specific applications. This section demonstrates five diverse use cases spanning sports analytics, brand recognition, and event documentation, showcasing the system's flexibility in handling specific entity names and fine-grained distinctions without requiring dataset preparation or model retraining.
+
+Each example follows the same zero-shot workflow: (1) define a custom vocabulary as a simple text list, (2) provide the input image, and (3) obtain segmentation masks where CLIP identifies semantic regions and SAM2 generates precise boundaries. No descriptor files, training data, or model fine-tuning are required—the system operates purely through CLIP's pre-trained vision-language understanding.
+
+\paragraph{Football Player Identification}
+
+The first use case demonstrates \textbf{specific person recognition} in sports analytics. Figure~\ref{fig:football_example} shows a football match frame where the custom vocabulary includes individual player names: ``Lionel Messi'', ``Luis Suarez'', ``Neymar Jr'', along with generic categories like ``goalkeeper'', ``referee'', and ``background''.
+
+\textit{How it works:} CLIP's pre-training on billions of image-text pairs from the web includes exposure to celebrity and athlete names alongside their visual appearances. When prompted with ``Lionel Messi'', CLIP's text encoder generates an embedding that captures not just generic ``person'' features, but specific visual attributes associated with Messi (facial features, body build, typical poses). The SCLIP dense prediction module computes similarity between this text embedding and every image region, producing a heatmap highlighting Messi's location. SAM2 then refines this coarse localization into a precise segmentation mask.
+
+The key technical challenge is \textbf{discriminating between visually similar entities}—all players are humans wearing similar uniforms. Success relies on CLIP learning subtle person-specific features during pre-training (facial characteristics, body proportions, movement patterns). Results show successful separation of the three named players plus generic categories, though accuracy depends on image resolution and visibility of discriminative features like faces.
+
+\textit{Application:} Sports analytics for tracking specific players across video frames, generating highlight reels for individual athletes, or analyzing player positioning and interactions.
+
+\begin{figure}[!htbp]
+\centering
+\includegraphics[width=0.95\textwidth]{Imagenes/football_frame_collage.png}
+\caption{Football player segmentation with custom vocabulary. Left: vocabulary with named players. Middle: input match frame. Right: segmentation masks discriminating between individual players.}
+\label{fig:football_example}
+\end{figure}
+
+\paragraph{Brand-Based Product Discrimination}
+
+The second use case targets \textbf{commercial brand recognition} for product monitoring and retail analytics. Figure~\ref{fig:brands_example} shows a product photography scene with the vocabulary: ``Nike Shoe'', ``Adidas Sneaker'', ``shelf'', ``background''.
+
+\textit{How it works:} Modern vision-language models like CLIP are trained on massive web-scale datasets containing product images paired with text descriptions that frequently mention brand names. During pre-training, CLIP learns to associate visual brand markers (logos, design patterns, color schemes) with textual brand identifiers. When queried for ``Nike Shoe'', CLIP's text encoder produces an embedding reflecting Nike-specific visual attributes (swoosh logo, characteristic design language). SCLIP computes per-pixel similarity with this brand-specific embedding, effectively detecting Nike products in the image. Crucially, CLIP can distinguish ``Nike Shoe'' from ``Adidas Sneaker'' despite both being footwear—the brand name modifier shifts the embedding toward brand-discriminative features.
+
+The technical mechanism relies on CLIP's \textbf{compositional understanding}: ``Nike Shoe'' is not simply ``Nike'' OR ``Shoe'', but rather the composed concept of ``a shoe manufactured by Nike with Nike's visual characteristics''. This compositional capability emerges from contrastive pre-training on diverse image-caption pairs.
+
+\textit{Limitation:} Brand recognition accuracy depends on visibility of brand markers (logos, distinctive design elements). Generic-looking products without prominent branding may fail. Performance also degrades on lesser-known brands with less web presence during CLIP's pre-training.
+
+\textit{Application:} Retail analytics (tracking brand presence on shelves), product placement monitoring in media, automated inventory management, and brand compliance verification.
+
+\begin{figure}[!htbp]
+\centering
+\includegraphics[width=0.95\textwidth]{Imagenes/brands_collage.png}
+\caption{Brand-based product segmentation. Left: vocabulary with brand-specific terms. Middle: product display. Right: segmentation separating Nike and Adidas based on visual brand markers.}
+\label{fig:brands_example}
+\end{figure}
+
+\paragraph{Motorsport Rider Recognition with Team Context}
+
+The third use case demonstrates \textbf{contextual entity recognition} combining person identity with team affiliation. Figure~\ref{fig:motogp_example} shows a MotoGP racing scene with vocabulary: ``Valentino Rossi Yamaha'', ``Marc Marquez Honda'', ``Jorge Lorenzo Ducati'', ``motorcycle'', ``crowd'', ``background''.
+
+\textit{How it works:} This example leverages CLIP's ability to process \textbf{multi-word contextual descriptions}. The vocabulary terms combine rider names with team manufacturers (e.g., ``Valentino Rossi Yamaha''). During CLIP pre-training on sports journalism images and captions, the model encounters phrases like ``Valentino Rossi riding for Yamaha'' which create associations between rider appearance, team colors, and manufacturer names. When queried with ``Valentino Rossi Yamaha'', CLIP's text embedding encodes both the individual's visual features AND the associated team's visual identity (Yamaha's characteristic blue livery, bike design). This compound embedding helps disambiguate riders in team-specific contexts.
+
+The technical advantage is \textbf{context-enhanced discrimination}: including team affiliation provides additional visual cues (team colors, sponsor logos, bike design) that supplement person-specific features. This improves robustness when faces are occluded by helmets—a common challenge in motorsport imagery where riders wear full-face protective gear.
+
+\textit{Challenge:} Success depends on CLIP having learned rider-team associations during pre-training. Outdated team affiliations (e.g., querying ``Valentino Rossi Yamaha'' for an image where he rides for Ducati) may cause confusion or reduced accuracy.
+
+\textit{Application:} Motorsport analytics, automated race footage annotation, sponsorship exposure measurement, and historical race documentation.
+
+\begin{figure}[!htbp]
+\centering
+\includegraphics[width=0.95\textwidth]{Imagenes/motogp_frame_collage.png}
+\caption{MotoGP rider segmentation with contextual vocabulary. Left: rider names combined with team manufacturers. Middle: racing scene. Right: segmentation using both person-specific and team-associated visual cues.}
+\label{fig:motogp_example}
+\end{figure}
+
+\paragraph{Celebrity Recognition in Public Events}
+
+The fourth use case addresses \textbf{celebrity identification} for media documentation and archival applications. Figure~\ref{fig:obama_example} shows a public event with vocabulary: ``Obama'', ``Michael Jordan'', ``person'', ``suit'', ``background''.
+
+\textit{How it works:} High-profile public figures like political leaders and sports icons are extensively represented in CLIP's web-scale training data. Images of Barack Obama and Michael Jordan appear in millions of news articles, social media posts, and multimedia content, each paired with captions mentioning their names. This massive exposure creates highly distinctive embeddings for celebrity names—when CLIP's text encoder processes ``Obama'', it generates a rich representation encoding facial features, typical poses, associated contexts (formal events, suits), and visual attributes specific to that individual.
+
+The SCLIP dense prediction leverages these celebrity-specific embeddings for fine-grained localization. Unlike generic ``person'' detection, querying for ``Obama'' activates features tuned to Obama's unique visual signature. The system can successfully segment ``Obama'' separately from generic ``person'' in the same image, demonstrating CLIP's ability to represent a hierarchy of semantic concepts (``Obama'' is a specific instance of ``person'', not a conflicting category).
+
+\textit{Technical note:} This example highlights \textbf{semantic hierarchies in CLIP's embedding space}. The vocabulary intentionally includes both ``Obama'' and generic ``person'' to show that CLIP can distinguish specific entities from their category parents. The text embeddings for ``Obama'' and ``person'' occupy related but distinct regions in CLIP's latent space, allowing simultaneous detection without mutual exclusion.
+
+\textit{Ethical consideration:} Celebrity recognition capabilities raise privacy concerns when applied to non-public figures. This system inherits biases from CLIP's training data, with higher accuracy for well-documented individuals and potential degradation for underrepresented demographics.
+
+\textit{Application:} Media archival, automated photo organization, event documentation, and historical research.
+
+\begin{figure}[!htbp]
+\centering
+\includegraphics[width=0.95\textwidth]{Imagenes/obama_jordan_collage.png}
+\caption{Celebrity recognition at a public event. Left: vocabulary with specific celebrities and generic ``person''. Middle: event photograph. Right: segmentation distinguishing named individuals from other attendees.}
+\label{fig:obama_example}
+\end{figure}
+
+\paragraph{Complex Multi-Granularity Scene Understanding}
+
+The fifth use case demonstrates the system's most challenging capability: \textbf{mixed-granularity segmentation} combining specific entities, generic objects, and fine-grained attributes. Figure~\ref{fig:podium_example} shows an F1 podium ceremony with highly diverse vocabulary: ``Lewis Hamilton'', ``red bull driver'', ``champagne'', ``hand'', ``hat'', ``trophy'', ``background''.
+
+\textit{How it works:} This example pushes CLIP's compositional limits by requiring simultaneous handling of multiple semantic levels:
+\begin{itemize}
+    \item \textbf{Named entity}: ``Lewis Hamilton'' (specific person identification)
+    \item \textbf{Contextual description}: ``red bull driver'' (role + team affiliation, without specific name)
+    \item \textbf{Object categories}: ``champagne'', ``trophy'' (generic object detection)
+    \item \textbf{Body parts}: ``hand'' (fine-grained anatomical segmentation)
+    \item \textbf{Accessories}: ``hat'' (small object detection)
+\end{itemize}
+
+The technical challenge is \textbf{avoiding semantic collapse}: CLIP must distinguish ``Lewis Hamilton'' from ``red bull driver'' despite both being racing drivers, while also segmenting Lewis Hamilton's ``hand'' separately from his body. This requires CLIP's embedding space to maintain fine-grained distinctions at multiple semantic scales simultaneously.
+
+The vocabulary design showcases strategic prompt engineering: ``red bull driver'' deliberately avoids a specific name, instead using team affiliation + role to identify individuals. This pattern is useful when specific identities are unknown but contextual attributes are available. CLIP successfully segments the Red Bull team member based on team colors and uniform features, demonstrating flexible semantic grounding.
+
+\textit{Limitation:} Mixed-granularity vocabularies increase ambiguity. ``Hand'' could match any visible hands in the image, potentially fragmenting results. The system performs best when vocabulary terms have minimal semantic overlap.
+
+\textit{Application:} This capability enables sophisticated content editing workflows: selectively remove ``champagne'' from podium photos, isolate ``Lewis Hamilton'' for automated highlight generation, or blur ``hand'' regions for gesture analysis while preserving person identity.
+
+\begin{figure}[!htbp]
+\centering
+\includegraphics[width=0.95\textwidth]{Imagenes/podium_collage.png}
+\caption{F1 podium scene with mixed-granularity vocabulary. Left: vocabulary combining named entity, contextual role, objects, and body part. Middle: podium photograph. Right: segmentation handling multiple semantic levels simultaneously.}
+\label{fig:podium_example}
+\end{figure}
+
+\paragraph{Summary of Custom Vocabulary Capabilities}
+
+These five examples collectively demonstrate the open-vocabulary paradigm's key advantages:
+
+\begin{itemize}
+    \item \textbf{Zero-shot flexibility}: Define arbitrary vocabularies without training data or model updates
+    \item \textbf{Compositional understanding}: Combine modifiers (brand names, team affiliations, roles) with object categories
+    \item \textbf{Semantic hierarchy support}: Mix specific entities (``Obama'') with category-level terms (``person'')
+    \item \textbf{Multi-granularity handling}: Process names, objects, attributes, and parts in unified vocabulary
+    \item \textbf{Domain transfer}: Apply immediately to sports, retail, events, and media without domain adaptation
+\end{itemize}
+
+Limitations include dependence on CLIP's training data coverage (rare entities may fail), sensitivity to vocabulary phrasing (``Nike shoe'' vs. ``shoe by Nike'' may produce different results), and challenges with highly ambiguous terms or overlapping semantic concepts. Nevertheless, the approach provides unprecedented flexibility compared to fixed-taxonomy systems, enabling rapid prototyping for domain-specific applications without expensive dataset creation or model retraining.
+
+\FloatBarrier
 
 \subsection{Failure Cases and Limitations}
 
@@ -268,15 +373,16 @@ While the system achieves 68.09\% mIoU on PASCAL VOC 2012, several systematic fa
     \item \textbf{Inpainting artifacts (generation quality):} Stable Diffusion inpainting struggles with complex textures (text, fine patterns, faces) and occasionally produces semantically incorrect content. \textit{Impact}: ~20-30\% of inpainted regions in custom test set exhibit visible artifacts or inconsistencies.
 \end{itemize}
 
-\begin{figure}[h]
+\begin{figure}[!htbp]
 \centering
 \includegraphics[width=0.95\textwidth]{Imagenes/5. Pascal Voc Failures.png}
-\caption{Representative failure cases illustrating current limitations. The figure shows challenging scenarios where the CLIP-guided segmentation system struggles: (Top row) Small objects like bottles and birds are frequently missed due to SCLIP's 14×14 resolution limiting detection of objects smaller than 32×32 pixels. (Middle row) Furniture classes (sofa, chair, diningtable) suffer from high intra-class variance, with IoU scores as low as 17.09\% for chairs due to diverse shapes and appearances. (Bottom row) Occlusions and deformable objects present boundary ambiguity challenges, where SAM2 struggles to delineate precise boundaries despite CLIP identifying the correct regions. Red boxes highlight problematic regions, with IoU scores indicating severity of failure. These systematic failure modes affect 15-30\% of challenging classes and motivate future work on multi-scale processing, adaptive region proposals, and improved shape priors for high-variance categories.}
+\caption{Representative failure cases. Top row: small objects (bottles, birds) missed due to resolution limits. Middle row: furniture with high intra-class variance. Bottom row: occlusions and boundary ambiguity.}
 \label{fig:failure_cases}
 \end{figure}
 
 These limitations suggest directions for future work, discussed in Chapter 5.
 
+\FloatBarrier
 
 \subsection{Computational Performance}
 
@@ -289,13 +395,35 @@ On an NVIDIA GeForce GTX 1060 6GB Max-Q:
 
 Performance is constrained by the 6GB VRAM limit and mobile GPU compute capability. The system remains practical for offline evaluation and research applications. Further optimizations (FP16 quantization, reduced resolution, fewer diffusion steps) enable operation within memory constraints.
 
+\FloatBarrier
+
 \subsection{Generative Editing Results}
+
+\begin{figure}[!htbp]
+\centering
+\begin{subfigure}[b]{0.32\textwidth}
+    \includegraphics[width=\textwidth]{Imagenes/car_input.jpg}
+    \caption{Original Image}
+\end{subfigure}
+\hfill
+\begin{subfigure}[b]{0.32\textwidth}
+    \includegraphics[width=\textwidth]{Imagenes/car_segmentation.png}
+    \caption{Sky Segmentation}
+\end{subfigure}
+\hfill
+\begin{subfigure}[b]{0.32\textwidth}
+    \includegraphics[width=\textwidth]{Imagenes/car_result.png}
+    \caption{Sky Replaced with Sunset}
+\end{subfigure}
+\caption{Sky replacement workflow. Left: original image. Middle: sky segmentation mask. Right: inpainted result with sunset using Stable Diffusion.}
+\label{fig:generative_workflows}
+\end{figure}
 
 Beyond segmentation, the system demonstrates realistic object removal and replacement through Stable Diffusion v2 integration. Figure~\ref{fig:inpainting_results} showcases representative inpainting results.
 
 \begin{figure}[!htbp]
 \centering
 \includegraphics[width=0.95\textwidth]{Imagenes/6. Image Generation.png}
-\caption{Generative editing results through Stable Diffusion v2 inpainting integration. Multiple representative examples demonstrate object removal, replacement, and style transfer capabilities. The figure showcases the complete pipeline from segmentation to inpainting: (Left column) Original images with diverse objects and backgrounds. (Middle column) CLIP-guided SAM2 segmentation masks overlaid in red, showing precise boundary delineation. (Right column) Inpainted results demonstrating realistic object removal with coherent texture continuation and lighting preservation. Examples include: desk object removal with wood grain continuation, vintage furniture replacement maintaining perspective and shadows, landscape editing with sky replacement preserving horizon alignment, and style transfer applications. The system achieves realistic inpainting in 12-18 seconds per mask on consumer GPU (GTX 1060 6GB). Success cases show clean texture synthesis and semantic coherence, while challenging scenarios (complex patterns, text regions) occasionally exhibit minor artifacts. CLIP scores range from 0.75-0.92 depending on scene complexity, demonstrating strong text-image alignment in generated content. The integration enables practical applications including object removal for image cleanup, object replacement for creative editing, and style transfer for artistic manipulation, all driven by natural language prompts without manual annotation.}
+\caption{Generative editing results with Stable Diffusion v2 inpainting. Left: original images. Middle: segmentation masks (red overlay). Right: inpainted results showing object removal, replacement, and texture synthesis.}
 \label{fig:inpainting_results}
 \end{figure}

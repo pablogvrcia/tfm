@@ -1,0 +1,141 @@
+\chapter{Implementation Details}
+\label{appendix:implementation_details}
+
+This appendix provides specific implementation details, code snippets, and configuration files used in the thesis. These technical specifics support the methodology described in Chapter \ref{ch:methodology}.
+
+\section{Descriptor Files}
+\label{sec:appendix_descriptors}
+
+The descriptor file \texttt{configs/cls\_voc21.txt} provides rich descriptions for PASCAL VOC 2012 classes. Below is the content used for the key classes discussed in Section \ref{sec:descriptor_files}.
+
+\textbf{Background class (line 1):}
+\begin{verbatim}
+sky, wall, tree, wood, grass, road, sea, river, mountain,
+sands, desk, bed, building, cloud, lamp, door, window,
+wardrobe, ceiling, shelf, curtain, stair, floor, hill,
+rail, fence
+\end{verbatim}
+
+\textbf{Person class (line 16):}
+\begin{verbatim}
+person, person in shirt, person in jeans, person in dress,
+person in sweater, person in skirt, person in jacket
+\end{verbatim}
+
+\textbf{Compound classes:}
+\begin{verbatim}
+table                    (line 12: diningtable)
+television monitor, tv monitor, monitor, television, screen
+                         (line 21: tvmonitor)
+\end{verbatim}
+
+\section{Template Strategy Implementation}
+\label{sec:appendix_templates}
+
+The template strategies discussed in Section \ref{sec:template_strategies} are implemented in Python. The \texttt{Top-7 Dense Prediction} strategy is defined as follows:
+
+\begin{verbatim}
+top7_dense_templates = [
+    lambda c: f'a photo of a {c}.',
+    lambda c: f'a {c} in the scene.',
+    lambda c: f'the {c}.',
+    lambda c: f'a close-up photo of a {c}.',
+    lambda c: f'a photo of the large {c}.',
+    lambda c: f'a photo of the small {c}.',
+    lambda c: f'one {c}.',
+]
+\end{verbatim}
+
+\section{Computational Optimizations}
+\label{sec:appendix_optimizations}
+
+This section provides the PyTorch implementation details for the optimizations described in Section \ref{sec:computational_optimizations}.
+
+\subsection{Mixed Precision Inference (FP16)}
+
+The implementation uses \texttt{torch.cuda.amp.autocast} to enable mixed precision:
+
+\begin{verbatim}
+with torch.cuda.amp.autocast(enabled=use_fp16):
+    # CLIP vision encoder forward pass
+    image_features = clip_model.encode_image(images)
+    # Text encoder forward pass
+    text_features = clip_model.encode_text(text_tokens)
+    # Similarity computation
+    similarity = image_features @ text_features.T
+\end{verbatim}
+
+\subsection{Just-In-Time Compilation}
+
+PyTorch 2.0 compilation is applied to CLIP encoders:
+
+\begin{verbatim}
+if use_compile:
+    clip_model.visual = torch.compile(
+        clip_model.visual,
+        mode="reduce-overhead"
+    )
+    clip_model.transformer = torch.compile(
+        clip_model.transformer,
+        mode="reduce-overhead"
+    )
+\end{verbatim}
+
+\subsection{Batched SAM2 Prompting}
+
+Batching multiple prompts for efficient SAM2 inference:
+
+\begin{verbatim}
+# Standard approach (sequential, slow)
+masks = []
+for point in prompt_points:
+    mask = sam2_predictor.predict(point)
+    masks.append(mask)
+
+# Batched approach (parallel, fast)
+batch_size = 32
+for i in range(0, len(prompt_points), batch_size):
+    batch = prompt_points[i:i+batch_size]
+    batch_masks = sam2_predictor.predict_batch(batch)
+    masks.extend(batch_masks)
+\end{verbatim}
+
+\section{VACE Integration Details}
+\label{sec:appendix_vace}
+
+\subsection{Video Encoding with FFmpeg}
+
+The binary mask frames are encoded into an MP4 video using FFmpeg with H.264 codec to ensure compatibility with VACE:
+
+\begin{verbatim}
+ffmpeg -framerate <fps> -i frame_%06d.png
+       -c:v libx264 -pix_fmt yuv420p -crf 23
+       output_mask.mp4
+\end{verbatim}
+
+\subsection{VACE Inference Arguments}
+
+The VACE inference is invoked with specific arguments to handle path management and model configuration:
+
+\begin{verbatim}
+# Change to VACE directory for correct imports
+original_dir = os.getcwd()
+vace_path = os.path.join(os.path.dirname(__file__), 'VACE')
+os.chdir(vace_path)
+
+from vace.vace_wan_inference import main as vace_main
+
+# Prepare arguments with absolute paths
+vace_args = {
+    'model_name': 'vace-1.3B',
+    'ckpt_dir': 'models/Wan2.1-VACE-1.3B/',
+    'src_video': abs_preview_video_path,
+    'src_mask': abs_mask_video_path,
+    'prompt': edit_prompt,
+    'save_file': abs_output_path,
+    ...
+}
+
+result = vace_main(vace_args)
+os.chdir(original_dir)
+\end{verbatim}
