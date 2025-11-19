@@ -25,7 +25,7 @@ Using the same intelligent prompting strategy as the image pipeline, 50-300 sema
 
 \subsubsection{Stage 3: SAM2 Initialization}
 
-SAM2's video predictor is initialized with the Hiera-Large architecture. Video frames and intermediate states are offloaded to CPU RAM to conserve GPU memory on consumer hardware (6GB VRAM). Each extracted prompt point is registered as a foreground point on frame 0, associating spatial locations with object classes for temporal tracking.
+SAM2's video predictor is initialized with the Hiera-Large architecture. Each extracted prompt point is registered as a foreground point on frame 0, associating spatial locations with object classes for temporal tracking.
 
 \subsubsection{Stage 4: Temporal Mask Propagation}
 
@@ -37,7 +37,7 @@ The final stage generates a visualization video by overlaying colored segmentati
 
 \subsection{Key Implementation Features}
 
-Video processing on consumer GPUs (GTX 1060 6GB) requires careful memory management. The implementation employs CPU offloading for video frames and intermediate states, temporary file storage for rendered frames, and single-pass processing to minimize overhead. This enables video segmentation within 6GB VRAM constraints, though with increased CPU-GPU transfer overhead.
+The implementation employs efficient memory management with CPU offloading for video frames and intermediate states, temporary file storage for rendered frames, and single-pass processing to minimize overhead.
 
 The approach performs CLIP analysis only on frame 0, unlike per-frame methods. SAM2's memory-based tracking handles temporal propagation, making video segmentation as efficient as image segmentation plus encoding overhead. The implementation uses CLIP class indices as SAM2 object IDs, creating direct mapping between semantic classes and tracked objects suitable for class-level segmentation.
 
@@ -61,7 +61,7 @@ This video extension enables applications such as:
 \end{itemize}
 
 \section{Video Inpainting with WAN 2.1 VACE}
-\label{sec:appendix_vace}
+\label{sec:appendix_vace_videogen}
 
 While the CLIP-guided video segmentation pipeline generates high-quality segmentation masks across video frames, practical video editing applications require the ability to modify or remove detected objects. This section describes the integration of WAN 2.1 VACE \cite{vace2025} for text-driven video inpainting, enabling complete video editing workflows from segmentation to content generation.
 
@@ -122,10 +122,10 @@ where $I_t$ is the original frame and $I'_t$ is the preview frame. This gray ove
 
 \subsection{VACE Inference Configuration}
 
-WAN 2.1 VACE is invoked with the following configuration optimized for consumer hardware (6GB VRAM):
+WAN 2.1 VACE is invoked with the following configuration optimized for high-end GPUs (NVIDIA RTX 4090 24GB VRAM):
 
 \subsubsection{Model Selection}
-The implementation uses \texttt{VACE-1.3B} (1.3 billion parameters) rather than \texttt{VACE-14B} due to memory constraints. While VACE-14B provides finer detail synthesis, VACE-1.3B produces acceptable results within hardware limitations.
+The implementation uses \texttt{VACE-14B} (14 billion parameters) for high-quality inpainting results. The RTX 4090's 24GB VRAM enables full-resolution processing at 480p-720p with the larger model variant.
 
 \subsubsection{Input Preparation}
 VACE requires three inputs:
@@ -179,13 +179,10 @@ for frame_idx in range(num_frames):
     cv2.imwrite(f"{temp_dir}/frame_{frame_idx:06d}.png", frame)
 \end{verbatim}
 
-This trades disk I/O for reduced VRAM usage, critical for processing 81-frame videos on 6GB GPUs.
+This approach maintains efficient disk usage while ensuring all frames are accessible during VACE processing.
 
-\subsubsection{Model Offloading}
-VACE supports optional CPU offloading for model components not actively used during inference. While this increases latency, it enables processing on memory-constrained hardware.
-
-\subsubsection{Resolution Reduction}
-The implementation defaults to 480p resolution. While 720p is supported by VACE, it requires approximately 10-12GB VRAM, exceeding consumer hardware capabilities. For applications requiring higher resolution, users can run inference at 480p and apply video super-resolution as post-processing.
+\subsubsection{Resolution Configuration}
+The RTX 4090's 24GB VRAM enables processing at 480p-720p resolution. The implementation defaults to 480p for faster processing, with 720p available for higher quality output when needed.
 
 \subsection{Output and Cleanup}
 
@@ -223,8 +220,7 @@ Poor prompts (e.g., ``remove the person'') often produce artifacts as VACE inter
 \subsubsection{Limitations}
 Current implementation limitations include:
 \begin{itemize}
-    \item \textbf{Length restriction:} 81-frame maximum due to memory constraints
-    \item \textbf{Resolution limitation:} 480p for 6GB VRAM, 720p requires 12GB+
+    \item \textbf{Length restriction:} 81-frame maximum per VACE batch
     \item \textbf{Single-pass processing:} No iterative refinement or multi-scale generation
     \item \textbf{No instance control:} Cannot selectively inpaint individual instances of a class (e.g., remove only one of three people)
 \end{itemize}
