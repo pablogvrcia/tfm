@@ -369,6 +369,54 @@ python clip_guided_segmentation.py \
 
 ---
 
+### Vitage Desk to modern desk
+
+Transform the old desk into a modern one using inpainting.
+
+```bash
+python clip_guided_segmentation.py \
+  --image examples/desk.png \
+  --vocabulary floor background desk "potted plant" laptop \
+  --prompt "desk" \
+  --edit replace \
+  --use-inpainting \
+  --edit-prompt "realistic, expensive, luxurious metallic desk" \
+  --output examples_results/vintage-desk-replacement.png
+```
+
+<table>
+<tr>
+<td width="33%">
+
+**Original Image**
+
+![Desk Original](desk.png)
+
+</td>
+<td width="33%">
+
+**Segmentation**
+
+![Desk Segmentation](../examples_results/vintage-desk-replacement.png)
+
+</td>
+<td width="33%">
+
+**Road to Ski Slope**
+
+![Marble desk](../examples_results/vintage-desk-replacement_inpainted_replaced_desk.png)
+
+</td>
+</tr>
+</table>
+
+- **Operation:** Replace the desk by a metallic desk using Stable Diffusion inpainting
+- **Classes:** Floor, background, desk, potted plant and laptop
+- **Edit Prompt:** "realistic, expensive, luxurious metallic desk"
+- **Results stored in:** `examples_results/vintage-desk-replacement*.png`
+
+---
+
 ## Features Demonstrated
 
 ### Image Segmentation

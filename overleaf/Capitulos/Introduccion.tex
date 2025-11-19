@@ -11,30 +11,7 @@ Furthermore, the integration of generative AI models, such as Stable Diffusion \
 
 \begin{figure}[h]
 \centering
-\fbox{\parbox{0.9\textwidth}{\centering
-\vspace{1cm}
-\textbf{[PLACEHOLDER: System Overview Concept]}\\[0.5cm]
-\textit{This figure should illustrate the complete capability of the proposed system:}\\[0.3cm]
-\begin{tabular}{l}
-\textbf{Show 3 example scenarios in a vertical layout:}\\[0.2cm]
-\textbf{Scenario 1 - Zero-Shot Segmentation:}\\
-\quad Input image (living room) + Text: "vintage lamp on side table"\\
-\quad → System segments lamp (never seen during training)\\
-\quad → Highlighted mask overlay showing successful segmentation\\[0.2cm]
-\textbf{Scenario 2 - Object Removal:}\\
-\quad Same input + Text: "remove the lamp"\\
-\quad → System segments lamp → Inpaints background naturally\\
-\quad → Output: Lamp removed, table surface filled realistically\\[0.2cm]
-\textbf{Scenario 3 - Object Replacement:}\\
-\quad Same input + Text: "replace lamp with modern floor lamp"\\
-\quad → System segments old lamp → Generates new lamp via Stable Diffusion\\
-\quad → Output: Modern lamp in place, matching lighting and style\\[0.3cm]
-\end{tabular}
-\textit{Use arrows between steps and annotations highlighting key capabilities:}\\
-\textit{- "Open-Vocabulary" - "Zero-Shot" - "Natural Language" - "Realistic Generation"}\\
-\textit{Include small icons representing SAM 2, CLIP, and Stable Diffusion at relevant stages.}
-\vspace{1cm}
-}}
+\includegraphics[width=0.95\textwidth]{Imagenes/1. System Overview Concept.png}
 \caption{Overview of the proposed open-vocabulary semantic segmentation and generative editing system. The system combines vision-language understanding (CLIP), precise segmentation (SAM 2), and realistic generation (Stable Diffusion) to enable flexible, language-driven image manipulation.}
 \label{fig:system_overview}
 \end{figure}

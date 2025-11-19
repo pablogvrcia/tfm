@@ -210,16 +210,25 @@ class SCLIPFeatureExtractor:
                     # Convert to (B, C, H, W) format for upsampling
                     patch_features_chw = patch_features.permute(0, 3, 1, 2)  # (1, D, H, W)
 
-                    # Determine target size (2x upsampling is standard for LoftUp)
-                    target_h = grid_size * 2
-                    target_w = grid_size * 2
+                    # Get target size from the image tensor shape
+                    # LoftUp upsamples directly to the full image resolution (e.g., 14x14 -> 224x224)
+                    # This matches the reference implementation where guidance image size = output size
+                    _, _, img_h, img_w = image_tensor.shape
+                    target_h = img_h
+                    target_w = img_w
 
-                    # Apply LoftUp upsampling
+                    # Apply LoftUp upsampling with correctly sized guidance image
+                    # The guidance image must be at the target resolution for LoftUp to work correctly
                     upsampled_features = self.loftup_upsampler(
                         patch_features_chw,
                         target_size=(target_h, target_w),
-                        original_image=image_tensor  # Provide original image for guidance
+                        original_image=image_tensor  # Already at target size (224x224)
                     )
+
+                    # Re-normalize features after LoftUp (LoftUp changes the normalization)
+                    # This is CRITICAL: LoftUp outputs unnormalized features
+                    if normalize:
+                        upsampled_features = F.normalize(upsampled_features, dim=1)  # Normalize channel dim
 
                     # Convert back to (1, H, W, D) format
                     patch_features = upsampled_features.permute(0, 2, 3, 1)

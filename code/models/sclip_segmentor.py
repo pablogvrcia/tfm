@@ -1321,8 +1321,9 @@ class SCLIPSegmentor:
                         original_image=crop_tensor
                     )  # (1, D, crop_h, crop_w)
 
-                    # Normalize upsampled features
-                    hr_features = hr_features / hr_features.norm(dim=1, keepdim=True)
+                    # Normalize upsampled features PER-PIXEL (not globally)
+                    # Shape: (1, D, H, W) -> normalize along D dimension for each pixel
+                    hr_features = F.normalize(hr_features, dim=1)
 
                     # Reshape to (H*W, D) for similarity computation
                     hr_features_flat = hr_features.flatten(2).permute(0, 2, 1)  # (1, H*W, D)
