@@ -72,8 +72,10 @@ The remainder of this thesis is structured as follows:
 
 \item \textbf{Chapter 3 (Methodology):} Details the methodology employed in this thesis, providing a comprehensive description of the proposed open-vocabulary semantic segmentation system. This chapter covers the following aspects:
 \begin{itemize}
-\item \textbf{System Architecture:} Presents a detailed overview of the system's architecture, including the integration of CLIP for language processing, SAM2 for mask generation, and a generative AI model for inpainting. It explains how these components interact to achieve open-vocabulary segmentation and image modification.
-\item \textbf{Implementation Details:} Provides specific implementation details, such as the choice of CLIP and SAM2 variants, hyperparameter settings for each component, and the software libraries and hardware used for development and evaluation.
+\item \textbf{System Architecture:} Presents a detailed overview of the system's architecture, including the integration of CLIP for language processing, SAM2 for mask generation, and the CLIP-guided intelligent prompting strategy that achieves 96\% reduction in computational overhead.
+\item \textbf{Implementation Details:} Provides specific implementation details, such as the choice of CLIP and SAM2 variants, template strategies for multi-term class representations, hyperparameter settings, and computational optimizations (FP16, torch.compile, batched prompting).
+\item \textbf{Generative Editing Extension:} Describes the integration with Stable Diffusion v2 for text-driven image editing, enabling object removal, replacement, and style transfer applications.
+\item \textbf{Video Segmentation Extension:} Briefly introduces the extension to video processing by combining first-frame CLIP analysis with SAM2's temporal tracking. For complete technical details, see Appendix \ref{appendix:video_generation}.
 \end{itemize}
 
 \item \textbf{Chapter 4 (Experiments and Evaluation):} Presents the experimental setup and results, demonstrating the effectiveness of the proposed system. This chapter includes:
@@ -84,4 +86,12 @@ The remainder of this thesis is structured as follows:
 \end{itemize}
 
 \item \textbf{Chapter 5 (Conclusions and Future Work):} Concludes the thesis by summarizing the key contributions, discussing the limitations of the current system, and outlining potential future research directions. This chapter provides a concluding perspective on the research presented in the thesis and suggests avenues for further exploration and development in the field of open-vocabulary semantic segmentation.
+
+\item \textbf{Appendices:} The thesis includes several appendices with technical details:
+\begin{itemize}
+\item \textbf{Appendix A (Technical Foundations):} Detailed technical explanations of CLIP, SAM2, and Stable Diffusion architectures.
+\item \textbf{Appendix B (Implementation Details):} Specific implementation details, code snippets, and configuration parameters.
+\item \textbf{Appendix C (State of the Art in Video Inpainting):} Comprehensive review of video inpainting evolution from flow-based to diffusion-based methods.
+\item \textbf{Appendix E (Video Generation):} Complete technical details of the video segmentation pipeline, including SAM2's temporal tracking mechanism, VACE integration for text-driven video inpainting, memory management strategies, and practical considerations for consumer hardware deployment.
+\end{itemize}
 \end{itemize}
