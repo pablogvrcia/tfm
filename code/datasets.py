@@ -4,6 +4,7 @@ Dataset Loaders for Open-Vocabulary Semantic Segmentation Benchmarks
 This module contains dataset loaders for:
 - PASCAL VOC 2012
 - COCO-Stuff 164K
+- Cityscapes
 - ADE20K (placeholder)
 - COCO-Open split (placeholder)
 """
@@ -311,6 +312,215 @@ class COCOOpenDataset:
         raise NotImplementedError()
 
 
+class CityscapesDataset:
+    """
+    Cityscapes Dataset Loader.
+
+    Dataset: 19 classes for semantic segmentation
+    Paper: https://arxiv.org/abs/1604.01685
+
+    Supports two directory structures:
+
+    1. Standard Cityscapes:
+        cityscapes/
+            leftImg8bit/
+                train/cityname/*.png
+                val/cityname/*.png
+            gtFine/
+                train/cityname/*_labelTrainIds.png
+                val/cityname/*_labelTrainIds.png
+
+    2. Simplified structure:
+        cityscapes/
+            train/
+                img/*.png
+                label/*.png
+            val/
+                img/*.png
+                label/*.png
+    """
+
+    CLASSES = [
+        'road', 'sidewalk', 'building', 'wall', 'fence', 'pole',
+        'trafficlight', 'trafficsign', 'vegetation', 'terrain',
+        'sky', 'person', 'rider', 'car', 'truck', 'bus', 'train',
+        'motorcycle', 'bicycle'
+    ]
+
+    # Standard Cityscapes ID to trainID mapping
+    # Source: https://github.com/mcordts/cityscapesScripts
+    ID_TO_TRAINID = {
+        7: 0,   # road
+        8: 1,   # sidewalk
+        11: 2,  # building
+        12: 3,  # wall
+        13: 4,  # fence
+        17: 5,  # pole
+        19: 6,  # traffic light
+        20: 7,  # traffic sign
+        21: 8,  # vegetation
+        22: 9,  # terrain
+        23: 10, # sky
+        24: 11, # person
+        25: 12, # rider
+        26: 13, # car
+        27: 14, # truck
+        28: 15, # bus
+        31: 16, # train
+        32: 17, # motorcycle
+        33: 18, # bicycle
+        # All other IDs map to 255 (ignore)
+    }
+
+    def __init__(self, data_dir: Path, split='val', max_samples: Optional[int] = None):
+        """
+        Initialize Cityscapes dataset.
+
+        Args:
+            data_dir: Root directory containing datasets (e.g., ./data/benchmarks)
+            split: Dataset split ('train', 'val', 'train+val')
+            max_samples: Maximum number of samples to load (None = all)
+        """
+        import glob
+
+        self.data_dir = Path(data_dir) / "cityscapes"
+        self.split = split
+        self.num_classes = 19
+        self.class_names = self.CLASSES
+
+        # Validate split
+        assert self.split in ["train", "val", "train+val"], \
+            f"Split must be one of ['train', 'val', 'train+val'], got {self.split}"
+
+        split_dirs = {
+            "train": ["train"],
+            "val": ["val"],
+            "train+val": ["train", "val"]
+        }
+
+        # Collect image and label paths
+        self.image_files = []
+        self.label_files = []
+
+        for split_dir in split_dirs[self.split]:
+            # Check for two possible directory structures:
+            # 1. Standard Cityscapes: leftImg8bit/val/cityname/*.png
+            # 2. Simplified structure: val/img/*.png
+
+            standard_images_path = self.data_dir / "leftImg8bit" / split_dir
+            simplified_images_path = self.data_dir / split_dir / "img"
+
+            if simplified_images_path.exists():
+                # Simplified structure: val/img/ and val/label/
+                images_path = simplified_images_path
+                labels_path = self.data_dir / split_dir / "label"
+
+                if not labels_path.exists():
+                    raise FileNotFoundError(f"Labels directory not found: {labels_path}")
+
+                # Find all images (no subdirectories in simplified structure)
+                for img_path in sorted(glob.glob(str(images_path / "*.png"))):
+                    self.image_files.append(img_path)
+                    # Corresponding label has same filename
+                    img_filename = Path(img_path).name
+                    label_path = str(labels_path / img_filename)
+                    self.label_files.append(label_path)
+
+            elif standard_images_path.exists():
+                # Standard Cityscapes structure: leftImg8bit/val/cityname/*.png
+                images_path = standard_images_path
+
+                # Find all images in subdirectories (cityname folders)
+                for img_path in sorted(glob.glob(str(images_path / "*" / "*.png"))):
+                    self.image_files.append(img_path)
+                    # Convert image path to label path
+                    # e.g., leftImg8bit/val/lindau/lindau_000000_000019_leftImg8bit.png
+                    # ->    gtFine/val/lindau/lindau_000000_000019_gtFine_labelIds.png
+                    label_path = img_path.replace("_leftImg8bit.png", "_gtFine_labelIds.png")
+                    label_path = label_path.replace("leftImg8bit", "gtFine")
+                    self.label_files.append(label_path)
+            else:
+                raise FileNotFoundError(
+                    f"Images directory not found. Tried:\n"
+                    f"  Standard: {standard_images_path}\n"
+                    f"  Simplified: {simplified_images_path}"
+                )
+
+        if len(self.image_files) == 0:
+            raise ValueError(f"No images found in {self.data_dir}")
+
+        if max_samples is not None:
+            self.image_files = self.image_files[:max_samples]
+            self.label_files = self.label_files[:max_samples]
+
+    def get_num_classes(self):
+        return self.num_classes
+
+    def get_class_names(self):
+        return self.CLASSES
+
+    def __len__(self):
+        return len(self.image_files)
+
+    def __getitem__(self, idx):
+        if isinstance(idx, slice):
+            # Handle slicing
+            start, stop, step = idx.indices(len(self))
+            new_dataset = CityscapesDataset.__new__(CityscapesDataset)
+            new_dataset.data_dir = self.data_dir
+            new_dataset.split = self.split
+            new_dataset.num_classes = self.num_classes
+            new_dataset.class_names = self.class_names
+            new_dataset.image_files = self.image_files[idx]
+            new_dataset.label_files = self.label_files[idx]
+            return new_dataset
+
+        if idx >= len(self):
+            raise IndexError(f"Index {idx} out of range for dataset of size {len(self)}")
+
+        # Load image
+        img_path = self.image_files[idx]
+        image = np.array(Image.open(img_path).convert('RGB'))
+
+        # Load label mask
+        label_path = self.label_files[idx]
+        if not Path(label_path).exists():
+            # If label doesn't exist, create empty mask with ignore label
+            mask = np.full(image.shape[:2], 255, dtype=np.uint8)
+        else:
+            # Load mask (could be RGB or grayscale)
+            mask_pil = Image.open(label_path)
+            mask = np.array(mask_pil)
+
+            # If mask is RGB, convert to grayscale by taking first channel
+            # (Cityscapes labels are sometimes stored as color-coded RGB)
+            if len(mask.shape) == 3:
+                mask = mask[:, :, 0]
+
+            # Convert Cityscapes IDs to trainIDs (0-18)
+            # Check if mask needs conversion (has values outside 0-18 range)
+            if mask.max() > 18 or not np.all(np.isin(mask[mask <= 18], list(range(19)))):
+                # Create output mask with ignore label (255) as default
+                trainid_mask = np.full(mask.shape, 255, dtype=np.uint8)
+
+                # Apply mapping for valid IDs
+                for cityscapes_id, train_id in self.ID_TO_TRAINID.items():
+                    trainid_mask[mask == cityscapes_id] = train_id
+
+                mask = trainid_mask
+
+        # Extract image ID from filename
+        # e.g., lindau_000000_000019_leftImg8bit.png -> lindau_000000_000019
+        img_id = Path(img_path).stem.replace('_leftImg8bit', '')
+
+        return {
+            'image': image,
+            'mask': mask,
+            'class_names': self.class_names,
+            'image_id': img_id
+        }
+
+
 class MockDataset:
     """
     Mock dataset for testing and development.
@@ -358,7 +568,7 @@ def load_dataset(dataset_name: str, data_dir: Path, max_samples: Optional[int] =
     Factory function to load any dataset by name.
 
     Args:
-        dataset_name: Name of dataset ('pascal-voc', 'coco-stuff', 'ade20k', 'coco-open')
+        dataset_name: Name of dataset ('pascal-voc', 'coco-stuff', 'cityscapes', 'ade20k', 'coco-open')
         data_dir: Root directory containing datasets
         max_samples: Maximum number of samples to load
 
@@ -371,6 +581,7 @@ def load_dataset(dataset_name: str, data_dir: Path, max_samples: Optional[int] =
     dataset_map = {
         'pascal-voc': PASCALVOCDataset,
         'coco-stuff': COCOStuffDataset,
+        'cityscapes': CityscapesDataset,
         'ade20k': ADE20KDataset,
         'coco-open': COCOOpenDataset,
     }
@@ -385,6 +596,8 @@ def load_dataset(dataset_name: str, data_dir: Path, max_samples: Optional[int] =
         return dataset_class(data_dir, split='val', max_samples=max_samples)
     elif dataset_name == 'coco-stuff':
         return dataset_class(data_dir, split='val2017', max_samples=max_samples)
+    elif dataset_name == 'cityscapes':
+        return dataset_class(data_dir, split='val', max_samples=max_samples)
     elif dataset_name == 'ade20k':
         return dataset_class(data_dir, split='validation', max_samples=max_samples)
     elif dataset_name == 'coco-open':
