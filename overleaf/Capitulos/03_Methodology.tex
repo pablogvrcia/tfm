@@ -89,15 +89,17 @@ The complete SCLIP pipeline (see Figure \ref{fig:clip_guided_pipeline} for overv
 
 \textbf{2. Text encoding:} For each class, encode text descriptors with templates (detailed in Sections \ref{sec:descriptor_files}, \ref{sec:template_strategies}) to get embeddings $e_c \in \mathbb{R}^{512}$
 
-\textbf{3. Similarity computation:} Calculate dense cosine similarity between image patches and text embeddings:
+\textbf{3. Similarity computation:} Calculate dense cosine similarity between image patches and text embeddings at the 14×14 feature resolution:
 \begin{equation}
 S_{i,j,c} = F[i,j,:] \cdot e_c \in [-1, 1], \quad S \in \mathbb{R}^{14 \times 14 \times C}
 \end{equation}
+where $(i,j) \in [0,13] \times [0,13]$ indexes the 14×14 patch grid.
 
-\textbf{4. Dense predictions:} Upsample to original resolution and apply softmax with temperature scaling ($T=40$):
+\textbf{4. Dense predictions:} Bilinear upsampling maps the 14×14 similarity tensor to full image resolution $H \times W$ (typically 224×224), yielding $S' \in \mathbb{R}^{H \times W \times C}$. We then apply softmax with temperature scaling ($T=40$) at each pixel location $(x,y)$:
 \begin{equation}
-P_{x,y,c} = \frac{\exp(T \cdot S_{x,y,c})}{\sum_{c'} \exp(T \cdot S_{x,y,c'})}, \quad \hat{c}(x,y) = \arg\max_c P_{x,y,c}
+P_{x,y,c} = \frac{\exp(T \cdot S'_{x,y,c})}{\sum_{c'} \exp(T \cdot S'_{x,y,c'})}, \quad \hat{c}(x,y) = \arg\max_c P_{x,y,c}
 \end{equation}
+where $(x,y) \in [0, H-1] \times [0, W-1]$ indexes pixel coordinates in the upsampled resolution.
 
 This produces pixel-wise class predictions $\hat{c} \in \mathbb{R}^{H \times W}$ and confidence maps $P \in \mathbb{R}^{H \times W \times C}$ that feed into the intelligent prompting strategy.
 
@@ -232,87 +234,6 @@ Adaptive & 5-7 & 11-16× & 67.8 \\
 \caption{Template strategy comparison. ImageNet-80 achieves best accuracy; Top-7 offers best speed/accuracy tradeoff.}
 \label{tab:template_strategies}
 \end{table}
-
-\subsubsection{Computational Optimizations}
-\label{sec:computational_optimizations}
-
-This section describes the implementation of computational optimizations.
-
-Beyond algorithmic improvements (descriptor files, template strategies, intelligent prompting), several low-level computational optimizations are implemented that significantly improve inference speed and memory efficiency without affecting accuracy. These optimizations are critical for practical deployment, especially on resource-constrained hardware.
-
-\paragraph{Mixed Precision Inference (FP16)}
-
-Modern GPUs achieve substantially higher throughput when operating on 16-bit floating-point (FP16) data compared to standard 32-bit (FP32). The implementation leverages PyTorch's automatic mixed precision (AMP) to accelerate inference while preserving numerical stability.
-
-\textbf{Implementation:} The implementation leverages PyTorch's automatic mixed precision (AMP) to accelerate inference. Code details are available in Appendix \ref{sec:appendix_optimizations}.
-
-The \texttt{autocast} context automatically identifies operations that benefit from FP16 (e.g., matrix multiplications, convolutions) while keeping precision-sensitive operations (e.g., softmax, normalization) in FP32. This hybrid approach provides:
-
-\begin{itemize}
-    \item \textbf{Speed improvement}: Approximately 1.5-2× faster inference on modern GPUs (Ampere, Ada Lovelace architectures)
-    \item \textbf{Memory reduction}: 50\% reduction in activation memory, enabling larger batch sizes or higher-resolution inputs
-    \item \textbf{Numerical stability}: Critical operations remain in FP32, preventing precision-related artifacts
-    \item \textbf{Accuracy preservation}: No measurable impact on segmentation quality
-\end{itemize}
-
-\textbf{Note:} FP16 optimizations are only enabled on CUDA devices. CPU inference defaults to FP32 due to limited FP16 hardware support on most CPUs.
-
-\paragraph{Just-In-Time Compilation (torch.compile)}
-
-PyTorch 2.0+ introduces \texttt{torch.compile()}, a JIT compiler that fuses operations, eliminates Python overhead, and generates optimized CUDA kernels. The implementation applies compilation to both the CLIP vision encoder and text encoder.
-
-\textbf{Implementation:} The implementation applies compilation to both the CLIP vision encoder and text encoder using \texttt{mode="reduce-overhead"}. See Appendix \ref{sec:appendix_optimizations} for the code.
-
-The \texttt{"reduce-overhead"} mode prioritizes minimizing kernel launch overhead and maximizing GPU occupancy. First-inference compilation incurs a one-time overhead (10-20 seconds), but subsequent inferences benefit from:
-
-\begin{itemize}
-    \item \textbf{Kernel fusion}: Combines consecutive operations (e.g., LayerNorm + Linear + GELU) into single kernels
-    \item \textbf{Memory optimization}: Reduces intermediate tensor allocations through in-place operations
-    \item \textbf{Graph-level optimization}: Eliminates redundant computations and optimizes data movement
-    \item \textbf{Speedup}: Additional 1.2-1.5× improvement on top of FP16 optimizations
-\end{itemize}
-
-\textbf{Trade-offs:} Compilation adds initial latency and slightly increases memory usage during compilation. For single-image inference, the overhead may not be justified. For benchmark evaluation (hundreds of images), compilation provides substantial cumulative savings.
-
-\paragraph{Batched SAM2 Prompting}
-
-Standard SAM2 usage prompts one point at a time, requiring separate forward passes for each prompt. With 50-300 prompts per image, this creates significant overhead from repeated model loading, tensor transfers, and kernel launches. The implementation uses batched prompting to process multiple points simultaneously.
-
-\textbf{Implementation:} The implementation processes multiple points simultaneously in batches (default size 32). See Appendix \ref{sec:appendix_optimizations} for the implementation details.
-
-Batching exploits GPU parallelism by:
-\begin{itemize}
-    \item \textbf{Amortizing overhead}: Single image encoding shared across all prompts in batch
-    \item \textbf{Parallel mask decoding}: Decoder processes multiple prompts simultaneously
-    \item \textbf{Efficient memory access}: Coalesced GPU memory reads/writes
-    \item \textbf{Speedup}: 2-4× faster than sequential prompting, depending on batch size
-\end{itemize}
-
-\textbf{Batch size selection:} Larger batches improve GPU utilization but increase memory consumption. The default batch size of 32 provides a balance, fitting comfortably within 6GB VRAM while maintaining high throughput.
-
-\paragraph{Combined Impact}
-
-When all optimizations are enabled together, they provide multiplicative speedup:
-
-\begin{table}[h]
-\centering
-\begin{tabular}{lcc}
-\hline
-\textbf{Configuration} & \textbf{Time/Image (s)} & \textbf{Relative Speedup} \\
-\hline
-Baseline (FP32, no compile, sequential) & 45-60 & 1.0× \\
-+ FP16 & 25-35 & 1.5-1.8× \\
-+ FP16 + torch.compile & 18-28 & 2.1-2.5× \\
-+ FP16 + torch.compile + batching & 12-20 & 3.0-3.8× \\
-\hline
-\end{tabular}
-\caption{Cumulative impact of computational optimizations on inference time (NVIDIA RTX series GPU, PASCAL VOC images).}
-\label{tab:computational_optimizations}
-\end{table}
-
-These optimizations enable practical deployment on consumer hardware (e.g., NVIDIA GeForce GTX 1060 6GB) where the best configuration achieves 12-33 seconds per image for the complete CLIP-guided SAM2 pipeline.
-
-
 
 
 \subsection{Intelligent Prompt Extraction}
@@ -459,6 +380,41 @@ The complete prompt extraction algorithm processes all classes in parallel:
 \text{Prompts} = \bigcup_{c=1}^{C} \left\{ \text{Prompt}_c^i : R_c^i \text{ valid after filtering} \right\}
 \end{equation}
 
+Algorithm~\ref{alg:intelligent_prompting} provides the complete pseudocode for the intelligent prompt extraction process.
+
+\begin{algorithm}[H]
+\caption{Intelligent Prompt Extraction from SCLIP Predictions}
+\label{alg:intelligent_prompting}
+\begin{algorithmic}[1]
+\State \textbf{Input:} Segmentation map $\hat{c} \in \mathbb{R}^{H \times W}$, probability map $P \in \mathbb{R}^{H \times W \times C}$
+\State \textbf{Parameters:} Confidence threshold $\tau_{\text{conf}} = 0.7$, minimum area $\tau_{\text{area}} = 100$
+\State \textbf{Output:} Prompt set $\mathcal{P} = \{(\mathbf{p}_i, c_i, \text{conf}_i, \text{area}_i)\}$
+\State
+\State $\mathcal{P} \gets \emptyset$ \Comment{Initialize empty prompt set}
+\State
+\For{each class $c = 1$ to $C$}
+    \State \textbf{// Stage 1: Confidence Masking}
+    \State $M_c^{\text{conf}}(x,y) \gets \mathbb{1}[\hat{c}(x,y) = c \text{ and } P_{x,y,c} > \tau_{\text{conf}}]$
+    \State
+    \State \textbf{// Stage 2: Connected Component Analysis}
+    \State $\{R_c^1, R_c^2, \ldots, R_c^{N_c}\} \gets \text{ConnectedComponents}(M_c^{\text{conf}})$
+    \State
+    \State \textbf{// Stage 3-5: Region Filtering, Centroid Extraction, Metadata}
+    \For{each region $R_c^i$ in $\{R_c^1, \ldots, R_c^{N_c}\}$}
+        \If{$|R_c^i| > \tau_{\text{area}}$} \Comment{Size filtering}
+            \State $\bar{x} \gets \frac{1}{|R_c^i|} \sum_{(x,y) \in R_c^i} x$ \Comment{Centroid x}
+            \State $\bar{y} \gets \frac{1}{|R_c^i|} \sum_{(x,y) \in R_c^i} y$ \Comment{Centroid y}
+            \State $\mathbf{p}_c^i \gets (\text{round}(\bar{x}), \text{round}(\bar{y}))$
+            \State $\text{conf}_c^i \gets P_{\bar{x}, \bar{y}, c}$ \Comment{Confidence at centroid}
+            \State $\mathcal{P} \gets \mathcal{P} \cup \{(\mathbf{p}_c^i, c, \text{conf}_c^i, |R_c^i|)\}$
+        \EndIf
+    \EndFor
+\EndFor
+\State
+\State \Return $\mathcal{P}$ \Comment{Typically 50-300 prompts}
+\end{algorithmic}
+\end{algorithm}
+
 \textbf{Typical prompt counts:} For Pascal VOC 2012 images with 21 classes (20 objects + background), the extraction produces:
 \begin{itemize}
     \item \textbf{Simple scenes:} 50-100 prompts (sparse objects, large background regions)
@@ -471,7 +427,7 @@ The complete prompt extraction algorithm processes all classes in parallel:
 \text{Reduction} = 1 - \frac{150}{4096} = 96.3\%
 \end{equation}
 
-This 27× reduction in SAM2 queries translates directly to 27× speedup in mask generation, enabling practical deployment on consumer hardware.
+This 27× reduction in SAM2 queries translates to 3-4× end-to-end speedup in practice (accounting for fixed costs like image encoding), enabling practical deployment on consumer hardware.
 
 \subsubsection{Hyperparameter Selection}
 
@@ -509,6 +465,65 @@ SAM2 generates a high-quality instance mask $M_i$ at prompt $p_i$, and the class
 \caption{Comparison between SCLIP dense prediction baseline and the proposed CLIP-guided prompting approach. Three representative examples demonstrate key advantages: superior boundary quality through SAM2 integration (+13.19pp on horse), improved small object detection (+7.77pp on bottle), and cleaner instance separation in cluttered scenes (+7.00pp on person). Red circles highlight baseline errors; green checkmarks indicate improvements. The proposed method achieves significant prompt reduction (3-15 points vs 4096 grid) while improving accuracy across all scenarios.}
 \label{fig:comparison_baseline}
 \end{figure}
+
+\subsection{Computational Optimizations}
+\label{sec:computational_optimizations}
+
+Beyond the algorithmic improvements (descriptor files, template strategies, intelligent prompting), several low-level computational optimizations significantly improve inference speed and memory efficiency without affecting accuracy. These optimizations are critical for practical deployment, especially on resource-constrained hardware.
+
+\subsubsection{Computational Complexity Analysis}
+
+Before discussing implementation optimizations, we analyze the computational complexity of the CLIP-guided prompting approach compared to baseline methods.
+
+For an image of resolution $H \times W$ with $C$ classes and CLIP embedding dimension $D = 512$:
+
+\textbf{SCLIP dense prediction:} $\mathcal{O}(H \times W \times C \times D)$ for computing similarity between all pixels and all class embeddings.
+
+\textbf{Intelligent prompt extraction:} $\mathcal{O}(H \times W)$ for connected component analysis and centroid computation, dominated by the linear scan through confidence masks.
+
+\textbf{SAM2 segmentation:} $\mathcal{O}(N_{\text{prompts}} \times T_{\text{SAM2}})$ where $N_{\text{prompts}} \in [50, 300]$ is the number of extracted prompts and $T_{\text{SAM2}}$ is the per-prompt processing time.
+
+\textbf{Baseline grid sampling:} $\mathcal{O}(N_{\text{grid}} \times T_{\text{SAM2}})$ where $N_{\text{grid}} = 4096$ for a $64 \times 64$ grid.
+
+\textbf{Theoretical speedup:} $\frac{N_{\text{grid}}}{N_{\text{prompts}}} = \frac{4096}{50\text{-}300} \approx 13\text{-}80\times$
+
+In practice, the speedup is lower due to fixed costs (image encoding, feature extraction), but the intelligent prompting approach consistently achieves $3\text{-}4\times$ end-to-end speedup on PASCAL VOC 2012 images.
+
+\subsubsection{Mixed Precision Inference (FP16)}
+
+Modern GPUs achieve substantially higher throughput when operating on 16-bit floating-point (FP16) data compared to standard 32-bit (FP32). The implementation leverages PyTorch's automatic mixed precision (AMP) to accelerate inference while preserving numerical stability. Code details are available in Appendix \ref{sec:appendix_optimizations}.
+
+The \texttt{autocast} context automatically identifies operations that benefit from FP16 (e.g., matrix multiplications, convolutions) while keeping precision-sensitive operations (e.g., softmax, normalization) in FP32. This hybrid approach provides approximately $1.5\text{-}2\times$ faster inference on modern GPUs (Ampere, Ada Lovelace architectures), 50\% reduction in activation memory, and no measurable impact on segmentation quality.
+
+\subsubsection{Just-In-Time Compilation}
+
+PyTorch 2.0+ introduces \texttt{torch.compile()}, which fuses operations, eliminates Python overhead, and generates optimized CUDA kernels. The implementation applies compilation to both the CLIP vision encoder and text encoder using \texttt{mode="reduce-overhead"}. See Appendix \ref{sec:appendix_optimizations} for details.
+
+While compilation incurs a one-time overhead (10-20 seconds), subsequent inferences benefit from kernel fusion, memory optimization, and graph-level optimization, providing an additional $1.2\text{-}1.5\times$ improvement on top of FP16 optimizations.
+
+\subsubsection{Batched SAM2 Prompting}
+
+Standard SAM2 usage prompts one point at a time, requiring separate forward passes for each prompt. With 50-300 prompts per image, this creates significant overhead. The implementation processes multiple points simultaneously in batches (default size 32), exploiting GPU parallelism to achieve $2\text{-}4\times$ speedup over sequential prompting. Implementation details in Appendix \ref{sec:appendix_optimizations}.
+
+\subsubsection{Combined Impact}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{lcc}
+\hline
+\textbf{Configuration} & \textbf{Time/Image (s)} & \textbf{Relative Speedup} \\
+\hline
+Baseline (FP32, no compile, sequential) & 45-60 & 1.0× \\
++ FP16 & 25-35 & 1.5-1.8× \\
++ FP16 + torch.compile & 18-28 & 2.1-2.5× \\
++ FP16 + torch.compile + batching & 12-20 & 3.0-3.8× \\
+\hline
+\end{tabular}
+\caption{Cumulative impact of computational optimizations on inference time (NVIDIA RTX series GPU, PASCAL VOC images).}
+\label{tab:computational_optimizations}
+\end{table}
+
+These optimizations enable practical deployment on consumer hardware (e.g., NVIDIA GeForce GTX 1060 6GB) where the best configuration achieves 12-33 seconds per image for the complete CLIP-guided SAM2 pipeline.
 
 \subsection{Boundary Refinement}
 \label{sec:boundary_refinement}
