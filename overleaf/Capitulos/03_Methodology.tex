@@ -104,7 +104,7 @@ This produces pixel-wise class predictions $\hat{c} \in \mathbb{R}^{H \times W}$
 \subsubsection{Descriptor Files: Multi-Term Class Representations}
 \label{sec:descriptor_files}
 
-\fbox{\textbf{Thesis Contribution}} This section describes the enhancement to SCLIP through descriptor files.
+This section describes the enhancement to SCLIP through descriptor files.
 
 In practice, using a single class name (e.g., "person") limits CLIP's ability to recognize intra-class variations. \textbf{Descriptor files} address this limitation by providing multiple descriptive terms for each class, enabling CLIP to match different visual manifestations of the same semantic category.
 
@@ -147,7 +147,7 @@ This produces a richer class embedding that captures multiple visual manifestati
 
 \paragraph{Impact on Performance}
 
-Descriptor files contribute significantly to the 68.09\% mIoU on PASCAL VOC:
+Descriptor files contribute significantly to overall performance on PASCAL VOC:
 \begin{itemize}
     \item \textbf{Background}: 86.90\% IoU - comprehensive coverage of stuff classes
     \item \textbf{Person}: 56.70\% IoU - improved through clothing-aware variants
@@ -158,7 +158,7 @@ Descriptor files contribute significantly to the 68.09\% mIoU on PASCAL VOC:
 \subsubsection{Template Optimization Strategies}
 \label{sec:template_strategies}
 
-\fbox{\textbf{Thesis Contribution}} This section describes the evaluation and selection of template strategies.
+This section describes the evaluation and selection of template strategies.
 
 While descriptor files address \textit{what} terms to encode, template strategies determine \textit{how} to frame those terms for CLIP. Standard approaches use 80 ImageNet templates \cite{zhou2022learning}, but recent research \cite{huang2024pixelclip, wysoczanska2024clipdiy} shows that carefully curated templates tailored for dense prediction can achieve better accuracy with 10× fewer templates.
 
@@ -211,7 +211,7 @@ We implement several template strategies, selectable via the system configuratio
 
 Template selection is configured via Python code. The specific implementation of the recommended Top-7 strategy is detailed in Appendix \ref{sec:appendix_templates}.
 
-Our best results (68.09\% mIoU) use the \textbf{ImageNet-80} strategy, trading inference speed for maximum accuracy. For faster inference with minimal accuracy loss, Top-7 is recommended.
+The \textbf{ImageNet-80} strategy provides maximum accuracy by trading inference speed for comprehensive template coverage. For faster inference with minimal accuracy loss, Top-7 is recommended.
 
 \paragraph{Performance Comparison}
 
@@ -236,7 +236,7 @@ Adaptive & 5-7 & 11-16× & 67.8 \\
 \subsubsection{Computational Optimizations}
 \label{sec:computational_optimizations}
 
-\fbox{\textbf{Thesis Contribution}} This section describes the implementation of computational optimizations.
+This section describes the implementation of computational optimizations.
 
 Beyond algorithmic improvements (descriptor files, template strategies, intelligent prompting), several low-level computational optimizations are implemented that significantly improve inference speed and memory efficiency without affecting accuracy. These optimizations are critical for practical deployment, especially on resource-constrained hardware.
 
@@ -252,7 +252,7 @@ The \texttt{autocast} context automatically identifies operations that benefit f
     \item \textbf{Speed improvement}: Approximately 1.5-2× faster inference on modern GPUs (Ampere, Ada Lovelace architectures)
     \item \textbf{Memory reduction}: 50\% reduction in activation memory, enabling larger batch sizes or higher-resolution inputs
     \item \textbf{Numerical stability}: Critical operations remain in FP32, preventing precision-related artifacts
-    \item \textbf{Accuracy preservation}: No measurable impact on mIoU (68.09\% maintained)
+    \item \textbf{Accuracy preservation}: No measurable impact on segmentation quality
 \end{itemize}
 
 \textbf{Note:} FP16 optimizations are only enabled on CUDA devices. CPU inference defaults to FP32 due to limited FP16 hardware support on most CPUs.
@@ -318,7 +318,7 @@ These optimizations enable practical deployment on consumer hardware (e.g., NVID
 \subsection{Intelligent Prompt Extraction}
 \label{sec:intelligent_prompting}
 
-\fbox{\textbf{Main Contribution}} This is the core algorithmic contribution: using SCLIP's dense predictions to extract intelligent prompt points for SAM2, achieving substantial efficiency gains while outperforming recent training-free methods on PASCAL VOC 2012.
+This is the core algorithmic contribution: using SCLIP's dense predictions to extract intelligent prompt points for SAM2, achieving substantial efficiency gains while outperforming recent training-free methods on PASCAL VOC 2012.
 
 The intelligent prompt extraction uses SCLIP's semantic understanding to guide SAM2 prompting, achieving massive efficiency gains without sacrificing accuracy. This section details the complete pipeline from SCLIP's dense predictions to semantically meaningful prompt points.
 
@@ -499,7 +499,7 @@ SAM2 generates a high-quality instance mask $M_i$ at prompt $p_i$, and the class
 
 \begin{itemize}
     \item \textbf{SCLIP's semantic understanding:} Correct class assignment from vision-language features
-    \item \textbf{SAM2's segmentation quality:} Precise object boundaries from specialized segmentation model
+    \item \textbf{SAM 2's segmentation quality:} Precise object boundaries from specialized segmentation model
     \item \textbf{Efficient processing:} No need for majority voting or multi-scale evaluation
 \end{itemize}
 
@@ -513,9 +513,9 @@ SAM2 generates a high-quality instance mask $M_i$ at prompt $p_i$, and the class
 \subsection{Boundary Refinement}
 \label{sec:boundary_refinement}
 
-\fbox{\textbf{Thesis Contribution}} This enhancement improves boundary quality in the final segmentation.
+This enhancement improves boundary quality in the final segmentation.
 
-While SAM2 provides high-quality instance boundaries, the final merged segmentation can exhibit minor boundary artifacts at class transitions, particularly in regions where multiple SAM2 masks overlap or where SCLIP predictions have low confidence. To address this, the best-performing configuration (68.09\% mIoU on PASCAL VOC 2012) incorporates \textbf{Dense Conditional Random Field (CRF)} post-processing \cite{krahenbuhl2011efficient} as a refinement stage.
+While SAM2 provides high-quality instance boundaries, the final merged segmentation can exhibit minor boundary artifacts at class transitions, particularly in regions where multiple SAM2 masks overlap or where SCLIP predictions have low confidence. To address this, the system incorporates \textbf{Dense Conditional Random Field (CRF)} post-processing \cite{krahenbuhl2011efficient} as a refinement stage.
 
 \textbf{Dense CRF formulation:} Given the merged segmentation logits $P \in \mathbb{R}^{H \times W \times C}$ and original image $I$, Dense CRF refines boundaries by minimizing an energy function that encourages:
 \begin{itemize}
@@ -542,7 +542,7 @@ where $\psi_u$ are unary potentials from SCLIP logits, and $\psi_p$ are pairwise
 
 \textbf{Performance impact:} Dense CRF adds approximately 0.5-1.0 seconds per image but provides measurable quality improvements:
 \begin{itemize}
-    \item \textbf{mIoU improvement:} +1-2 percentage points (66.5\% → 68.09\% on PASCAL VOC 2012)
+    \item \textbf{mIoU improvement:} +1-2 percentage points on PASCAL VOC 2012
     \item \textbf{Boundary F1:} +3-5 percentage points (improves edge alignment)
     \item \textbf{Qualitative benefits:} Smoother class transitions, reduced salt-and-pepper noise
 \end{itemize}
@@ -572,7 +572,7 @@ While the primary focus of this thesis is image segmentation evaluated on PASCAL
 \label{fig:video_generation}
 \end{figure}
 
-The complete video processing pipeline (Figure~\ref{fig:video_generation}) enables zero-shot video editing workflows such as removing specific objects from sports footage or surveillance videos using only natural language descriptions. Processing 81 frames at 480p takes 3-8 minutes on consumer GPUs (GTX 1060 6GB).
+The complete video processing pipeline (Figure~\ref{fig:video_generation}) enables zero-shot video editing workflows such as removing specific objects from sports footage or surveillance videos using only natural language descriptions.
 
 For complete technical details including SAM2's temporal tracking mechanism, VACE configuration parameters, memory management strategies, and implementation considerations, see \textbf{Appendix~\ref{appendix:video_generation}}.
 

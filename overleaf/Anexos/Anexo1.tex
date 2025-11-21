@@ -17,7 +17,7 @@ Our implementation is built using the following core dependencies:
     \item \textbf{NumPy, PIL, tqdm:} Scientific computing and utilities
 \end{itemize}
 
-All experiments were conducted on an NVIDIA GeForce GTX 1060 6GB Max-Q mobile GPU. Due to the limited 6GB VRAM constraint, careful memory management and optimization were required. The dense SCLIP + SAM2 approach was adapted to work within this memory budget through FP16 precision, sequential processing, and model variant selection.
+All experiments were conducted on an NVIDIA GeForce GTX 1060 6GB Max-Q mobile GPU (except video generation, which has been performed on a more powerful GPU with higher VRAM RTX 4090 24GB). Due to the limited 6GB VRAM constraint, careful memory management and optimization were required. The dense SCLIP + SAM2 approach was adapted to work within this memory budget through FP16 precision, sequential processing, and model variant selection.
 
 \section{Code Repository Structure}
 

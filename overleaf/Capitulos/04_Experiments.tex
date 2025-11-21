@@ -106,7 +106,7 @@ Key observations:
 
     \item \textbf{Massive efficiency gains without accuracy loss:} Intelligent prompt extraction achieves 96\% reduction in computational cost (50-300 semantic points vs 4096 blind grid points) while simultaneously improving accuracy over exhaustive sampling approaches. This demonstrates that semantic guidance is not merely efficient—it actively improves segmentation quality.
 
-    \item \textbf{Superior boundary quality through SAM2 integration:} By leveraging SAM2's specialized segmentation capabilities guided by CLIP's semantic understanding, the approach achieves precise object boundaries that pure dense prediction methods (SCLIP, MaskCLIP) cannot match.
+    \item \textbf{Superior boundary quality through SAM 2 integration:} By leveraging SAM 2's specialized segmentation capabilities guided by CLIP's semantic understanding, the approach achieves precise object boundaries that pure dense prediction methods (SCLIP, MaskCLIP) cannot match.
 
     \item \textbf{Descriptor files and template optimization:} Three key enhancements contribute to the 68.09\% result: (1) multi-term descriptor files capturing intra-class variations, (2) ImageNet-80 template strategy providing comprehensive object descriptions, and (3) computational optimizations (FP16, torch.compile, batching) enabling practical deployment. Detailed ablations in Chapter \ref{ch:methodology} demonstrate each component's contribution.
 

@@ -41,12 +41,12 @@ This filtering pipeline ensures that only high-quality, semantically relevant ma
 A thorough evaluation protocol is established on PASCAL VOC 2012, measuring segmentation quality through multiple metrics (mIoU, pixel accuracy, F1 score, precision, recall, boundary F1). The experiments demonstrate:
 
 \begin{itemize}
-    \item \textbf{State-of-the-art open-vocabulary performance} on PASCAL VOC 2012, achieving \textbf{68.09\% mIoU} with CLIP-guided prompting, surpassing previous training-free methods (ITACLIP: 67.9\%)
-    \item Exceptional background recognition (86.90\% IoU) through comprehensive descriptor files
-    \item Strong class-specific results: Horse (78.49\%), Cat (75.48\%), Aeroplane (76.53\%)
-    \item High precision (81.13\%) and pixel accuracy (85.38\%) indicating effective false positive reduction
+    \item \textbf{State-of-the-art training-free performance} on PASCAL VOC 2012, surpassing previous open-vocabulary methods through intelligent prompting strategies
+    \item Exceptional background recognition through comprehensive descriptor files
+    \item Strong performance on diverse object categories demonstrating robust zero-shot generalization
+    \item High precision and pixel accuracy indicating effective false positive reduction
     \item Significant efficiency gains compared to blind grid sampling (50-300 vs 4096 points)
-    \item Comprehensive evaluation across 21 object categories demonstrating zero-shot generalization
+    \item Comprehensive evaluation across 21 object categories validating the approach
 \end{itemize}
 
 \subsection{Practical System Design}
@@ -70,7 +70,7 @@ This video extension demonstrates the versatility of the approach, showing how C
 
 \subsection{Open-Vocabulary Paradigm Shift}
 
-The results support the growing evidence that open-vocabulary approaches represent a fundamental shift in computer vision. Traditional closed-vocabulary methods achieve higher accuracy on their target classes (e.g., Mask2Former: 89.5\% on PASCAL VOC vs. 68.09\% from this work), but they completely fail on unseen objects. In contrast, the system gracefully handles arbitrary text prompts, making it far more versatile for real-world scenarios where the set of relevant objects cannot be predetermined.
+The results support the growing evidence that open-vocabulary approaches represent a fundamental shift in computer vision. Traditional closed-vocabulary methods achieve higher accuracy on their target classes (e.g., Mask2Former: 89.5\% on PASCAL VOC), but they completely fail on unseen objects. In contrast, the system gracefully handles arbitrary text prompts, making it far more versatile for real-world scenarios where the set of relevant objects cannot be predetermined.
 
 The gap between open-vocabulary and closed-vocabulary performance has narrowed significantly (approximately 21 percentage points on PASCAL VOC, down from 30 points), highlighting rapid progress in this field. The intelligent prompting strategy combined with descriptor files and optimized template strategies demonstrates significant advancement—achieving \textbf{state-of-the-art mIoU with a fraction of the prompts} required by blind grid sampling. This represents both efficiency gains and competitive accuracy among training-free methods on PASCAL VOC 2012.
 
