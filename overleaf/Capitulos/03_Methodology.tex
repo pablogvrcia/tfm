@@ -119,11 +119,9 @@ Standard approaches encode each class with a single term: ["person", "car", "dog
     \item \textbf{Compound objects} have material-specific variants (brick wall, wooden floor)
 \end{itemize}
 
-Descriptor files (e.g., \texttt{cls\_voc21.txt}) map each class index to a comma-separated list of descriptive terms, allowing CLIP to recognize these variations. This simple yet effective technique significantly improves segmentation quality without requiring retraining.
+Descriptor files map each class index to a comma-separated list of descriptive terms, allowing CLIP to recognize these variations. This simple yet effective technique significantly improves segmentation quality without requiring retraining.
 
-\paragraph{Implementation for PASCAL VOC 2012}
-
-Our PASCAL VOC descriptor file (\texttt{configs/cls\_voc21.txt}) provides rich descriptions for all 21 classes. For example, the background class includes terms like "sky", "wall", "tree", and "road", while the person class includes clothing variations. Full details of the descriptor file content are provided in Appendix \ref{sec:appendix_descriptors}.
+Our PASCAL VOC descriptor file provides rich descriptions for all 21 classes. For example, the background class includes terms like "sky", "wall", "tree", and "road", while the person class includes clothing variations. Full details of the descriptor file content are provided in Appendix \ref{sec:appendix_descriptors}.
 
 Synonym expansion (diningtable → "table") and multi-word variants (tvmonitor → "television monitor", "tv monitor") help CLIP understand Pascal VOC's specific naming conventions.
 
@@ -462,7 +460,7 @@ SAM2 generates a high-quality instance mask $M_i$ at prompt $p_i$, and the class
 \begin{figure}[h]
 \centering
 \includegraphics[width=0.95\textwidth]{Imagenes/3. Comparison between SCLIP dense prediction baseline and the proposed CLIP-guided prompting approach.png}
-\caption{Comparison between SCLIP dense prediction baseline and the proposed CLIP-guided prompting approach. Three representative examples demonstrate key advantages: superior boundary quality through SAM2 integration (+13.19pp on horse), improved small object detection (+7.77pp on bottle), and cleaner instance separation in cluttered scenes (+7.00pp on person). Red circles highlight baseline errors; green checkmarks indicate improvements. The proposed method achieves significant prompt reduction (3-15 points vs 4096 grid) while improving accuracy across all scenarios.}
+\caption{Comparison between SCLIP dense prediction baseline and the proposed CLIP-guided prompting approach. Four representative examples demonstrate key advantages: superior boundary quality through SAM2 integration, improved small object detection, and cleaner instance separation in cluttered scenes.}
 \label{fig:comparison_baseline}
 \end{figure}
 
@@ -507,7 +505,7 @@ Standard SAM2 usage prompts one point at a time, requiring separate forward pass
 
 \subsubsection{Combined Impact}
 
-\begin{table}[h]
+\begin{table}[!htbp]
 \centering
 \begin{tabular}{lcc}
 \hline
@@ -519,7 +517,7 @@ Baseline (FP32, no compile, sequential) & 45-60 & 1.0× \\
 + FP16 + torch.compile + batching & 12-20 & 3.0-3.8× \\
 \hline
 \end{tabular}
-\caption{Cumulative impact of computational optimizations on inference time (NVIDIA RTX series GPU, PASCAL VOC images).}
+\caption{Cumulative impact of computational optimizations on inference time.}
 \label{tab:computational_optimizations}
 \end{table}
 
@@ -569,7 +567,20 @@ The Dense CRF refinement is particularly effective for:
     \item \textbf{Low-confidence regions:} Resolves ambiguities through spatial context
 \end{itemize}
 
-\textbf{Note:} While computationally more expensive, this refinement is essential for achieving state-of-the-art results and is considered an integral part of the high-accuracy pipeline configuration.
+\textbf{Note:} While computationally more expensive, this refinement is essential for achieving near state-of-the-art results and is considered an integral part of the high-accuracy pipeline configuration.
+
+\subsection{Generative Editing Integration}
+
+Once refined segmentation masks are obtained from images, Stable Diffusion v2 Inpainting \cite{rombach2022high} is optionally integrated for text-driven image modification. The inpainting model operates in the latent space of a variational autoencoder (VAE), enabling high-resolution generation with computational efficiency.
+
+Several techniques are employed to ensure coherent results:
+\begin{itemize}
+    \item \textbf{Mask dilation:} Expand mask boundaries by 5-10 pixels for smoother blending
+    \item \textbf{Classifier-free guidance:} Use guidance scale of 7.5 to balance prompt following and realism
+    \item \textbf{Prompt engineering:} Reformulate user queries into detailed prompts suitable for the diffusion model
+\end{itemize}
+
+This completes the CLIP-guided prompting pipeline, enabling fully annotation-free open-vocabulary segmentation with high-quality boundaries and massive efficiency gains through intelligent semantic guidance.
 
 \subsection{Video Generation Extension}
 
@@ -590,16 +601,3 @@ While the primary focus of this thesis is image segmentation evaluated on PASCAL
 The complete video processing pipeline (Figure~\ref{fig:video_generation}) enables zero-shot video editing workflows such as removing specific objects from sports footage or surveillance videos using only natural language descriptions.
 
 For complete technical details including SAM2's temporal tracking mechanism, VACE configuration parameters, memory management strategies, and implementation considerations, see \textbf{Appendix~\ref{appendix:video_generation}}.
-
-\subsection{Generative Editing Integration}
-
-Once refined segmentation masks are obtained from images, Stable Diffusion v2 Inpainting \cite{rombach2022high} is optionally integrated for text-driven image modification. The inpainting model operates in the latent space of a variational autoencoder (VAE), enabling high-resolution generation with computational efficiency.
-
-Several techniques are employed to ensure coherent results:
-\begin{itemize}
-    \item \textbf{Mask dilation:} Expand mask boundaries by 5-10 pixels for smoother blending
-    \item \textbf{Classifier-free guidance:} Use guidance scale of 7.5 to balance prompt following and realism
-    \item \textbf{Prompt engineering:} Reformulate user queries into detailed prompts suitable for the diffusion model
-\end{itemize}
-
-This completes the CLIP-guided prompting pipeline, enabling fully annotation-free open-vocabulary segmentation with high-quality boundaries and massive efficiency gains through intelligent semantic guidance.

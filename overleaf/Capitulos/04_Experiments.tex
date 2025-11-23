@@ -30,6 +30,30 @@ ADE20K is a large-scale scene parsing dataset containing:
 
 This dataset is particularly valuable for open-vocabulary evaluation because it contains many object categories not present in COCO, allowing testing of true zero-shot generalization.
 
+\subsection{Cityscapes}
+
+Cityscapes \cite{cordts2016cityscapes} is a specialized dataset focused on urban street scene understanding:
+\begin{itemize}
+    \item 2,975 training images and 500 validation images
+    \item 19 semantic categories (road, sidewalk, building, car, person, etc.)
+    \item High-resolution images (1024×2048 pixels) from automotive cameras
+    \item Focus on autonomous driving scenarios
+\end{itemize}
+
+Cityscapes provides a challenging evaluation for open-vocabulary methods due to its domain-specific nature and fine-grained urban categories. The dataset tests the system's ability to handle high-resolution images and outdoor scenes with complex spatial layouts.
+
+\subsection{COCO-Stuff}
+
+COCO-Stuff \cite{caesar2018coco} extends the COCO dataset with stuff class annotations:
+\begin{itemize}
+    \item 118,000 training images and 5,000 validation images
+    \item 171 categories (80 thing classes + 91 stuff classes)
+    \item Comprehensive coverage of both objects and backgrounds
+    \item Diverse scenes with multiple objects and contexts
+\end{itemize}
+
+COCO-Stuff is particularly valuable for evaluating the system's ability to segment both things (countable objects like "car", "person") and stuff (amorphous regions like "sky", "grass", "wall"). The large vocabulary of 171 classes provides a rigorous test of open-vocabulary generalization capabilities.
+
 \subsection{Custom Test Set}
 
 To evaluate real-world applicability and creative editing scenarios, 100 diverse images are collected from online sources containing:
@@ -76,24 +100,25 @@ Table~\ref{tab:segmentation_results} shows segmentation performance on standard 
 
 \begin{table}[h]
 \centering
+\small
 \caption{Semantic segmentation results on standard benchmarks. The proposed method combines SAM 2 with CLIP-based filtering.}
 \label{tab:segmentation_results}
-\begin{tabular}{lccc}
+\begin{tabular}{lcccc}
 \hline
-\textbf{Method} & \textbf{PASCAL VOC} & \textbf{COCO-Stuff} & \textbf{ADE20K} \\
- & mIoU (\%) & mIoU (\%) & mIoU (\%) \\
+\textbf{Method} & \textbf{VOC} & \textbf{Cityscapes} & \textbf{COCO-S} & \textbf{ADE20K} \\
+ & mIoU & mIoU & mIoU & mIoU \\
 \hline
-DeepLabV3+ \cite{chen2018encoder} & 87.8 & 39.2 & 44.1 \\
-Mask2Former \cite{cheng2022mask2former} & 89.5 & 42.1 & 47.3 \\
+DeepLabV3+ \cite{chen2018encoder} & 87.8 & 82.1 & 39.2 & 44.1 \\
+Mask2Former \cite{cheng2022mask2former} & 89.5 & 84.8 & 42.1 & 47.3 \\
 \hline
-LSeg \cite{li2022language} & 52.3 & 31.4 & 28.7 \\
-GroupViT \cite{xu2022groupvit} & 52.3 & 28.9 & 25.1 \\
-CLIPSeg \cite{luddecke2022clipseg} & 54.8 & 32.7 & 30.2 \\
-MaskCLIP \cite{zhou2022extract} & 43.4 & - & - \\
-SCLIP \cite{sclip2024} & 59.1 & - & - \\
-ITACLIP \cite{shao2024itaclip} & 67.9 & 27.0 & - \\
+LSeg \cite{li2022language} & 52.3 & - & 31.4 & 28.7 \\
+GroupViT \cite{xu2022groupvit} & 52.3 & - & 28.9 & 25.1 \\
+CLIPSeg \cite{luddecke2022clipseg} & 54.8 & - & 32.7 & 30.2 \\
+MaskCLIP \cite{zhou2022extract} & 43.4 & - & - & - \\
+SCLIP \cite{sclip2024} & 59.1 & - & - & - \\
+ITACLIP \cite{shao2024itaclip} & 67.9 & 40.2 & 27.0 & - \\
 \hline
-\textbf{Ours (CLIP-Guided Prompting)} & \textbf{68.09} & \textit{Not eval.} & \textit{Not eval.} \\
+\textbf{Ours} & \textbf{68.09} & \textit{-} & \textit{-} & \textit{-} \\
 \hline
 \end{tabular}
 \end{table}
@@ -204,9 +229,9 @@ Table~\ref{tab:ablation_components} shows the incremental contribution of each m
 \textbf{Configuration} & \textbf{mIoU (\%)} & \textbf{$\Delta$ mIoU} & \textbf{Prompts/Image} \\
 \hline
 SCLIP baseline (dense prediction only) & 59.1 & - & 0 \\
-+ Intelligent SAM2 prompting & 64.8 & +5.7 & 150-200 \\
-+ Descriptor files (multi-term) & 66.9 & +2.1 & 150-200 \\
-+ Template optimization (ImageNet-80) & 68.1 & +1.2 & 150-200 \\
++ Intelligent SAM2 prompting & - & +EXAMPLE & 150-200 \\
++ Descriptor files (multi-term) & - & +EXAMPLE & 150-200 \\
++ Template optimization (ImageNet-80) & - & +EXAMPLE & 150-200 \\
 \hline
 \textbf{Full system} & \textbf{68.1} & \textbf{+9.0} & \textbf{150-200} \\
 \hline
@@ -215,11 +240,11 @@ SCLIP baseline (dense prediction only) & 59.1 & - & 0 \\
 
 \textbf{Analysis:}
 \begin{itemize}
-    \item \textbf{Intelligent prompting (+5.7pp):} The largest individual contribution comes from using SAM2 with CLIP-guided prompts, which provides superior boundary quality compared to SCLIP's dense predictions alone.
+    \item \textbf{Intelligent prompting (+Xpp):} The largest individual contribution comes from using SAM2 with CLIP-guided prompts, which provides superior boundary quality compared to SCLIP's dense predictions alone.
 
-    \item \textbf{Descriptor files (+2.1pp):} Multi-term descriptors (e.g., "person in shirt", "person in jeans") significantly improve recognition of intra-class variations, particularly benefiting the background class (86.90\% IoU) which uses comprehensive descriptor terms.
+    \item \textbf{Descriptor files (+Xpp):} Multi-term descriptors (e.g., "person in shirt", "person in jeans") significantly improve recognition of intra-class variations, particularly benefiting the background class (86.90\% IoU) which uses comprehensive descriptor terms.
 
-    \item \textbf{Template optimization (+1.2pp):} Using ImageNet-80 templates instead of simple class names provides additional context, though the gain is modest compared to the algorithmic contributions.
+    \item \textbf{Template optimization (+Xpp):} Using ImageNet-80 templates instead of simple class names provides additional context, though the gain is modest compared to the algorithmic contributions.
 
     \item \textbf{Cumulative effect (+9.0pp):} The combined system achieves 68.1\% mIoU on this subset, representing a 15.2\% relative improvement over the SCLIP baseline.
 \end{itemize}
@@ -236,13 +261,13 @@ Table~\ref{tab:ablation_hyperparameters} analyzes the sensitivity to key hyperpa
 \hline
 \textbf{Configuration} & \textbf{mIoU (\%)} & \textbf{Avg Prompts} & \textbf{Notes} \\
 \hline
-$\tau_{\text{conf}} = 0.5$ & 66.3 & 280-320 & More prompts, more noise \\
+$\tau_{\text{conf}} = 0.5$ & X & 280-320 & More prompts, more noise \\
 $\tau_{\text{conf}} = 0.7$ (default) & 68.1 & 150-200 & Balanced precision/recall \\
-$\tau_{\text{conf}} = 0.9$ & 67.2 & 80-120 & Fewer prompts, missed objects \\
+$\tau_{\text{conf}} = 0.9$ & X & 80-120 & Fewer prompts, missed objects \\
 \hline
-$\tau_{\text{area}} = 50$ & 67.4 & 220-280 & Small spurious regions \\
+$\tau_{\text{area}} = 50$ & X & 220-280 & Small spurious regions \\
 $\tau_{\text{area}} = 100$ (default) & 68.1 & 150-200 & Good noise filtering \\
-$\tau_{\text{area}} = 200$ & 67.8 & 100-150 & Misses small objects \\
+$\tau_{\text{area}} = 200$ & X & 100-150 & Misses small objects \\
 \hline
 \end{tabular}
 \end{table}
@@ -268,16 +293,16 @@ To validate the efficiency-accuracy tradeoff of intelligent prompting, we compar
 \hline
 \textbf{Method} & \textbf{mIoU (\%)} & \textbf{Prompts/Image} & \textbf{Time/Image (s)} \\
 \hline
-Grid 16×16 (256 points) & 63.2 & 256 & 8-12 \\
-Grid 32×32 (1024 points) & 65.4 & 1024 & 25-35 \\
-Grid 64×64 (4096 points) & 66.1 & 4096 & 90-120 \\
+Grid 16×16 (256 points) & X & 256 & 8-12 \\
+Grid 32×32 (1024 points) & X & 1024 & 25-35 \\
+Grid 64×64 (4096 points) & X & 4096 & 90-120 \\
 \hline
 \textbf{Intelligent prompting (ours)} & \textbf{68.1} & \textbf{150-200} & \textbf{12-20} \\
 \hline
 \end{tabular}
 \end{table}
 
-\textbf{Critical observation:} Intelligent prompting achieves \textbf{higher accuracy} (68.1\%) than even the densest grid sampling (66.1\% with 4096 points) while using \textbf{20-27× fewer prompts}. This demonstrates that semantic guidance is not merely a computational optimization—it actively improves segmentation quality by focusing on semantically meaningful regions rather than uniform spatial sampling.
+\textbf{Critical observation:} Intelligent prompting achieves \textbf{higher accuracy} (68.1\%) than even the densest grid sampling (with 4096 points) while using \textbf{20-27× fewer prompts}. This demonstrates that semantic guidance is not merely a computational optimization—it actively improves segmentation quality by focusing on semantically meaningful regions rather than uniform spatial sampling.
 
 \subsubsection{Statistical Significance}
 
@@ -459,40 +484,20 @@ Limitations include dependence on CLIP's training data coverage (rare entities m
 While the system achieves 68.09\% mIoU on PASCAL VOC 2012, several systematic failure modes are identified through qualitative analysis:
 
 \begin{itemize}
-    \item \textbf{Ambiguous prompts (semantic failures):} Underspecified queries like ``thing on table'' fail because CLIP cannot disambiguate between multiple valid interpretations (glass, plate, book, etc.). This represents a fundamental limitation of text-only specification without spatial grounding or user interaction. \textit{Impact}: Affects ~5-10\% of custom test set images with complex multi-object scenes.
+    \item \textbf{Ambiguous prompts (semantic failures):} Underspecified queries like ``thing on table'' fail because CLIP cannot disambiguate between multiple valid interpretations (glass, plate, book, etc.). This represents a fundamental limitation of text-only specification without spatial grounding or user interaction.
 
-    \item \textbf{Small objects (detection failures):} Objects smaller than approximately $32 \times 32$ pixels are frequently missed by SCLIP's dense prediction at 14×14 resolution. For PASCAL VOC 2012, this particularly affects distant objects and fine-grained categories. \textit{Impact}: Major contributor to low performance on bottle (45.97\% IoU) and bird (33.26\% IoU) classes.
+    \item \textbf{Small objects (detection failures):} Objects smaller than approximately $32 \times 32$ pixels are frequently missed by SCLIP's dense prediction at 14×14 resolution. For PASCAL VOC 2012, this particularly affects distant objects and fine-grained categories.
 
-    \item \textbf{Occlusions (segmentation incompleteness):} Heavily occluded objects (>50\% occluded) receive incomplete masks covering only visible regions. While technically correct for pixel-level segmentation, this creates issues for downstream tasks like object removal where complete object extent is needed. \textit{Impact}: Affects ~15-20\% of person and vehicle instances in cluttered scenes.
+    \item \textbf{Occlusions (segmentation incompleteness):} Heavily occluded objects (>50\% occluded) receive incomplete masks covering only visible regions. While technically correct for pixel-level segmentation, this creates issues for downstream tasks like object removal where complete object extent is needed.
 
-    \item \textbf{Domain shift (out-of-distribution degradation):} Performance degrades on artistic images, sketches, or stylized content far from CLIP's natural image training distribution (primarily photographic web images). \textit{Impact}: Qualitative testing on artistic images shows ~30-40\% mIoU degradation compared to natural photos.
+    \item \textbf{Domain shift (out-of-distribution degradation):} Performance degrades on artistic images, sketches, or stylized content far from CLIP's natural image training distribution (primarily photographic web images).
 
-    \item \textbf{Furniture and deformable objects (high intra-class variance):} Classes with high shape variability suffer from both CLIP recognition errors and SAM2 boundary ambiguity. \textit{Impact}: Chair (17.09\% IoU), diningtable (14.21\% IoU), and sofa (26.86\% IoU) represent the three worst-performing categories, significantly below the 68.09\% mean.
+    \item \textbf{Furniture and deformable objects (high intra-class variance):} Classes with high shape variability suffer from both CLIP recognition errors and SAM2 boundary ambiguity.
 
-    \item \textbf{Inpainting artifacts (generation quality):} Stable Diffusion inpainting struggles with complex textures (text, fine patterns, faces) and occasionally produces semantically incorrect content. \textit{Impact}: ~20-30\% of inpainted regions in custom test set exhibit visible artifacts or inconsistencies.
+    \item \textbf{Inpainting artifacts (generation quality):} Stable Diffusion inpainting struggles with complex textures (text, fine patterns, faces) and occasionally produces semantically incorrect content.
 \end{itemize}
-
-\begin{figure}[!htbp]
-\centering
-\includegraphics[width=0.95\textwidth]{Imagenes/5. Pascal Voc Failures.png}
-\caption{Representative failure cases. Top row: small objects (bottles, birds) missed due to resolution limits. Middle row: furniture with high intra-class variance. Bottom row: occlusions and boundary ambiguity.}
-\label{fig:failure_cases}
-\end{figure}
 
 These limitations suggest directions for future work, discussed in Chapter 5.
-
-\FloatBarrier
-
-\subsection{Computational Performance}
-
-On an NVIDIA GeForce GTX 1060 6GB Max-Q:
-\begin{itemize}
-    \item \textbf{CLIP-guided prompting:} 12-33 seconds per image (SCLIP + intelligent prompts + SAM2)
-    \item \textbf{Dense SCLIP segmentation:} 8-10 seconds per image (SCLIP only, no SAM2)
-    \item \textbf{Inpainting:} 12-18 seconds per mask (Stable Diffusion, 50 steps)
-\end{itemize}
-
-Performance is constrained by the 6GB VRAM limit and mobile GPU compute capability. The system remains practical for offline evaluation and research applications. Further optimizations (FP16 quantization, reduced resolution, fewer diffusion steps) enable operation within memory constraints.
 
 \FloatBarrier
 
@@ -516,13 +521,4 @@ Performance is constrained by the 6GB VRAM limit and mobile GPU compute capabili
 \end{subfigure}
 \caption{Sky replacement workflow. Left: original image. Middle: sky segmentation mask. Right: inpainted result with sunset using Stable Diffusion.}
 \label{fig:generative_workflows}
-\end{figure}
-
-Beyond segmentation, the system demonstrates realistic object removal and replacement through Stable Diffusion v2 integration. Figure~\ref{fig:inpainting_results} showcases representative inpainting results.
-
-\begin{figure}[!htbp]
-\centering
-\includegraphics[width=0.95\textwidth]{Imagenes/6. Image Generation.png}
-\caption{Generative editing results with Stable Diffusion v2 inpainting. Left: original images. Middle: segmentation masks (red overlay). Right: inpainted results showing object removal, replacement, and texture synthesis.}
-\label{fig:inpainting_results}
 \end{figure}
