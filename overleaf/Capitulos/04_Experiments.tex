@@ -103,19 +103,20 @@ Table~\ref{tab:segmentation_results} shows segmentation performance on standard 
 \small
 \caption{Semantic segmentation results on standard benchmarks. The proposed method combines SAM 2 with CLIP-based filtering.}
 \label{tab:segmentation_results}
-\begin{tabular}{lcccc}
+\begin{tabular}{llcccc}
 \hline
-\textbf{Method} & \textbf{VOC} & \textbf{Cityscapes} & \textbf{COCO-S} & \textbf{ADE20K} \\
+\textbf{Method} & \textbf{Post-process} & \textbf{VOC} & \textbf{Cityscapes} & \textbf{COCO-S} & \textbf{ADE20K} \\
  & mIoU & mIoU & mIoU & mIoU \\
 \hline
 DeepLabV3+ \cite{chen2018encoder} & 87.8 & 82.1 & 39.2 & 44.1 \\
 Mask2Former \cite{cheng2022mask2former} & 89.5 & 84.8 & 42.1 & 47.3 \\
 \hline
-LSeg \cite{li2022language} & 52.3 & - & 31.4 & 28.7 \\
-GroupViT \cite{xu2022groupvit} & 52.3 & - & 28.9 & 25.1 \\
-CLIPSeg \cite{luddecke2022clipseg} & 54.8 & - & 32.7 & 30.2 \\
-MaskCLIP \cite{zhou2022extract} & 43.4 & - & - & - \\
-SCLIP \cite{sclip2024} & 59.1 & - & - & - \\
+MaskCLIP \cite{zhou2022extract} & 43.4 & 24.9 & 16.7 & 11.9 \\
+GroupViT \cite{xu2022groupvit} & 52.3 & 18.5 & 15.3 & 10.4 \\
+TCL \cite{tcl2024} & 51.2 & 23.5 & 19.6 & 14.9 \\
+SCLIP \cite{sclip2024} & 61.7 & 34.1 & 23.9 & 17.8 \\
+NACLIP \cite{naclip2025} & 64.1 & 38.3 & 25.7 & - \\
+CaR \cite{huang2022car} & 67.6 & - & - & - \\
 ITACLIP \cite{shao2024itaclip} & 67.9 & 40.2 & 27.0 & - \\
 \hline
 \textbf{Ours} & \textbf{68.09} & \textit{-} & \textit{-} & \textit{-} \\
@@ -123,7 +124,7 @@ ITACLIP \cite{shao2024itaclip} & 67.9 & 40.2 & 27.0 & - \\
 \end{tabular}
 \end{table}
 
-\textit{Note: Numbers reported from original papers \cite{zhou2022extract, sclip2024, shao2024itaclip}. MaskCLIP: 43.4\% from SCLIP paper evaluation. GroupViT, CLIPSeg: from respective papers. All methods evaluated in training-free open-vocabulary setting.}
+\textit{Note: All baseline results taken from SCLIP \cite{sclip2024} Table 1 (with PAMR post-processing) for consistency in evaluation protocol. ITACLIP results from original paper \cite{shao2024itaclip}. DeepLabV3+ and Mask2Former represent supervised baselines. All open-vocabulary methods (MaskCLIP, GroupViT, TCL, SCLIP, ITACLIP) evaluated in training-free zero-shot setting.}
 
 Key observations:
 \begin{itemize}
