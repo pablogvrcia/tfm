@@ -441,6 +441,11 @@ def main():
         print(f"  → Scales: {args.mhqr_scales}")
         print(f"  → Total expected improvement: +8-15% mIoU")
 
+    # Determine if dataset has background class
+    # COCO-Stuff and Pascal VOC have background at index 0
+    # Cityscapes has NO background class (all 19 classes are foreground)
+    has_background_class = args.dataset in ['coco-stuff', 'pascal-voc']
+
     segmentor = SCLIPSegmentor(
         model_name=args.model,
         use_sam=args.use_sam if not args.use_clip_guided_sam else False,  # Disable built-in SAM for clip-guided
@@ -477,6 +482,8 @@ def main():
         mhqr_hierarchical_decoder=args.mhqr_hierarchical_decoder,
         mhqr_semantic_merging=args.mhqr_semantic_merging,
         mhqr_scales=args.mhqr_scales,
+        # Dataset-specific configuration
+        has_background_class=has_background_class,
     )
     print()
 

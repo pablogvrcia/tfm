@@ -97,6 +97,8 @@ class SCLIPSegmentor:
         mhqr_hierarchical_decoder: bool = True,  # Use hierarchical mask decoder
         mhqr_semantic_merging: bool = True,  # Use semantic-guided mask merging
         mhqr_scales: List[float] = None,  # Multi-scale pyramid (default: [0.25, 0.5, 1.0])
+        # Dataset-specific configuration
+        has_background_class: bool = True,  # Whether class 0 is background (True for COCO-Stuff, False for Cityscapes)
     ):
         """
         Initialize SCLIP segmentor with 2025 performance optimizations.
@@ -164,6 +166,10 @@ class SCLIPSegmentor:
         self.mhqr_hierarchical_decoder = mhqr_hierarchical_decoder if use_mhqr else False
         self.mhqr_semantic_merging = mhqr_semantic_merging if use_mhqr else False
         self.mhqr_scales = mhqr_scales if mhqr_scales is not None else [0.25, 0.5, 1.0]
+
+        # Dataset configuration
+        self.has_background_class = has_background_class
+        self.background_idx = 0 if has_background_class else None
 
         # Multi-descriptor support (SCLIP's cls_voc21.txt approach)
         self.descriptor_file = descriptor_file
@@ -319,6 +325,18 @@ class SCLIPSegmentor:
                     )
                     if verbose:
                         print(f"  DenseCRF: Enabled (+1-2% mIoU, +3-5% boundary F1 expected)")
+                        
+                    # self.densecrf_refiner = DenseCRFRefiner(
+                    #     max_iterations=15,      # More iterations for better refinement (was 10)
+                    #     pos_w=3.0,              # Positional weight (unchanged)
+                    #     pos_xy_std=3.0,         # Positional spatial std (default)
+                    #     bi_w=10.0,              # Bilateral weight (unchanged)
+                    #     bi_xy_std=60.0,         # Tighter spatial smoothing (was 80.0, respects boundaries better)
+                    #     bi_rgb_std=10.0         # Tighter color smoothing (was 13.0, less color bleeding)
+                    # )
+                    # if verbose:
+                    #     print(f"  DenseCRF: Enabled with tuned parameters (+1-2% mIoU expected)")
+                    #     print(f"    max_iterations=15, bi_xy_std=60.0, bi_rgb_std=10.0")
                 except Exception as e:
                     if verbose:
                         print(f"  WARNING: DenseCRF initialization failed: {e}")
@@ -646,9 +664,10 @@ class SCLIPSegmentor:
         pred_mask = probs.argmax(dim=0).cpu().numpy()
 
         # Apply probability threshold
-        if self.prob_threshold > 0:
+        if self.prob_threshold > 0 and self.has_background_class:
+            # Only apply threshold if dataset has explicit background class
             max_probs = probs.max(dim=0)[0].cpu().numpy()
-            pred_mask[max_probs < self.prob_threshold] = 0  # Background
+            pred_mask[max_probs < self.prob_threshold] = self.background_idx
 
         if return_logits:
             return pred_mask, logits
@@ -761,7 +780,12 @@ class SCLIPSegmentor:
         max_class = probs.argmax(dim=0).cpu().numpy()
 
         # Regions where another class is predicted with high confidence
-        competing_mask = (max_class != class_idx) & (max_prob > 0.6) & (max_class != 0)  # Exclude background
+        if self.has_background_class:
+            # Exclude background class if it exists
+            competing_mask = (max_class != class_idx) & (max_prob > 0.6) & (max_class != self.background_idx)
+        else:
+            # No background class - include all competing classes
+            competing_mask = (max_class != class_idx) & (max_prob > 0.6)
 
         if competing_mask.sum() > 0:
             # Find regions near the target class (boundary confusion)
@@ -992,7 +1016,8 @@ class SCLIPSegmentor:
             num_negative_total = 0
 
             for class_idx in range(len(class_names)):
-                if class_idx == 0:  # Skip background
+                # Skip background class only if dataset has one
+                if self.has_background_class and class_idx == self.background_idx:
                     continue
 
                 if use_hierarchical_prompts:
@@ -1646,7 +1671,8 @@ class SCLIPSegmentor:
         all_classes = []
 
         for class_idx in range(len(class_names)):
-            if class_idx == 0:  # Skip background
+            # Skip background class only if dataset has one
+            if self.has_background_class and class_idx == self.background_idx:
                 continue
 
             # Extract points for this class
