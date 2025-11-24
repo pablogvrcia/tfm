@@ -107,7 +107,7 @@ def load_image(image_path):
     return np.array(image.convert("RGB"))
 
 
-def extract_prompt_points_from_clip(seg_map, probs, vocabulary, min_confidence=0.7, min_region_size=100):
+def extract_prompt_points_from_clip(seg_map, probs, vocabulary, min_confidence=0.7, min_region_size=100, points_per_cluster=1):
     """
     Extract point prompts from CLIP predictions.
 
@@ -117,6 +117,7 @@ def extract_prompt_points_from_clip(seg_map, probs, vocabulary, min_confidence=0
         vocabulary: List of class names
         min_confidence: Minimum confidence to consider a region
         min_region_size: Minimum pixel area for a region
+        points_per_cluster: Number of points to extract per cluster (1=centroid only, >1=multiple points)
 
     Returns:
         List of (point, label) tuples where point is (x, y) and label is class_idx
@@ -140,7 +141,7 @@ def extract_prompt_points_from_clip(seg_map, probs, vocabulary, min_confidence=0
 
         print(f"  {class_name}: found {num_regions} high-confidence regions")
 
-        # For each region, extract centroid as prompt point
+        # For each region, extract point(s) as prompt point(s)
         for region_id in range(1, num_regions + 1):
             region_mask = (labeled_regions == region_id)
             region_size = region_mask.sum()
@@ -148,21 +149,89 @@ def extract_prompt_points_from_clip(seg_map, probs, vocabulary, min_confidence=0
             if region_size < min_region_size:
                 continue
 
-            # Get centroid
+            # Get all points in the region
             y_coords, x_coords = np.where(region_mask)
-            centroid_x = int(x_coords.mean())
-            centroid_y = int(y_coords.mean())
 
-            # Get confidence at centroid
-            confidence = class_confidence[centroid_y, centroid_x]
+            if points_per_cluster == 1:
+                # Extract only centroid (default behavior)
+                centroid_x = int(x_coords.mean())
+                centroid_y = int(y_coords.mean())
+                confidence = class_confidence[centroid_y, centroid_x]
 
-            prompts.append({
-                'point': (centroid_x, centroid_y),
-                'class_idx': class_idx,
-                'class_name': class_name,
-                'confidence': float(confidence),
-                'region_size': int(region_size)
-            })
+                prompts.append({
+                    'point': (centroid_x, centroid_y),
+                    'class_idx': class_idx,
+                    'class_name': class_name,
+                    'confidence': float(confidence),
+                    'region_size': int(region_size)
+                })
+            else:
+                # Extract multiple points using k-means or spatial sampling
+                num_points = min(points_per_cluster, len(x_coords))
+
+                if num_points <= 1:
+                    # Fallback to centroid if region too small
+                    centroid_x = int(x_coords.mean())
+                    centroid_y = int(y_coords.mean())
+                    confidence = class_confidence[centroid_y, centroid_x]
+
+                    prompts.append({
+                        'point': (centroid_x, centroid_y),
+                        'class_idx': class_idx,
+                        'class_name': class_name,
+                        'confidence': float(confidence),
+                        'region_size': int(region_size)
+                    })
+                else:
+                    # Sample points evenly across the region
+                    # Use stratified sampling based on confidence
+                    region_confidences = class_confidence[y_coords, x_coords]
+
+                    # Sort by confidence and select top points spread across region
+                    sorted_indices = np.argsort(region_confidences)[::-1]
+
+                    # Select points with spatial diversity
+                    selected_points = []
+                    coords = np.stack([x_coords, y_coords], axis=1)
+
+                    # Always include centroid as first point
+                    centroid_x = int(x_coords.mean())
+                    centroid_y = int(y_coords.mean())
+                    selected_points.append((centroid_x, centroid_y))
+
+                    # Select additional points with maximum distance from already selected
+                    remaining_points = num_points - 1
+                    for _ in range(remaining_points):
+                        max_min_dist = -1
+                        best_idx = -1
+
+                        for idx in sorted_indices:
+                            point = coords[idx]
+                            # Calculate minimum distance to already selected points
+                            min_dist = min(
+                                np.sqrt((point[0] - sp[0])**2 + (point[1] - sp[1])**2)
+                                for sp in selected_points
+                            )
+
+                            if min_dist > max_min_dist:
+                                max_min_dist = min_dist
+                                best_idx = idx
+
+                        if best_idx >= 0:
+                            selected_points.append((int(coords[best_idx][0]), int(coords[best_idx][1])))
+                            # Remove selected point from consideration
+                            sorted_indices = sorted_indices[sorted_indices != best_idx]
+
+                    # Add all selected points as separate prompts
+                    for point in selected_points:
+                        confidence = class_confidence[point[1], point[0]]
+                        prompts.append({
+                            'point': point,
+                            'class_idx': class_idx,
+                            'class_name': class_name,
+                            'confidence': float(confidence),
+                            'region_size': int(region_size)
+                        })
 
     print(f"\nTotal prompt points extracted: {len(prompts)}")
     return prompts
@@ -538,6 +607,8 @@ def main():
                        help="Minimum CLIP confidence for prompts")
     parser.add_argument("--min-region-size", type=int, default=100,
                        help="Minimum region size (pixels) for prompts")
+    parser.add_argument("--points-per-cluster", type=int, default=1,
+                       help="Number of points per cluster (1=centroid only, >1=multiple points)")
     parser.add_argument("--iou-threshold", type=float, default=0.8,
                        help="IoU threshold for merging overlapping masks")
     parser.add_argument("--device", default=None, help="Device (cuda/cpu)")
@@ -601,7 +672,8 @@ def main():
     prompts = extract_prompt_points_from_clip(
         seg_map, probs, args.vocabulary,
         min_confidence=args.min_confidence,
-        min_region_size=args.min_region_size
+        min_region_size=args.min_region_size,
+        points_per_cluster=args.points_per_cluster
     )
 
     print(f"\nUsing {len(prompts)} prompts vs {64*64}=4096 in blind grid!")
