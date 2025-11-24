@@ -149,6 +149,10 @@ def parse_args():
                         help='Minimum region size for guided prompts (--use-clip-guided-sam only)')
     parser.add_argument('--points-per-cluster', type=int, default=1,
                         help='Number of points per cluster (1=centroid only, >1=multiple points) (--use-clip-guided-sam only)')
+    parser.add_argument('--negative-points-per-cluster', type=int, default=0,
+                        help='Number of negative (background) points per cluster (0=disabled) (--use-clip-guided-sam only)')
+    parser.add_argument('--negative-confidence-threshold', type=float, default=0.8,
+                        help='Minimum confidence for negative point regions (--use-clip-guided-sam only)')
     parser.add_argument('--iou-threshold', type=float, default=0.8,
                         help='IoU threshold for merging overlaps (--use-clip-guided-sam only)')
     parser.add_argument('--use-pamr', action='store_true', default=False,
@@ -291,7 +295,9 @@ def segment_with_clip_guided_sam(image, class_names, segmentor, args):
         seg_map, probs, class_names,
         min_confidence=args.min_confidence,
         min_region_size=args.min_region_size,
-        points_per_cluster=args.points_per_cluster
+        points_per_cluster=args.points_per_cluster,
+        negative_points_per_cluster=args.negative_points_per_cluster,
+        negative_confidence_threshold=args.negative_confidence_threshold
     )
 
     if len(prompts) == 0:
@@ -353,6 +359,9 @@ def main():
         print(f"  Min confidence: {args.min_confidence}")
         print(f"  Min region size: {args.min_region_size}")
         print(f"  Points per cluster: {args.points_per_cluster}")
+        if args.negative_points_per_cluster > 0:
+            print(f"  Negative points per cluster: {args.negative_points_per_cluster}")
+            print(f"  Negative confidence threshold: {args.negative_confidence_threshold}")
         print(f"  IoU threshold: {args.iou_threshold}")
     elif args.use_sam:
         print(f"Mode: Hybrid (SAM + SCLIP)")

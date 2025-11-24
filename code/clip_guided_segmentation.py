@@ -107,9 +107,11 @@ def load_image(image_path):
     return np.array(image.convert("RGB"))
 
 
-def extract_prompt_points_from_clip(seg_map, probs, vocabulary, min_confidence=0.7, min_region_size=100, points_per_cluster=1):
+def extract_prompt_points_from_clip(seg_map, probs, vocabulary, min_confidence=0.7, min_region_size=100,
+                                    points_per_cluster=1, negative_points_per_cluster=0,
+                                    negative_confidence_threshold=0.8):
     """
-    Extract point prompts from CLIP predictions.
+    Extract point prompts from CLIP predictions, including optional negative (background) points.
 
     Args:
         seg_map: (H, W) predicted class indices
@@ -117,10 +119,12 @@ def extract_prompt_points_from_clip(seg_map, probs, vocabulary, min_confidence=0
         vocabulary: List of class names
         min_confidence: Minimum confidence to consider a region
         min_region_size: Minimum pixel area for a region
-        points_per_cluster: Number of points to extract per cluster (1=centroid only, >1=multiple points)
+        points_per_cluster: Number of positive points to extract per cluster (1=centroid only, >1=multiple points)
+        negative_points_per_cluster: Number of negative (background) points per cluster (0=disabled)
+        negative_confidence_threshold: Minimum confidence for regions to extract negative points from
 
     Returns:
-        List of (point, label) tuples where point is (x, y) and label is class_idx
+        List of prompt dictionaries with 'point', 'class_idx', 'class_name', 'confidence', 'region_size', and 'negative_points'
     """
     H, W = seg_map.shape
     prompts = []
@@ -152,6 +156,76 @@ def extract_prompt_points_from_clip(seg_map, probs, vocabulary, min_confidence=0
             # Get all points in the region
             y_coords, x_coords = np.where(region_mask)
 
+            # Extract negative (background) points if enabled
+            negative_points = []
+            if negative_points_per_cluster > 0:
+                # Find high-confidence regions of OTHER classes (not this class)
+                # These serve as negative examples to help SAM distinguish foreground from background
+                negative_mask = np.zeros((H, W), dtype=bool)
+
+                for other_idx in range(len(vocabulary)):
+                    if other_idx == class_idx:
+                        continue  # Skip current class
+
+                    other_confidence = probs[:, :, other_idx]
+                    other_high_conf = (seg_map == other_idx) & (other_confidence > negative_confidence_threshold)
+                    negative_mask |= other_high_conf
+
+                # Only consider negative points that are outside the current region
+                # and have a minimum distance from the positive region
+                from scipy.ndimage import distance_transform_edt
+
+                # Calculate distance from positive region
+                distance_from_region = distance_transform_edt(~region_mask)
+
+                # Negative points should be at least some distance away (e.g., 10 pixels)
+                min_distance = 10
+                valid_negative_mask = negative_mask & (distance_from_region > min_distance)
+
+                if valid_negative_mask.sum() > 0:
+                    neg_y, neg_x = np.where(valid_negative_mask)
+
+                    if len(neg_x) > 0:
+                        # Sample negative points with spatial diversity
+                        num_neg_points = min(negative_points_per_cluster, len(neg_x))
+
+                        if num_neg_points > 0:
+                            # Select negative points spread out spatially
+                            # Start with the point farthest from the positive region
+                            neg_distances = distance_from_region[neg_y, neg_x]
+
+                            # Sort by distance (farthest first)
+                            sorted_neg_indices = np.argsort(neg_distances)[::-1]
+
+                            # Select points with spatial diversity
+                            neg_coords = np.stack([neg_x, neg_y], axis=1)
+
+                            # Start with farthest point
+                            first_idx = sorted_neg_indices[0]
+                            negative_points.append((int(neg_x[first_idx]), int(neg_y[first_idx])))
+
+                            # Select additional points with maximum distance from already selected
+                            for _ in range(num_neg_points - 1):
+                                max_min_dist = -1
+                                best_idx = -1
+
+                                for idx in sorted_neg_indices:
+                                    point = neg_coords[idx]
+                                    # Calculate minimum distance to already selected negative points
+                                    min_dist = min(
+                                        np.sqrt((point[0] - np[0])**2 + (point[1] - np[1])**2)
+                                        for np in negative_points
+                                    )
+
+                                    if min_dist > max_min_dist:
+                                        max_min_dist = min_dist
+                                        best_idx = idx
+
+                                if best_idx >= 0:
+                                    negative_points.append((int(neg_coords[best_idx][0]), int(neg_coords[best_idx][1])))
+                                    # Remove selected point from consideration
+                                    sorted_neg_indices = sorted_neg_indices[sorted_neg_indices != best_idx]
+
             if points_per_cluster == 1:
                 # Extract only centroid (default behavior)
                 centroid_x = int(x_coords.mean())
@@ -163,7 +237,8 @@ def extract_prompt_points_from_clip(seg_map, probs, vocabulary, min_confidence=0
                     'class_idx': class_idx,
                     'class_name': class_name,
                     'confidence': float(confidence),
-                    'region_size': int(region_size)
+                    'region_size': int(region_size),
+                    'negative_points': negative_points
                 })
             else:
                 # Extract multiple points using k-means or spatial sampling
@@ -180,7 +255,8 @@ def extract_prompt_points_from_clip(seg_map, probs, vocabulary, min_confidence=0
                         'class_idx': class_idx,
                         'class_name': class_name,
                         'confidence': float(confidence),
-                        'region_size': int(region_size)
+                        'region_size': int(region_size),
+                        'negative_points': negative_points
                     })
                 else:
                     # Sample points evenly across the region
@@ -230,7 +306,8 @@ def extract_prompt_points_from_clip(seg_map, probs, vocabulary, min_confidence=0
                             'class_idx': class_idx,
                             'class_name': class_name,
                             'confidence': float(confidence),
-                            'region_size': int(region_size)
+                            'region_size': int(region_size),
+                            'negative_points': negative_points
                         })
 
     print(f"\nTotal prompt points extracted: {len(prompts)}")
@@ -272,10 +349,21 @@ def segment_with_guided_prompts(image, prompts, checkpoint_path=None, model_cfg=
 
     for i, prompt_info in enumerate(prompts):
         point = prompt_info['point']
+        negative_points = prompt_info.get('negative_points', [])
 
         # Convert to numpy array format SAM expects
-        point_coords = np.array([[point[0], point[1]]])
-        point_labels = np.array([1])  # 1 = foreground point
+        # Combine positive and negative points
+        all_coords = [point]
+        all_labels = [1]  # 1 = foreground point
+
+        # Add negative points if present
+        if negative_points:
+            for neg_point in negative_points:
+                all_coords.append(neg_point)
+                all_labels.append(0)  # 0 = background point
+
+        point_coords = np.array(all_coords)
+        point_labels = np.array(all_labels)
 
         # Get mask from SAM
         masks, scores, _ = predictor.predict(
@@ -609,6 +697,10 @@ def main():
                        help="Minimum region size (pixels) for prompts")
     parser.add_argument("--points-per-cluster", type=int, default=1,
                        help="Number of points per cluster (1=centroid only, >1=multiple points)")
+    parser.add_argument("--negative-points-per-cluster", type=int, default=0,
+                       help="Number of negative (background) points per cluster (0=disabled)")
+    parser.add_argument("--negative-confidence-threshold", type=float, default=0.8,
+                       help="Minimum confidence for negative point regions")
     parser.add_argument("--iou-threshold", type=float, default=0.8,
                        help="IoU threshold for merging overlapping masks")
     parser.add_argument("--device", default=None, help="Device (cuda/cpu)")
@@ -673,7 +765,9 @@ def main():
         seg_map, probs, args.vocabulary,
         min_confidence=args.min_confidence,
         min_region_size=args.min_region_size,
-        points_per_cluster=args.points_per_cluster
+        points_per_cluster=args.points_per_cluster,
+        negative_points_per_cluster=args.negative_points_per_cluster,
+        negative_confidence_threshold=args.negative_confidence_threshold
     )
 
     print(f"\nUsing {len(prompts)} prompts vs {64*64}=4096 in blind grid!")
