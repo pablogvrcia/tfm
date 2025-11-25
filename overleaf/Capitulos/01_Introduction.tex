@@ -5,9 +5,9 @@
 
 Semantic segmentation has progressed significantly in recent years, enabling machines to assign semantic labels to individual pixels in visual scenes. However, traditional semantic segmentation models are constrained by a closed vocabulary, meaning they can only recognize objects explicitly present in their training data. This limitation reduces their applicability in real-world scenarios where novel objects are frequently encountered. For example, a self-driving car trained to recognize "car," "pedestrian," and "traffic light" might fail to identify a "scooter" or a "delivery robot," potentially leading to hazardous situations.
 
-This limitation of closed-vocabulary models has motivated the development of open-vocabulary semantic segmentation. Open-vocabulary approaches bridge the gap between visual perception and human language by leveraging vision-language models such as CLIP (Contrastive Language-Image Pre-training) \cite{radford2021learning}, which learns to represent both text and images in a shared embedding space. These systems can interpret natural language descriptions and segment objects not seen during training. For instance, a system could process the description "a person walking a dog" and segment both the person and the dog, even without having encountered this specific combination during training.
+This limitation of closed-vocabulary models has motivated the development of open-vocabulary semantic segmentation. Open-vocabulary approaches bridge the gap between visual perception and human language by leveraging vision-language models such as CLIP (Contrastive Language-Image Pre-training) \cite{radford2021learning}, which learns to represent both text and images in a shared embedding space. These systems can interpret natural language descriptions and perform zero-shot segmentation—that is, segment objects and concepts not seen during training. For instance, a system could process the description "a person walking a dog" and segment both the person and the dog in a zero-shot manner, even without having encountered this specific combination during training.
 
-Furthermore, integrating generative AI models such as Stable Diffusion \cite{rombach2022high} enables modification of images based on segmented objects. This capability supports applications in image editing, where users can describe desired changes ("make the sky blue" or "add a hat to the person"), and the system modifies the image accordingly. In content creation, artists and designers can generate scenes by combining segmented objects from different images or generating new objects based on textual descriptions. Potential applications span diverse domains, including human-computer interaction, augmented reality, and robotics.
+Furthermore, integrating generative AI models such as Stable Diffusion \cite{rombach2022high} enables modification of images based on segmented objects. This capability supports applications in image editing, where users can describe desired changes ("make the sky blue" or "add a hat to the person"), and the system modifies the image accordingly. In content creation, artists and designers can generate scenes by combining segmented objects from different images or generating new objects based on textual descriptions. Potential applications span diverse domains, including human-computer interaction, augmented reality, and robotics. Figure \ref{fig:system_overview} illustrates the integration of these components—CLIP for vision-language understanding, SAM 2 for precise segmentation, and Stable Diffusion for realistic generation—into a unified system for language-driven image manipulation.
 
 \begin{figure}[h]
 \centering
@@ -35,26 +35,24 @@ This thesis presents a novel approach to open-vocabulary semantic segmentation t
 \noindent\textbf{Primary Contribution:}
 
 \begin{itemize}
-\item \textbf{CLIP-guided intelligent prompting for SAM2 segmentation:} The core contribution is a novel prompting strategy that extracts intelligent prompt points from SCLIP's \cite{sclip2024} high-confidence regions to guide SAM2's mask generation. This semantic-aware approach achieves a \textbf{massive reduction in prompts} compared to blind grid sampling (50-300 points versus 4,096 points) while reaching \textbf{competitive mIoU on PASCAL VOC 2012}, outperforming recent training-free open-vocabulary methods such as ITACLIP. The method assigns class labels directly from CLIP's predictions at each prompt location, avoiding the complexity of majority voting or multi-scale evaluation. This annotation-free approach enables segmentation of both discrete objects and amorphous ``stuff'' classes (sky, road, vegetation) without requiring any labeled training data.
+\item \textbf{CLIP-guided intelligent prompting for SAM2 segmentation:} The core contribution is a novel prompting strategy that extracts intelligent prompt points from SCLIP's \cite{sclip2024} high-confidence regions to guide SAM2's mask generation. This semantic-aware approach achieves a \textbf{massive reduction in computational cost}, using only a bunch of semantically-informed prompt points instead of thousands of uniformly distributed points, while reaching \textbf{competitive mIoU on PASCAL VOC 2012} and outperforming recent training-free open-vocabulary methods such as ITACLIP. The method assigns class labels directly from SCLIP's predictions at each prompt location, avoiding the complexity of majority voting or multi-scale evaluation. This annotation-free approach enables segmentation of both discrete objects and amorphous ``stuff'' classes (sky, road, vegetation) without requiring any labeled training data.
+\item \textbf{Integration with Stable Diffusion for text-driven editing:} The segmentation system is integrated with Stable Diffusion v2 \cite{rombach2022high} to enable text-driven image editing, creating a complete pipeline from language-based semantic understanding to image manipulation. This integration supports practical applications including object removal, replacement, and style transfer.
+\item \textbf{Extension to video segmentation and edition:} The CLIP-guided prompting approach extends to video processing through two capabilities: (1) video segmentation by leveraging SAM2's temporal tracking, with SCLIP-guided analysis performed only on the first frame and SAM2 propagating masks across all frames; (2) text-driven video inpainting using WAN 2.1 VACE \cite{vace2025}, enabling object removal and replacement in videos.
 \end{itemize}
 
 \vspace{0.3cm}
-\noindent\textbf{Secondary Enhancements:}
+\noindent\textbf{Secondary Contributions:}
 
 \begin{itemize}
 \item \textbf{Descriptor files for multi-term class representations:} The system incorporates descriptor files that provide multiple textual variations for each class (e.g., ``person in shirt'', ``person in jeans'', ``person wearing glasses''), improving robustness to intra-class appearance variations and enhancing CLIP's ability to match diverse visual manifestations of semantic categories.
 
-\item \textbf{Template strategy optimization:} A systematic evaluation of five template strategies (ImageNet-80, Top-7, Spatial Context, Top-3, Adaptive) identifies ImageNet-80 as the optimal choice for PASCAL VOC 2012, providing comprehensive object descriptions that improve semantic understanding while maintaining computational efficiency.
+\item \textbf{Template strategy optimization:} CLIP requires text prompts to match visual features. Different strategies for generating these prompts—ranging are evaluated (e.g., ``a photo of a [CLASS]'', ``a rendering of a [CLASS]'', ``a close-up of a [CLASS]'') to identify the most effective templates for maximizing segmentation accuracy or inference time.
 
-\item \textbf{Computational optimizations for practical deployment:} Implementation of FP16 mixed precision, \texttt{torch.compile} optimization, and batched prompting enables deployment on consumer hardware (6GB VRAM) with inference times of 12-33 seconds per image, making the approach practical for real-world applications.
+\item \textbf{Computational optimizations for practical deployment:} Implementation of FP16 mixed precision, \texttt{torch.compile} optimization, and batched prompting enables deployment on consumer hardware (6GB VRAM), making the approach practical for real-world applications.
 
-\item \textbf{Integration with Stable Diffusion for text-driven editing:} The segmentation system is integrated with Stable Diffusion v2 \cite{rombach2022high} to enable text-driven image editing, creating a complete pipeline from language-based semantic understanding to image manipulation. This integration supports practical applications including object removal, replacement, and style transfer.
+\item \textbf{Comprehensive evaluation on PASCAL VOC 2012:} The system is rigorously evaluated on PASCAL VOC 2012 across 21 object categories, with detailed per-class analysis and multiple metrics (mIoU, pixel accuracy, F1 score, precision, recall, boundary F1).
 
-\item \textbf{Extension to video segmentation and inpainting:} The CLIP-guided prompting approach extends to video processing through two capabilities: (1) video segmentation by leveraging SAM2's temporal tracking, with CLIP analysis performed only on the first frame and SAM2 propagating masks across all frames; (2) text-driven video inpainting using WAN 2.1 VACE \cite{vace2025}, enabling object removal and replacement in videos. This complete pipeline is demonstrated on sports footage (MotoGP racing, NBA basketball) with processing times of 3-8 minutes for 81 frames at 480p on consumer GPUs. Complete technical details in Appendix \ref{appendix:video_generation}.
-
-\item \textbf{Comprehensive evaluation on PASCAL VOC 2012:} The system is rigorously evaluated on PASCAL VOC 2012 across 21 object categories, with detailed per-class analysis and multiple metrics (mIoU, pixel accuracy, F1 score, precision, recall, boundary F1). The evaluation includes exceptional performance on background recognition (86.90\% IoU) and strong results on specific classes (horse 78.49\%, cat 75.48\%, aeroplane 76.53\%).
-
-\item \textbf{Comparative analysis demonstrating efficiency-accuracy trade-off:} Experimental validation compares the CLIP-guided prompting approach against pure dense prediction methods (SCLIP, MaskCLIP, ITACLIP), demonstrating that semantic guidance provides both efficiency gains (significantly fewer prompts, 3-4× speedup) and quality improvements through SAM2's superior boundary delineation on the PASCAL VOC 2012 benchmark.
+\item \textbf{Comparative analysis demonstrating efficiency-accuracy trade-off:} Experimental validation compares the SCLIP-guided prompting approach against pure dense prediction methods (SCLIP, MaskCLIP, ITACLIP), demonstrating that semantic guidance provides quality improvements through SAM2's superior boundary delineation on the PASCAL VOC 2012 benchmark.
 \end{itemize}
 
 \section{Thesis Structure}
@@ -62,36 +60,13 @@ This thesis presents a novel approach to open-vocabulary semantic segmentation t
 The remainder of this thesis is structured as follows:
 
 \begin{itemize}
-\item \textbf{Chapter 2 (Background and Related Work):} Provides a comprehensive review of the relevant background literature, laying the foundation for the research presented in this thesis. This chapter covers the following key areas:
-\begin{itemize}
-\item \textbf{Semantic Segmentation:} Explores the fundamentals of semantic segmentation, including different architectures (e.g., encoder-decoder, fully convolutional networks), commonly used datasets (e.g., COCO, PASCAL VOC), and traditional closed-vocabulary approaches. It also discusses the limitations of existing methods in handling open vocabulary and natural language input.
-\item \textbf{Language Models for Vision:} Provides an in-depth analysis of CLIP \cite{radford2021learning} and its ability to connect text and images in a shared embedding space. It explores alternative language models, such as ALIGN, and compares their strengths and weaknesses in the context of open-vocabulary semantic segmentation.
-\item \textbf{Mask Generation Models:} Discusses SAM \cite{kirillov2023segment} and SAM 2 \cite{ravi2024sam2} and their zero-shot segmentation capabilities. It analyzes other relevant mask generation models, such as Mask2Former \cite{cheng2022mask2former}, comparing their architectures and performance characteristics.
-\item \textbf{Generative AI Models for Inpainting:} Reviews inpainting techniques and discusses suitable generative models, such as Stable Diffusion \cite{rombach2022high} and LaMa. It explains how these models can be integrated with a segmentation system to achieve realistic image modification.
-\end{itemize}
+\item \textbf{Chapter 2 (Background and Related Work):} Reviews the foundational concepts and prior work in semantic segmentation, vision-language models (CLIP), mask generation models (SAM and SAM 2), and generative AI for inpainting (Stable Diffusion).
 
-\item \textbf{Chapter 3 (Methodology):} Details the methodology employed in this thesis, providing a comprehensive description of the proposed open-vocabulary semantic segmentation system. This chapter covers the following aspects:
-\begin{itemize}
-\item \textbf{System Architecture:} Presents a detailed overview of the system's architecture, including the integration of CLIP for language processing, SAM2 for mask generation, and the CLIP-guided intelligent prompting strategy that achieves substantial reduction in computational overhead.
-\item \textbf{Implementation Details:} Provides specific implementation details, such as the choice of CLIP and SAM2 variants, template strategies for multi-term class representations, hyperparameter settings, and computational optimizations (FP16, torch.compile, batched prompting).
-\item \textbf{Generative Editing Extension:} Describes the integration with Stable Diffusion v2 for text-driven image editing, enabling object removal, replacement, and style transfer applications.
-\item \textbf{Video Segmentation Extension:} Briefly introduces the extension to video processing by combining first-frame CLIP analysis with SAM2's temporal tracking. For complete technical details, see Appendix \ref{appendix:video_generation}.
-\end{itemize}
+\item \textbf{Chapter 3 (Methodology):} Describes the proposed system architecture, including the CLIP-guided intelligent prompting strategy, descriptor files, template optimization, computational optimizations, and extensions to generative editing and video processing.
 
-\item \textbf{Chapter 4 (Experiments and Evaluation):} Presents the experimental setup and results, demonstrating the effectiveness of the proposed system. This chapter includes:
-\begin{itemize}
-\item \textbf{Dataset Selection:} Describes the datasets used for evaluating the system, justifying their selection based on their suitability for open-vocabulary and zero-shot learning. It considers including specialized datasets and potentially creating a custom dataset for specific scenarios.
-\item \textbf{Evaluation Metrics:} Defines the metrics used to evaluate both the segmentation and generation aspects of the system. It explains how these metrics measure accuracy, quality, and efficiency, ensuring a comprehensive evaluation of the system's performance.
-\item \textbf{Results and Analysis:} Presents the experimental results, including quantitative and qualitative analysis. It compares the system's performance to existing methods, discussing its strengths and limitations in detail.
-\end{itemize}
+\item \textbf{Chapter 4 (Experiments and Evaluation):} Presents the experimental setup, evaluation metrics, and results on PASCAL VOC 2012, with comparative analysis against existing open-vocabulary segmentation methods.
 
-\item \textbf{Chapter 5 (Conclusions and Future Work):} Concludes the thesis by summarizing the key contributions, discussing the limitations of the current system, and outlining potential future research directions. This chapter provides a concluding perspective on the research presented in the thesis and suggests avenues for further exploration and development in the field of open-vocabulary semantic segmentation.
+\item \textbf{Chapter 5 (Conclusions and Future Work):} Summarizes the key contributions, discusses limitations, and outlines potential future research directions.
 
-\item \textbf{Appendices:} The thesis includes several appendices with technical details:
-\begin{itemize}
-\item \textbf{Appendix A (Technical Foundations):} Detailed technical explanations of CLIP, SAM2, and Stable Diffusion architectures.
-\item \textbf{Appendix B (Implementation Details):} Specific implementation details, code snippets, and configuration parameters.
-\item \textbf{Appendix C (State of the Art in Video Inpainting):} Comprehensive review of video inpainting evolution from flow-based to diffusion-based methods.
-\item \textbf{Appendix E (Video Generation):} Complete technical details of the video segmentation pipeline, including SAM2's temporal tracking mechanism, VACE integration for text-driven video inpainting, memory management strategies, and practical considerations for consumer hardware deployment.
-\end{itemize}
+\item \textbf{Appendices:} Provide detailed technical explanations of CLIP, SAM2, and Stable Diffusion architectures (Appendix A), and implementation details (Appendix B).
 \end{itemize}
