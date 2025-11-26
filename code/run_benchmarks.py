@@ -179,12 +179,18 @@ def parse_args():
                         help='Save visualizations')
 
     # Performance optimizations (2025 papers)
-    parser.add_argument('--use-fp16', action='store_true', default=True,
+    parser.add_argument('--use-fp16', action='store_true', dest='use_fp16', default=True,
                         help='Enable FP16 mixed precision (inspired by TernaryCLIP 2025)')
-    parser.add_argument('--use-compile', action='store_true', default=False,
+    parser.add_argument('--no-use-fp16', action='store_false', dest='use_fp16',
+                        help='Disable FP16 mixed precision')
+    parser.add_argument('--use-compile', action='store_true', dest='use_compile', default=False,
                         help='Enable torch.compile() for JIT optimization (PyTorch 2.0+)')
-    parser.add_argument('--batch-prompts', action='store_true', default=True,
+    parser.add_argument('--no-use-compile', action='store_false', dest='use_compile',
+                        help='Disable torch.compile()')
+    parser.add_argument('--batch-prompts', action='store_true', dest='batch_prompts', default=True,
                         help='Enable batch processing for SAM prompts (inspired by EfficientViT-SAM 2024)')
+    parser.add_argument('--no-batch-prompts', action='store_false', dest='batch_prompts',
+                        help='Disable batch processing for SAM prompts')
     parser.add_argument('--enable-profiling', action='store_true', default=False,
                         help='Enable detailed performance profiling')
 

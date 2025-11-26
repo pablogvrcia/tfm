@@ -1,6 +1,9 @@
 #!/bin/bash
 # Script to generate comparison figures for thesis
 
+# Activate virtual environment
+source venv/bin/activate
+
 echo "Generating comparison figures..."
 echo ""
 
