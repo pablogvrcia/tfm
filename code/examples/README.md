@@ -141,12 +141,29 @@ python clip_guided_segmentation.py \
 
 Segment football players from FC Barcelona.
 
+**Standard Segmentation:**
 ```bash
 python clip_guided_segmentation.py \
     --image examples/football_frame.png \
     --vocabulary "Lionel Messi" "Luis Suarez" "Neymar Jr" grass crowd background \
     --output examples_results/football_frame
 ```
+
+**Educational Visualization (18 Steps + Interactive HTML):**
+```bash
+python clip_guided_sam_explanatory.py \
+    --image examples/football_frame.png \
+    --vocabulary "Lionel Messi" "Luis Suarez" "Neymar Jr" grass crowd background \
+    --output explanatory_results/football \
+    --min-confidence 0.3 \
+    --points-per-cluster 1 \
+    --negative-points-per-cluster 2 \
+    --create-html
+
+# Then open: explanatory_results/football/index.html
+```
+
+See [EXPLANATORY_VISUALIZATION_README.md](../EXPLANATORY_VISUALIZATION_README.md) for complete documentation.
 
 <table>
 <tr>

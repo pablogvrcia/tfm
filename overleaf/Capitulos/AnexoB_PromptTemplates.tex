@@ -1,0 +1,128 @@
+\chapter{Prompt Templates}
+\label{appendix:prompt_templates}
+
+This appendix provides the complete template specifications for all template strategies discussed in Section~\ref{sec:template_strategies}. Each template contains a placeholder \texttt{\{c\}} that is replaced with the class term during text encoding.
+
+\section{Curated Template Strategies}
+\label{sec:appendix_curated_templates}
+
+Table~\ref{tab:curated_templates} lists the complete templates for the curated strategies: Top-7 Dense Prediction, Spatial Context, Top-3 Ultra-Fast, and Adaptive (Stuff/Thing).
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{p{3.5cm}p{11cm}}
+\hline
+\textbf{Strategy} & \textbf{Templates} \\
+\hline
+\textbf{Top-7 Dense} &
+\begin{enumerate}[topsep=0pt,itemsep=0pt,leftmargin=*]
+    \item ``a photo of a \{c\}.''
+    \item ``a \{c\} in the scene.''
+    \item ``the \{c\}.''
+    \item ``a close-up photo of a \{c\}.''
+    \item ``a photo of the large \{c\}.''
+    \item ``a photo of the small \{c\}.''
+    \item ``one \{c\}.''
+\end{enumerate} \\
+\hline
+\textbf{Spatial Context} &
+\begin{enumerate}[topsep=0pt,itemsep=0pt,leftmargin=*]
+    \item ``a photo of a \{c\}.''
+    \item ``\{c\} in the scene.''
+    \item ``a \{c\} in an image.''
+    \item ``there is a \{c\} in the scene.''
+    \item ``segment the \{c\}.''
+    \item ``the \{c\} in the image.''
+    \item ``a region of \{c\}.''
+\end{enumerate} \\
+\hline
+\textbf{Top-3 Ultra-Fast} &
+\begin{enumerate}[topsep=0pt,itemsep=0pt,leftmargin=*]
+    \item ``a photo of a \{c\}.''
+    \item ``a \{c\} in the scene.''
+    \item ``the \{c\}.''
+\end{enumerate} \\
+\hline
+\textbf{Adaptive (Stuff)} &
+\begin{enumerate}[topsep=0pt,itemsep=0pt,leftmargin=*]
+    \item ``the \{c\}.''
+    \item ``a photo of \{c\}.''
+    \item ``\{c\} in the scene.''
+    \item ``\{c\} in the background.''
+    \item ``a region of \{c\}.''
+\end{enumerate} \\
+\hline
+\textbf{Adaptive (Thing)} &
+\begin{enumerate}[topsep=0pt,itemsep=0pt,leftmargin=*]
+    \item ``a photo of a \{c\}.''
+    \item ``one \{c\}.''
+    \item ``a \{c\} in the scene.''
+    \item ``the \{c\} in the image.''
+    \item ``a photo of the \{c\}.''
+\end{enumerate} \\
+\hline
+\end{tabular}
+\caption{Curated template specifications for Top-7, Spatial Context, Top-3, and Adaptive strategies.}
+\label{tab:curated_templates}
+\end{table}
+
+\section{ImageNet-80 Baseline Templates}
+\label{sec:appendix_imagenet80}
+
+Table~\ref{tab:imagenet80_templates} provides the complete set of 80 ImageNet templates used as the baseline strategy. These templates were designed for ImageNet classification and provide comprehensive coverage of visual variations (viewpoint, lighting, rendering style, etc.).
+
+\begin{table}[p]
+\centering
+\tiny
+\begin{tabular}{rp{6.8cm}rp{6.8cm}}
+\hline
+\multicolumn{4}{c}{\textbf{ImageNet-80 Templates (OpenAI Baseline)}} \\
+\hline
+\textbf{\#} & \textbf{Template} & \textbf{\#} & \textbf{Template} \\
+\hline
+1 & a bad photo of a \{c\}. & 41 & the \{c\} in a video game. \\
+2 & a photo of many \{c\}. & 42 & a sketch of a \{c\}. \\
+3 & a sculpture of a \{c\}. & 43 & a doodle of the \{c\}. \\
+4 & a photo of the hard to see \{c\}. & 44 & a origami \{c\}. \\
+5 & a low resolution photo of the \{c\}. & 45 & a low resolution photo of a \{c\}. \\
+6 & a rendering of a \{c\}. & 46 & the toy \{c\}. \\
+7 & graffiti of a \{c\}. & 47 & a rendition of the \{c\}. \\
+8 & a bad photo of the \{c\}. & 48 & a photo of the clean \{c\}. \\
+9 & a cropped photo of the \{c\}. & 49 & a photo of a large \{c\}. \\
+10 & a tattoo of a \{c\}. & 50 & a rendition of a \{c\}. \\
+11 & the embroidered \{c\}. & 51 & a photo of a nice \{c\}. \\
+12 & a photo of a hard to see \{c\}. & 52 & a photo of a weird \{c\}. \\
+13 & a bright photo of a \{c\}. & 53 & a blurry photo of a \{c\}. \\
+14 & a photo of a clean \{c\}. & 54 & a cartoon \{c\}. \\
+15 & a photo of a dirty \{c\}. & 55 & art of a \{c\}. \\
+16 & a dark photo of the \{c\}. & 56 & a sketch of the \{c\}. \\
+17 & a drawing of a \{c\}. & 57 & a embroidered \{c\}. \\
+18 & a photo of my \{c\}. & 58 & a pixelated photo of a \{c\}. \\
+19 & the plastic \{c\}. & 59 & itap of the \{c\}. \\
+20 & a photo of the cool \{c\}. & 60 & a jpeg corrupted photo of the \{c\}. \\
+21 & a close-up photo of a \{c\}. & 61 & a good photo of a \{c\}. \\
+22 & a black and white photo of the \{c\}. & 62 & a plushie \{c\}. \\
+23 & a painting of the \{c\}. & 63 & a photo of the nice \{c\}. \\
+24 & a painting of a \{c\}. & 64 & a photo of the small \{c\}. \\
+25 & a pixelated photo of the \{c\}. & 65 & a photo of the weird \{c\}. \\
+26 & a sculpture of the \{c\}. & 66 & the cartoon \{c\}. \\
+27 & a bright photo of the \{c\}. & 67 & art of the \{c\}. \\
+28 & a cropped photo of a \{c\}. & 68 & a drawing of the \{c\}. \\
+29 & a plastic \{c\}. & 69 & a photo of the large \{c\}. \\
+30 & a photo of the dirty \{c\}. & 70 & a black and white photo of a \{c\}. \\
+31 & a jpeg corrupted photo of a \{c\}. & 71 & the plushie \{c\}. \\
+32 & a blurry photo of the \{c\}. & 72 & a dark photo of a \{c\}. \\
+33 & a photo of the \{c\}. & 73 & itap of a \{c\}. \\
+34 & a good photo of the \{c\}. & 74 & graffiti of the \{c\}. \\
+35 & a rendering of the \{c\}. & 75 & a toy \{c\}. \\
+36 & a \{c\} in a video game. & 76 & itap of my \{c\}. \\
+37 & a photo of one \{c\}. & 77 & a photo of a cool \{c\}. \\
+38 & a doodle of a \{c\}. & 78 & a photo of a small \{c\}. \\
+39 & a close-up photo of the \{c\}. & 79 & a tattoo of the \{c\}. \\
+40 & a photo of a \{c\}. & 80 & \\
+\hline
+\end{tabular}
+\caption{Complete ImageNet-80 template set.}
+\label{tab:imagenet80_templates}
+\end{table}

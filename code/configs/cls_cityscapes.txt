@@ -1,19 +1,19 @@
-road
-sidewalk
-building
-wall
-fence
-pole
-trafficlight
-trafficsign
-vegetation
-terrain
-sky
+road, street, asphalt road, paved road
+sidewalk, pavement, footpath, walkway
+building, house, skyscraper, office building, apartment building
+wall, brick wall, concrete wall, stone wall, barrier wall
+fence, metal fence, wooden fence, wire fence, railing
+pole, street pole, traffic pole, light pole, utility pole
+trafficlight, traffic light, traffic signal, stoplight
+trafficsign, traffic sign, road sign, street sign, warning sign
+vegetation, tree, bush, plant, shrub, foliage
+terrain, ground, dirt, grass terrain, natural terrain
+sky, blue sky, cloudy sky, clear sky
 person, person in shirt, person in jeans, person in dress, person in sweater, person in skirt, person in jacket
-rider
-car
-truck
-bus
-train
-motorcycle
-bicycle
+rider, person on bike, person on motorcycle, cyclist, motorcyclist
+car, vehicle, sedan, automobile
+truck, lorry, delivery truck, cargo truck
+bus, city bus, transit bus, coach
+train, railway train, locomotive, passenger train
+motorcycle, motorbike, motor scooter
+bicycle, bike, cycle
