@@ -1,0 +1,171 @@
+person, child, girl, boy, woman, man, people, lady, guy, pedestrian, human, individual
+bicycle, bike, road bike, mountain bike, cycling, cyclist
+car, automobile, vehicle, sedan, SUV, parked car, moving car
+motorcycle, motorbike, scooter, bike
+airplane, aircraft, plane, jet, airliner, flying plane
+bus, coach, transit bus, school bus, city bus
+train, locomotive, freight train, passenger train, railway, railroad train
+truck, lorry, pickup truck, delivery truck, semi truck
+boat, ship, vessel, sailboat, motorboat, watercraft
+traffic light, stoplight, signal light, red light, green light
+fire hydrant, hydrant
+stop sign, stop signal
+parking meter
+bench, park bench, wooden bench, seat
+bird, flying bird, perched bird, seagull, pigeon, sparrow
+cat, kitty, kitten, feline, house cat
+dog, puppy, canine, hound, pet dog
+horse, foal, stallion, mare, equine
+sheep, lamb, ewe, ram
+cow, calf, cattle, dairy cow, bull
+elephant, african elephant, asian elephant
+bear, grizzly bear, black bear, brown bear
+zebra, striped horse
+giraffe, long neck animal
+backpack, rucksack, bag, school bag, hiking backpack
+umbrella, parasol, rain umbrella, beach umbrella
+handbag, purse, bag, shoulder bag, tote bag
+tie, necktie, bow tie
+suitcase, luggage, travel bag, baggage
+frisbee, flying disc
+skis, ski equipment, downhill skis, cross country skis
+snowboard, snow board
+sports ball, ball, soccer ball, basketball, football, tennis ball
+kite, flying kite, paper kite
+baseball bat, bat, wooden bat
+baseball glove, mitt, baseball mitt, catcher's mitt
+skateboard, skate board
+surfboard, surf board, longboard, shortboard
+tennis racket, racquet, tennis racquet
+bottle, water bottle, plastic bottle, glass bottle
+wine glass, wineglass, goblet
+cup, water cup, water glass, mug, coffee cup, drinking cup
+fork, dining fork, silverware
+knife, kitchen knife, cutting knife, blade
+spoon, tablespoon, teaspoon, silverware
+bowl, dish, serving bowl, cereal bowl
+banana, yellow banana, ripe banana
+apple, apple fruit, red apple, green apple
+sandwich, sub, burger, hoagie
+orange, orange fruit, citrus
+broccoli, vegetable, green vegetable
+carrot, orange vegetable, root vegetable
+hot dog, hotdog, sausage
+pizza, pizza slice, pepperoni pizza
+donut, doughnut, pastry
+cake, birthday cake, layer cake, dessert
+chair, seat, dining chair, office chair, armchair
+couch, sofa, settee, loveseat, divan
+potted plant, pottedplant, planter, indoor plant, houseplant
+bed, mattress, double bed, queen bed, sleeping bed
+dining table, diningtable, table, dinner table, kitchen table
+toilet, lavatory, bathroom fixture, commode
+tv, television, TV screen, flat screen, monitor
+laptop, notebook, computer, laptop computer
+mouse, computer mouse, wireless mouse
+remote, tv remote, remote control, controller
+keyboard, computer keyboard, typing keyboard
+cell phone, mobile, smartphone, mobile phone, iPhone
+microwave, microwave oven
+oven, stove, cooking oven, electric oven, gas oven
+toaster, bread toaster
+sink, basin, kitchen sink, bathroom sink, wash basin
+refrigerator, fridge, cooler, icebox
+book, novel, textbook, reading book, open book
+clock, wall clock, alarm clock, timepiece
+vase, flower vase, ceramic vase, decorative vase
+scissors, cutting scissors, shears
+teddy bear, stuffed bear, plush bear, toy bear
+hair drier, hairdryer, blow dryer
+toothbrush, tooth brush, dental brush
+banner, flag, sign, advertising banner
+blanket, cover, bedspread, throw blanket, quilt
+branch, tree branch, wooden branch, limb
+bridge, overpass, walkway, footbridge, suspension bridge
+building, structure, skyscraper, office building, apartment building, architecture
+bush, shrub, hedge, vegetation
+cabinet, cupboard, storage cabinet, kitchen cabinet
+cage, enclosure, animal cage, wire cage
+cardboard, cardboard box, box, shipping box
+carpet, rug, floor covering, mat
+ceiling, roof interior, overhead, ceiling surface
+ceiling tile, ceiling panel, drop ceiling
+cloth, fabric, textile, material, canvas
+clothes, clothing, garments, apparel, outfit
+clouds, cloud, sky clouds, white clouds, storm clouds
+counter, countertop, kitchen counter, surface
+cupboard, cabinet, storage cupboard, pantry
+curtain, drapes, window curtain, shower curtain
+desk, table, work desk, office desk, writing desk
+dirt, soil, earth, ground, mud
+door, doorway, entrance, wooden door, front door
+fence, railing, barrier, wooden fence, chain link fence
+marble floor, polished floor, stone floor
+floor, ground, flooring, floor surface
+stone floor, tile floor, concrete floor
+tile floor, tiled floor, ceramic floor
+wood floor, wooden floor, hardwood floor, parquet
+flower, blossom, bloom, petals, rose, tulip
+fog, mist, haze, foggy weather
+food, meal, dish, cuisine, edible
+fruit, fresh fruit, ripe fruit
+furniture, furnishing, indoor furniture
+grass, lawn, turf, green grass, grassland
+gravel, pebbles, stones, gravel road
+ground, earth, soil, terrain, land surface
+hill, hillside, slope, elevation, mound
+house, home, building, residence, dwelling
+leaves, foliage, tree leaves, green leaves, fallen leaves
+light, lighting, lamp, illumination, light fixture
+mat, rug, floor mat, doormat, yoga mat
+metal, metallic surface, steel, iron, aluminum
+mirror, looking glass, reflection, wall mirror
+moss, lichen, green moss, plant growth
+mountain, peak, mountain range, hill, summit
+mud, muddy ground, wet soil, mire
+napkin, serviette, paper napkin, cloth napkin
+net, netting, mesh, fishing net, sports net
+paper, sheet, document, newspaper, paper material
+pavement, sidewalk, walkway, paved surface, concrete
+pillow, cushion, bed pillow, throw pillow
+plant, vegetation, greenery, flora, potted plant
+plastic, polymer, plastic material, synthetic
+platform, stage, raised platform, train platform
+playingfield, tennis court, baseball field, soccer field, football field, sports field, athletic field
+railing, handrail, banister, guardrail, balustrade
+railroad, railway, train tracks, rail line
+river, stream, waterway, flowing water, creek
+road, street, highway, roadway, asphalt road, paved road
+rock, stone, boulder, rocky surface
+roof, rooftop, building roof, shingles, tiles
+rug, carpet, floor rug, area rug, oriental rug
+salad, mixed salad, green salad, vegetable salad
+sand, sandy beach, sandy ground, desert sand
+sea, ocean, seawater, sea wave, wave, ocean water
+shelf, shelving, bookshelf, storage shelf
+sky, clear sky, blue sky, cloudy sky, sky background
+skyscraper, tall building, high rise, tower
+snow, snowfall, white snow, snow cover, snowy ground
+solid, solid surface, solid material
+stairs, staircase, steps, stairway, flight of stairs
+stone, rock, stone surface, paving stone
+straw, hay, dried grass, straw material
+structural, structure, architectural element
+table, desk, dining table, coffee table, side table
+tent, camping tent, canvas tent, shelter
+textile, fabric, cloth, material, woven fabric
+towel, bath towel, hand towel, beach towel
+tree, palm tree, oak tree, pine tree, large tree, tree trunk
+vegetable, veggies, green vegetable, fresh vegetable
+brick wall, red brick, brick surface
+concrete wall, cement wall, gray wall
+wall, interior wall, exterior wall, wall surface
+wall panel, paneling, wall covering
+stone wall, rock wall, masonry
+wall tile, tiled wall, ceramic tile
+wood wall, wooden wall, wood paneling
+water, liquid, h2o, flowing water, clear water
+waterdrops, water droplets, rain drops, condensation
+window blind, blinds, venetian blinds, shades
+window, glass window, window pane, open window
+wood, timber, wooden material, lumber, wooden surface
