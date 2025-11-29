@@ -354,7 +354,7 @@ def segment_with_clip_guided_sam(image, class_names, segmentor, args, profiler=N
 
     # Track CLIP forward pass
     if profiler:
-        profiler.add_clip_forward(model_name=segmentor.model_name)
+        profiler.add_clip_forward(model_name=segmentor.clip_extractor.model_name)
 
     # Step 2: Extract prompt points
     prompts = extract_prompt_points_from_clip(
@@ -449,7 +449,7 @@ def segment_with_blind_grid(image, class_names, segmentor, args, profiler=None):
 
     # Track CLIP forward pass
     if profiler:
-        profiler.add_clip_forward(model_name=segmentor.model_name)
+        profiler.add_clip_forward(model_name=segmentor.clip_extractor.model_name)
 
     print(f"  CLIP dense prediction: Done")
 
@@ -781,7 +781,7 @@ def main():
             if profiler:
                 profiler.start('sclip_segment')
                 # Track CLIP forward for dense-only mode
-                profiler.add_clip_forward(model_name=segmentor.model_name)
+                profiler.add_clip_forward(model_name=segmentor.clip_extractor.model_name)
             pred_mask = segmentor.segment(image, dataset.class_names)
             if profiler:
                 profiler.end('sclip_segment')
