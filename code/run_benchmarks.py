@@ -398,26 +398,18 @@ def segment_with_blind_grid(image, class_names, segmentor, args):
     print(f"  CLIP dense prediction: Done")
 
     # Step 2: Generate uniform grid
-    # Create grid points covering the whole image
+    # Create grid points covering the whole image (NO FILTERING)
+    # This is truly "blind" - we don't skip background or any class
     x_coords = np.linspace(0, W-1, grid_size, dtype=int)
     y_coords = np.linspace(0, H-1, grid_size, dtype=int)
 
     grid_points = []
-    grid_classes = []
 
     for y in y_coords:
         for x in x_coords:
-            # Get CLIP predicted class at this grid point
-            class_idx = seg_map[y, x]
-
-            # Skip background if dataset has background class
-            if segmentor.has_background_class and class_idx == segmentor.background_idx:
-                continue
-
             grid_points.append((int(x), int(y)))
-            grid_classes.append(class_idx)
 
-    print(f"  Grid points generated: {len(grid_points)} (skipped background)")
+    print(f"  Grid points generated: {len(grid_points)} (uniform {grid_size}×{grid_size} grid)")
 
     if len(grid_points) == 0:
         print("  WARNING: No valid grid points, returning dense prediction")
@@ -445,12 +437,14 @@ def segment_with_blind_grid(image, class_names, segmentor, args):
 
     print(f"  SAM generated {len(mask_candidates)} mask candidates")
 
-    # Step 4: Assign classes from CLIP dense prediction
+    # Step 4: Assign classes using MAJORITY VOTING over SAM mask
+    # (consistent with predict_with_sam in sclip_segmentor.py)
+    # IMPORTANT: Background is a VALID class - we don't filter it out
     results = []
+    min_coverage = 0.6  # Same as in predict_with_sam
 
     for i, point in enumerate(grid_points):
         x, y = point
-        class_idx = grid_classes[i]
 
         # Find masks for this specific point
         point_masks = []
@@ -465,15 +459,39 @@ def segment_with_blind_grid(image, class_names, segmentor, args):
 
         # Pick best mask by predicted_iou
         best_mask = max(point_masks, key=lambda m: m.predicted_iou)
+        mask_region = best_mask.mask.astype(bool)
 
+        if mask_region.sum() == 0:
+            continue
+
+        # MAJORITY VOTING: Get dense predictions within this SAM mask
+        masked_predictions = seg_map[mask_region]
+
+        # Find the most common class in this region
+        unique_classes, counts = np.unique(masked_predictions, return_counts=True)
+        majority_class = unique_classes[counts.argmax()]
+        max_count = counts.max()
+        total_pixels = mask_region.sum()
+
+        # Only keep if majority class has sufficient coverage
+        coverage = max_count / total_pixels
+        if coverage < min_coverage:
+            continue
+
+        # Get average confidence of majority class within mask
+        majority_confidence = probs[majority_class][mask_region].mean()
+
+        # IMPORTANT: We keep background as a valid class
+        # If majority class is background, that's the correct assignment
         results.append({
-            'mask': best_mask.mask.astype(bool),
-            'class_idx': int(class_idx),
-            'class_name': class_names[class_idx],
-            'confidence': float(probs[class_idx, y, x]),  # CLIP confidence at grid point
+            'mask': mask_region,
+            'class_idx': int(majority_class),  # Can be background!
+            'class_name': class_names[majority_class],
+            'confidence': float(majority_confidence),
             'sam_score': float(best_mask.predicted_iou),
-            'region_size': int(best_mask.mask.sum()),
-            'prompt_point': point
+            'region_size': int(mask_region.sum()),
+            'prompt_point': point,
+            'coverage': float(coverage)
         })
 
     print(f"  Matched {len(results)} points to their best masks")
