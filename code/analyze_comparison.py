@@ -46,8 +46,8 @@ def print_comparison_table(results):
     print()
 
     # Header
-    print(f"{'Method':<25} {'Prompts':<12} {'Time (s)':<12} {'mIoU':<10} {'Pixel Acc':<12} {'F1':<10} {'Speedup':<10}")
-    print("-"*100)
+    print(f"{'Method':<25} {'Prompts':<12} {'Time (s)':<12} {'GFLOPs':<12} {'mIoU':<10} {'Pixel Acc':<12} {'F1':<10} {'Speedup':<10}")
+    print("-"*115)
 
     # Extract baseline time
     baseline_time = None
@@ -66,6 +66,11 @@ def print_comparison_table(results):
         total_time = data.get('elapsed_time', 0)
         time_per_image = total_time / num_samples if num_samples > 0 else 0
 
+        # Get GFLOPs if available
+        profiling = data.get('profiling', {})
+        total_gflops = profiling.get('total_gflops', 0)
+        gflops_per_image = total_gflops / num_samples if num_samples > 0 and total_gflops > 0 else 0
+
         # Estimate number of prompts
         if 'blind_grid_32x32' in str(data.get('args', {}).get('output_dir', '')):
             num_prompts = "~800-1024"
@@ -82,9 +87,13 @@ def print_comparison_table(results):
         else:
             speedup = 1.0
 
-        print(f"{method:<25} {num_prompts:<12} {time_per_image:>10.2f}s {miou:>8.2f}% {pixel_acc:>10.2f}% {f1:>8.2f}% {speedup:>8.2f}×")
+        # Print row with GFLOPs if available
+        if gflops_per_image > 0:
+            print(f"{method:<25} {num_prompts:<12} {time_per_image:>10.2f}s {gflops_per_image:>10.1f} {miou:>8.2f}% {pixel_acc:>10.2f}% {f1:>8.2f}% {speedup:>8.2f}×")
+        else:
+            print(f"{method:<25} {num_prompts:<12} {time_per_image:>10.2f}s {'N/A':>10} {miou:>8.2f}% {pixel_acc:>10.2f}% {f1:>8.2f}% {speedup:>8.2f}×")
 
-    print("-"*100)
+    print("-"*115)
     print()
 
 
@@ -112,14 +121,24 @@ def analyze_efficiency(results):
     guided_miou = guided.get('miou', 0) * 100
     blind_miou = blind.get('miou', 0) * 100
 
+    # Get GFLOPs
+    guided_profiling = guided.get('profiling', {})
+    blind_profiling = blind.get('profiling', {})
+
+    guided_gflops = guided_profiling.get('total_gflops', 0) / guided_samples if guided_samples > 0 else 0
+    blind_gflops = blind_profiling.get('total_gflops', 0) / blind_samples if blind_samples > 0 else 0
+
     # Calculate improvements
     time_speedup = blind_time / guided_time if guided_time > 0 else 0
+    gflops_reduction = (blind_gflops - guided_gflops) / blind_gflops * 100 if blind_gflops > 0 else 0
     prompt_reduction = (4096 - 200) / 4096 * 100  # Assuming ~200 prompts for guided
     miou_diff = guided_miou - blind_miou
 
     print(f"CLIP-Guided SAM vs Blind Grid 64×64:")
     print(f"  Time speedup:      {time_speedup:.1f}× faster")
     print(f"  Prompt reduction:  ~{prompt_reduction:.0f}% fewer prompts (200 vs 4096)")
+    if guided_gflops > 0 and blind_gflops > 0:
+        print(f"  GFLOPs reduction:  {gflops_reduction:.1f}% ({guided_gflops:.1f} vs {blind_gflops:.1f})")
     print(f"  mIoU difference:   {miou_diff:+.2f}% ({guided_miou:.2f}% vs {blind_miou:.2f}%)")
     print()
 

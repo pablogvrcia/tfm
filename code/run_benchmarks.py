@@ -49,13 +49,25 @@ class PerformanceProfiler:
     """
     Performance profiling for benchmarks - inspired by 2025 optimization papers.
 
-    Tracks: timing, memory usage, GPU utilization, throughput
+    Tracks: timing, memory usage, GPU utilization, throughput, GFLOPs
     """
+
+    # Computational costs (GFLOPs per operation)
+    # Based on published model architectures
+    CLIP_VIT_B16_GFLOPS = 17.6  # CLIP ViT-B/16 at 224x224
+    CLIP_VIT_L14_GFLOPS = 79.5  # CLIP ViT-L/14 at 224x224
+    SAM2_HIERA_L_GFLOPS = 360.0  # SAM2 Hiera-Large per prompt
+
     def __init__(self):
         self.timings = defaultdict(list)
         self.memory_usage = defaultdict(list)
         self.gpu_memory = defaultdict(list)
         self.start_times = {}
+
+        # GFLOPs tracking
+        self.num_clip_forwards = 0
+        self.num_sam_prompts = 0
+        self.total_gflops = 0.0
 
     def start(self, name: str):
         """Start timing a section."""
@@ -80,6 +92,19 @@ class PerformanceProfiler:
             self.gpu_memory[name].append(gpu_mem_mb)
 
         del self.start_times[name]
+
+    def add_clip_forward(self, model_name='ViT-B/16'):
+        """Record a CLIP forward pass."""
+        self.num_clip_forwards += 1
+        if 'ViT-L' in model_name:
+            self.total_gflops += self.CLIP_VIT_L14_GFLOPS
+        else:
+            self.total_gflops += self.CLIP_VIT_B16_GFLOPS
+
+    def add_sam_prompts(self, num_prompts):
+        """Record SAM prompts."""
+        self.num_sam_prompts += num_prompts
+        self.total_gflops += num_prompts * self.SAM2_HIERA_L_GFLOPS
 
     def get_summary(self):
         """Get performance summary."""
@@ -107,6 +132,25 @@ class PerformanceProfiler:
         print("\n" + "="*80)
         print("PERFORMANCE PROFILING SUMMARY (2025 Optimizations)")
         print("="*80)
+
+        # Print GFLOPs summary first
+        if self.num_clip_forwards > 0 or self.num_sam_prompts > 0:
+            print("\nComputational Cost (GFLOPs):")
+            print(f"  CLIP forward passes:  {self.num_clip_forwards}")
+            print(f"  SAM prompts:          {self.num_sam_prompts}")
+            print(f"  Total GFLOPs:         {self.total_gflops:.1f}")
+
+            # Calculate average per image
+            if 'total_inference' in summary and summary['total_inference']['count'] > 0:
+                num_images = summary['total_inference']['count']
+                avg_gflops = self.total_gflops / num_images
+                print(f"  Avg GFLOPs/image:     {avg_gflops:.1f}")
+
+                # Calculate theoretical FLOP efficiency (GFLOP/s)
+                avg_time = summary['total_inference']['mean_time']
+                if avg_time > 0:
+                    gflops_per_sec = avg_gflops / avg_time
+                    print(f"  Computational speed:  {gflops_per_sec:.1f} GFLOP/s")
 
         for name, stats in sorted(summary.items()):
             print(f"\n{name}:")
@@ -291,7 +335,7 @@ def load_dataset(dataset_name, data_dir, num_samples):
     return dataset
 
 
-def segment_with_clip_guided_sam(image, class_names, segmentor, args):
+def segment_with_clip_guided_sam(image, class_names, segmentor, args, profiler=None):
     """
     Perform CLIP-guided SAM segmentation.
 
@@ -308,6 +352,10 @@ def segment_with_clip_guided_sam(image, class_names, segmentor, args):
     probs = torch.softmax(logits, dim=0).cpu().numpy()
     probs = probs.transpose(1, 2, 0)  # (H, W, num_classes)
 
+    # Track CLIP forward pass
+    if profiler:
+        profiler.add_clip_forward(model_name=segmentor.model_name)
+
     # Step 2: Extract prompt points
     prompts = extract_prompt_points_from_clip(
         seg_map, probs, class_names,
@@ -321,6 +369,10 @@ def segment_with_clip_guided_sam(image, class_names, segmentor, args):
     if len(prompts) == 0:
         # Fallback to dense prediction if no prompts
         return seg_map
+
+    # Track SAM prompts
+    if profiler:
+        profiler.add_sam_prompts(len(prompts))
 
     # Step 3: Segment with guided prompts
     results = segment_with_guided_prompts(
@@ -357,7 +409,7 @@ def segment_with_clip_guided_sam(image, class_names, segmentor, args):
     return final_seg_map
 
 
-def segment_with_blind_grid(image, class_names, segmentor, args):
+def segment_with_blind_grid(image, class_names, segmentor, args, profiler=None):
     """
     Blind grid prompting baseline for efficiency comparison.
 
@@ -394,6 +446,10 @@ def segment_with_blind_grid(image, class_names, segmentor, args):
     # Step 1: Get CLIP dense predictions (SAME as guided method)
     seg_map, logits = segmentor.predict_dense(image, class_names, return_logits=True)
     probs = torch.softmax(logits, dim=0).cpu().numpy()  # (num_classes, H, W)
+
+    # Track CLIP forward pass
+    if profiler:
+        profiler.add_clip_forward(model_name=segmentor.model_name)
 
     print(f"  CLIP dense prediction: Done")
 
@@ -435,6 +491,10 @@ def segment_with_blind_grid(image, class_names, segmentor, args):
         point_labels=point_labels
     )
 
+    # Track SAM prompts
+    if profiler:
+        profiler.add_sam_prompts(len(grid_points))
+
     print(f"  SAM generated {len(mask_candidates)} mask candidates")
 
     # Step 4: Assign classes using MAJORITY VOTING over SAM mask
@@ -443,7 +503,7 @@ def segment_with_blind_grid(image, class_names, segmentor, args):
     results = []
     min_coverage = 0.6  # Same as in predict_with_sam
 
-    for i, point in enumerate(grid_points):
+    for point in grid_points:
         x, y = point
 
         # Find masks for this specific point
@@ -708,18 +768,20 @@ def main():
         if args.use_blind_grid:
             if profiler:
                 profiler.start('blind_grid')
-            pred_mask = segment_with_blind_grid(image, dataset.class_names, segmentor, args)
+            pred_mask = segment_with_blind_grid(image, dataset.class_names, segmentor, args, profiler)
             if profiler:
                 profiler.end('blind_grid')
         elif args.use_clip_guided_sam:
             if profiler:
                 profiler.start('clip_guided_sam')
-            pred_mask = segment_with_clip_guided_sam(image, dataset.class_names, segmentor, args)
+            pred_mask = segment_with_clip_guided_sam(image, dataset.class_names, segmentor, args, profiler)
             if profiler:
                 profiler.end('clip_guided_sam')
         else:
             if profiler:
                 profiler.start('sclip_segment')
+                # Track CLIP forward for dense-only mode
+                profiler.add_clip_forward(model_name=segmentor.model_name)
             pred_mask = segmentor.segment(image, dataset.class_names)
             if profiler:
                 profiler.end('sclip_segment')
@@ -875,6 +937,15 @@ def main():
     results['timestamp'] = datetime.now().isoformat()
     results['args'] = vars(args)
     results['elapsed_time'] = elapsed_time
+
+    # Add profiling data including GFLOPs
+    if profiler:
+        results['profiling'] = {
+            'total_gflops': profiler.total_gflops,
+            'num_clip_forwards': profiler.num_clip_forwards,
+            'num_sam_prompts': profiler.num_sam_prompts,
+            'summary': profiler.get_summary()
+        }
 
     with open(results_file, 'w') as f:
         json.dump(results, f, indent=2)
