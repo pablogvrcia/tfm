@@ -199,6 +199,15 @@ def parse_args():
     parser.add_argument('--iou-threshold', type=float, default=0.8,
                         help='IoU threshold for merging overlaps (--use-clip-guided-sam only)')
 
+    # Improved prompt extraction strategies (addresses tutor feedback)
+    parser.add_argument('--improved-strategy', type=str, default=None,
+                        choices=['adaptive_threshold', 'confidence_weighted', 'density_based', 'prob_map'],
+                        help='Use improved prompt extraction strategy:\n'
+                             '  adaptive_threshold: Adaptive thresholds for stuff vs thing classes\n'
+                             '  confidence_weighted: Sample more points in high-confidence regions\n'
+                             '  density_based: K-means clustering for spatial coverage\n'
+                             '  prob_map: Exploit full probability distribution (RECOMMENDED!)')
+
     # Blind Grid Baseline (for efficiency comparison)
     parser.add_argument('--use-blind-grid', action='store_true',
                         help='Use blind grid prompting baseline for efficiency comparison')
@@ -357,14 +366,36 @@ def segment_with_clip_guided_sam(image, class_names, segmentor, args, profiler=N
         profiler.add_clip_forward(model_name=segmentor.clip_extractor.model_name)
 
     # Step 2: Extract prompt points
-    prompts = extract_prompt_points_from_clip(
-        seg_map, probs, class_names,
-        min_confidence=args.min_confidence,
-        min_region_size=args.min_region_size,
-        points_per_cluster=args.points_per_cluster,
-        negative_points_per_cluster=args.negative_points_per_cluster,
-        negative_confidence_threshold=args.negative_confidence_threshold
-    )
+    # Use improved strategy if specified (addresses tutor feedback)
+    if args.improved_strategy:
+        try:
+            from improved_prompt_extraction import extract_prompts_improved
+            print(f"[IMPROVED] Using strategy: {args.improved_strategy}")
+            prompts = extract_prompts_improved(
+                seg_map, probs, class_names,
+                strategy=args.improved_strategy,
+                min_confidence=args.min_confidence,
+                min_region_size=args.min_region_size
+            )
+        except ImportError:
+            print("[WARNING] improved_prompt_extraction not found, falling back to default")
+            prompts = extract_prompt_points_from_clip(
+                seg_map, probs, class_names,
+                min_confidence=args.min_confidence,
+                min_region_size=args.min_region_size,
+                points_per_cluster=args.points_per_cluster,
+                negative_points_per_cluster=args.negative_points_per_cluster,
+                negative_confidence_threshold=args.negative_confidence_threshold
+            )
+    else:
+        prompts = extract_prompt_points_from_clip(
+            seg_map, probs, class_names,
+            min_confidence=args.min_confidence,
+            min_region_size=args.min_region_size,
+            points_per_cluster=args.points_per_cluster,
+            negative_points_per_cluster=args.negative_points_per_cluster,
+            negative_confidence_threshold=args.negative_confidence_threshold
+        )
 
     if len(prompts) == 0:
         # Fallback to dense prediction if no prompts
