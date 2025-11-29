@@ -154,6 +154,13 @@ def parse_args():
                         help='Minimum confidence for negative point regions (--use-clip-guided-sam only)')
     parser.add_argument('--iou-threshold', type=float, default=0.8,
                         help='IoU threshold for merging overlaps (--use-clip-guided-sam only)')
+
+    # Blind Grid Baseline (for efficiency comparison)
+    parser.add_argument('--use-blind-grid', action='store_true',
+                        help='Use blind grid prompting baseline for efficiency comparison')
+    parser.add_argument('--grid-size', type=int, default=32,
+                        help='Grid size for blind prompting (32×32=1024 prompts, 64×64=4096 prompts)')
+
     parser.add_argument('--use-pamr', action='store_true', default=False,
                         help='Use PAMR refinement (default: False, SCLIP disables by default)')
     parser.add_argument('--pamr-steps', type=int, default=10,
@@ -350,6 +357,157 @@ def segment_with_clip_guided_sam(image, class_names, segmentor, args):
     return final_seg_map
 
 
+def segment_with_blind_grid(image, class_names, segmentor, args):
+    """
+    Blind grid prompting baseline for efficiency comparison.
+
+    Strategy:
+    1. CLIP dense prediction (SAME as guided method)
+    2. Generate uniform grid of prompts (e.g., 32×32 = 1024 points)
+    3. Prompt SAM at each grid point
+    4. Assign class from CLIP dense pred at that grid point
+    5. Merge overlapping masks
+
+    This is the FAIR baseline because:
+    - Uses same CLIP information as guided method
+    - Only difference: WHERE we place SAM prompts (blind vs intelligent)
+    - Shows value of intelligent prompt placement
+
+    Args:
+        image: (H, W, 3) RGB image
+        class_names: List of class names
+        segmentor: SCLIP segmentor instance
+        args: Arguments with grid_size, iou_threshold, etc.
+
+    Returns:
+        Segmentation mask (H, W) with class indices
+    """
+    import torch
+
+    H, W = image.shape[:2]
+    grid_size = args.grid_size
+
+    print(f"\n[Blind Grid Baseline] Starting...")
+    print(f"  Grid size: {grid_size}×{grid_size} = {grid_size*grid_size} prompts")
+    print(f"  Image size: {H}×{W}")
+
+    # Step 1: Get CLIP dense predictions (SAME as guided method)
+    seg_map, logits = segmentor.predict_dense(image, class_names, return_logits=True)
+    probs = torch.softmax(logits, dim=0).cpu().numpy()  # (num_classes, H, W)
+
+    print(f"  CLIP dense prediction: Done")
+
+    # Step 2: Generate uniform grid
+    # Create grid points covering the whole image
+    x_coords = np.linspace(0, W-1, grid_size, dtype=int)
+    y_coords = np.linspace(0, H-1, grid_size, dtype=int)
+
+    grid_points = []
+    grid_classes = []
+
+    for y in y_coords:
+        for x in x_coords:
+            # Get CLIP predicted class at this grid point
+            class_idx = seg_map[y, x]
+
+            # Skip background if dataset has background class
+            if segmentor.has_background_class and class_idx == segmentor.background_idx:
+                continue
+
+            grid_points.append((int(x), int(y)))
+            grid_classes.append(class_idx)
+
+    print(f"  Grid points generated: {len(grid_points)} (skipped background)")
+
+    if len(grid_points) == 0:
+        print("  WARNING: No valid grid points, returning dense prediction")
+        return seg_map
+
+    # Step 3: Prompt SAM at each grid point
+    print(f"  Prompting SAM at {len(grid_points)} grid points...")
+
+    # Use SAM2 to get masks
+    from models.sam2_segmentation import SAM2MaskGenerator
+
+    sam_generator = SAM2MaskGenerator(
+        device=segmentor.device,
+        use_fp16=segmentor.use_fp16,
+        batch_prompts=True  # Batch processing for efficiency
+    )
+
+    # Generate all masks at once (batch processing)
+    point_labels = [1] * len(grid_points)  # All foreground
+    mask_candidates = sam_generator.segment_with_points(
+        image=image,
+        points=grid_points,
+        point_labels=point_labels
+    )
+
+    print(f"  SAM generated {len(mask_candidates)} mask candidates")
+
+    # Step 4: Assign classes from CLIP dense prediction
+    results = []
+
+    for i, point in enumerate(grid_points):
+        x, y = point
+        class_idx = grid_classes[i]
+
+        # Find masks for this specific point
+        point_masks = []
+        for mask_cand in mask_candidates:
+            if mask_cand.point_coords is not None:
+                px, py = mask_cand.point_coords[0]
+                if abs(px - x) < 1 and abs(py - y) < 1:
+                    point_masks.append(mask_cand)
+
+        if len(point_masks) == 0:
+            continue
+
+        # Pick best mask by predicted_iou
+        best_mask = max(point_masks, key=lambda m: m.predicted_iou)
+
+        results.append({
+            'mask': best_mask.mask.astype(bool),
+            'class_idx': int(class_idx),
+            'class_name': class_names[class_idx],
+            'confidence': float(probs[class_idx, y, x]),  # CLIP confidence at grid point
+            'sam_score': float(best_mask.predicted_iou),
+            'region_size': int(best_mask.mask.sum()),
+            'prompt_point': point
+        })
+
+    print(f"  Matched {len(results)} points to their best masks")
+
+    # Step 5: Merge overlapping masks (same class only)
+    results = merge_overlapping_masks(results, iou_threshold=args.iou_threshold)
+
+    print(f"  After merging: {len(results)} final masks")
+
+    # Step 6: Create final segmentation map
+    final_seg = np.zeros((H, W), dtype=np.int64)
+
+    # Sort by confidence (lower first, so higher overwrites)
+    results = sorted(results, key=lambda x: x['confidence'])
+
+    for result in results:
+        mask = result['mask']
+        class_idx = result['class_idx']
+
+        # Ensure mask is boolean and correct shape
+        if mask.dtype != bool:
+            mask = mask.astype(bool)
+        if mask.shape != (H, W):
+            # Resize mask if needed
+            import cv2
+            mask = cv2.resize(mask.astype(np.uint8), (W, H), interpolation=cv2.INTER_NEAREST).astype(bool)
+
+        final_seg[mask] = class_idx
+
+    print(f"[Blind Grid Baseline] Complete!")
+
+    return final_seg
+
+
 def main():
     args = parse_args()
 
@@ -362,10 +520,22 @@ def main():
         print("Error: Cannot use both --use-sam and --use-clip-guided-sam")
         return
 
+    if args.use_blind_grid and not CLIP_GUIDED_AVAILABLE:
+        print("Error: --use-blind-grid requires clip_guided_segmentation module (for merge_overlapping_masks)")
+        return
+
+    if args.use_blind_grid and (args.use_clip_guided_sam or args.use_sam):
+        print("Error: Cannot combine --use-blind-grid with other SAM modes")
+        return
+
     print("=" * 80)
     print(f"Benchmark: {args.dataset.upper()}")
     print("=" * 80)
-    if args.use_clip_guided_sam:
+    if args.use_blind_grid:
+        print(f"Mode: Blind Grid Baseline (Uniform grid prompting)")
+        print(f"  Grid size: {args.grid_size}×{args.grid_size} = {args.grid_size*args.grid_size} prompts")
+        print(f"  IoU threshold: {args.iou_threshold}")
+    elif args.use_clip_guided_sam:
         print(f"Mode: CLIP-Guided SAM (Intelligent prompting + overlap resolution)")
         print(f"  Min confidence: {args.min_confidence}")
         print(f"  Min region size: {args.min_region_size}")
@@ -517,7 +687,13 @@ def main():
             profiler.start('total_inference')
 
         # Predict
-        if args.use_clip_guided_sam:
+        if args.use_blind_grid:
+            if profiler:
+                profiler.start('blind_grid')
+            pred_mask = segment_with_blind_grid(image, dataset.class_names, segmentor, args)
+            if profiler:
+                profiler.end('blind_grid')
+        elif args.use_clip_guided_sam:
             if profiler:
                 profiler.start('clip_guided_sam')
             pred_mask = segment_with_clip_guided_sam(image, dataset.class_names, segmentor, args)
