@@ -358,9 +358,14 @@ def extract_prompts_prob_map_exploitation(seg_map, probs, vocabulary,
 
     print("\n[IMPROVED] Full probability map exploitation:")
     print(f"  Strategy: Top-{top_k_classes} classes, threshold ratio={prob_threshold_ratio}")
+    print(f"  Image shape: {H}x{W}, Num classes: {len(vocabulary)}")
+
+    # DEBUG: Track stats per class
+    debug_stats = []
+    extraction_count = 0
 
     # For each class, find regions where it has HIGH probability
-    # (not necessarily the argmax winner)
+    # STRATEGY: Start with argmax winners, then expand to competitive regions
     for class_idx, class_name in enumerate(vocabulary):
         class_confidence = probs[:, :, class_idx]
 
@@ -368,13 +373,42 @@ def extract_prompts_prob_map_exploitation(seg_map, probs, vocabulary,
         is_stuff = is_stuff_class(class_name)
         base_threshold = 0.15 if is_stuff else 0.3
 
+        # HYBRID APPROACH:
+        # 1. Find pixels where this class WINS argmax (traditional approach)
+        # 2. ALSO find pixels where this class is in top-K with high confidence
+        #    This captures "competitive" regions at class boundaries
+
+        class_wins_argmax = (seg_map == class_idx)
+
         # NEW: Also consider pixels where this class is in top-K
         # even if it's not the argmax winner
         max_probs = probs.max(axis=2)  # (H, W) - max prob at each pixel
 
-        # Create mask: class prob is high OR class is competitive with winner
-        competitive_mask = (class_confidence > prob_threshold_ratio * max_probs)
-        high_conf_mask = (class_confidence > base_threshold) & competitive_mask
+        # Get the K-th highest probability at each pixel
+        k_th_probs = np.partition(probs, -top_k_classes, axis=2)[:, :, -top_k_classes]
+
+        # Create mask: class is in top-K AND above base threshold
+        in_top_k = (class_confidence >= k_th_probs)
+        in_top_k_high_conf = in_top_k & (class_confidence > base_threshold)
+
+        # COMBINE: Either wins argmax OR is competitive (top-K + high conf)
+        high_conf_mask = class_wins_argmax | in_top_k_high_conf
+
+        # DEBUG: Log stats for each class
+        max_class_conf = class_confidence.max()
+        argmax_pixels = class_wins_argmax.sum()
+        top_k_contrib = in_top_k_high_conf.sum()
+        total_high_conf = high_conf_mask.sum()
+
+        if total_high_conf > 0 or argmax_pixels > 0:
+            debug_stats.append({
+                'class': class_name,
+                'max_conf': max_class_conf,
+                'argmax_px': argmax_pixels,
+                'top_k_contrib': top_k_contrib,
+                'total_px': total_high_conf,
+                'threshold': base_threshold
+            })
 
         if high_conf_mask.sum() < min_region_size:
             continue
@@ -385,6 +419,7 @@ def extract_prompts_prob_map_exploitation(seg_map, probs, vocabulary,
         if num_regions == 0:
             continue
 
+        extraction_count += 1
         region_info = []
 
         for region_id in range(1, num_regions + 1):
@@ -430,11 +465,56 @@ def extract_prompts_prob_map_exploitation(seg_map, probs, vocabulary,
                 p=weights
             )
 
-            for idx in sampled_indices:
-                px = int(x_coords[idx])
-                py = int(y_coords[idx])
-                conf = class_confidence[py, px]
+            # IMPROVED: Sample prompts only from pixels where class_idx is ACTUALLY argmax
+            # This prevents sampling noisy pixels that are just "top-K" but not winners
+            argmax_pixels_in_region = region_mask & class_wins_argmax
 
+            # If we have argmax pixels, prefer those for sampling
+            if argmax_pixels_in_region.any():
+                argmax_y, argmax_x = np.where(argmax_pixels_in_region)
+                argmax_coords = list(zip(argmax_x, argmax_y))
+
+                # If we have enough argmax pixels, sample only from those
+                if len(argmax_coords) >= num_points_to_sample:
+                    # Sample from argmax pixels only (highest quality)
+                    argmax_confidences = class_confidence[argmax_pixels_in_region]
+                    argmax_weights = argmax_confidences / argmax_confidences.sum()
+                    argmax_indices = np.random.choice(
+                        len(argmax_coords),
+                        size=num_points_to_sample,
+                        replace=False,
+                        p=argmax_weights
+                    )
+                    sampled_coords = [argmax_coords[i] for i in argmax_indices]
+                    sampling_strategy = "argmax_only"
+                else:
+                    # Not enough argmax pixels, mix argmax + top-K
+                    # Take ALL argmax pixels + sample remaining from top-K
+                    sampled_coords = argmax_coords.copy()
+                    remaining = num_points_to_sample - len(argmax_coords)
+
+                    # Sample remaining from non-argmax region pixels
+                    non_argmax_region = region_mask & ~class_wins_argmax
+                    if non_argmax_region.any() and remaining > 0:
+                        non_argmax_y, non_argmax_x = np.where(non_argmax_region)
+                        non_argmax_conf = class_confidence[non_argmax_region]
+                        non_argmax_weights = non_argmax_conf / non_argmax_conf.sum()
+                        non_argmax_indices = np.random.choice(
+                            len(non_argmax_y),
+                            size=min(remaining, len(non_argmax_y)),
+                            replace=False,
+                            p=non_argmax_weights
+                        )
+                        sampled_coords.extend(zip(non_argmax_x[non_argmax_indices],
+                                                 non_argmax_y[non_argmax_indices]))
+                    sampling_strategy = f"mixed({len(argmax_coords)}argmax+{len(sampled_coords)-len(argmax_coords)}topK)"
+            else:
+                # No argmax pixels in region, fall back to original sampling
+                sampled_coords = [(int(x_coords[i]), int(y_coords[i])) for i in sampled_indices]
+                sampling_strategy = "topK_only"
+
+            for px, py in sampled_coords:
+                conf = class_confidence[py, px]
                 prompts.append({
                     'point': (px, py),
                     'class_idx': class_idx,
@@ -457,6 +537,17 @@ def extract_prompts_prob_map_exploitation(seg_map, probs, vocabulary,
             print(f"  {class_name}: {len(region_info)} regions, purity={avg_purity:.2f}, {total_prompts} prompts")
 
     print(f"[IMPROVED] Extracted {len(prompts)} prompts total")
+
+    # DEBUG: Print classes that will be extracted (those with prompts)
+    if len(debug_stats) > 0:
+        print("\n[DEBUG] Classes extracted ({} total):".format(extraction_count))
+        # Sort by total pixels (descending)
+        sorted_stats = sorted(debug_stats, key=lambda x: x['total_px'], reverse=True)[:15]
+        for stat in sorted_stats:
+            print(f"  {stat['class']}: max_conf={stat['max_conf']:.3f}, "
+                  f"argmax={stat['argmax_px']}, top-K+={stat['top_k_contrib']}, "
+                  f"total={stat['total_px']}, thresh={stat['threshold']:.2f}")
+
     return prompts
 
 

@@ -316,15 +316,17 @@ def extract_prompt_points_from_clip(seg_map, probs, vocabulary, min_confidence=0
 
 
 def segment_with_guided_prompts(image, prompts, checkpoint_path=None, model_cfg=None, device=None,
-                                seg_map=None, vocabulary=None):
+                                seg_map=None, probs=None, vocabulary=None, use_hybrid_voting=True):
     """
     Segment image using CLIP-guided prompts.
 
     Args:
         image: (H, W, 3) RGB image
         prompts: List of prompt dictionaries with 'point', 'class_idx', etc.
-        seg_map: (H, W) CLIP dense prediction for re-classification (optional)
-        vocabulary: List of class names for re-classification (optional)
+        seg_map: (H, W) CLIP dense prediction for hybrid voting (optional)
+        probs: (H, W, num_classes) CLIP probabilities for hybrid voting (optional)
+        vocabulary: List of class names for hybrid voting (optional)
+        use_hybrid_voting: If True and seg_map/probs provided, use hybrid voting policy
 
     Returns:
         List of segmentation results
@@ -378,14 +380,33 @@ def segment_with_guided_prompts(image, prompts, checkpoint_path=None, model_cfg=
         mask = masks[best_idx]
         score = scores[best_idx]
 
+        # Assign class using hybrid voting if enabled and data available
+        prompt_class = prompt_info['class_idx']
+        assigned_class = prompt_class
+        correction_info = None
+
+        if use_hybrid_voting and seg_map is not None and probs is not None and vocabulary is not None:
+            assigned_class, correction_info = assign_class_hybrid_voting(
+                mask, prompt_class, seg_map, probs, vocabulary
+            )
+
+            # Log corrections for debugging
+            if correction_info is not None:
+                print(f"  [VOTING CORRECTION] Mask {i+1}: "
+                      f"{correction_info['from_name']} → {correction_info['to_name']} "
+                      f"(conf: {correction_info['conf_ratio']:.2f}x, "
+                      f"coverage: {correction_info['coverage']:.1%})")
+
         results.append({
             'mask': mask,
-            'class_idx': prompt_info['class_idx'],
-            'class_name': prompt_info['class_name'],
+            'class_idx': assigned_class,
+            'class_name': vocabulary[assigned_class] if vocabulary else prompt_info['class_name'],
             'confidence': prompt_info['confidence'],
             'sam_score': float(score),
             'region_size': prompt_info['region_size'],
-            'prompt_point': point
+            'prompt_point': point,
+            'original_class': prompt_class if correction_info else None,
+            'voting_correction': correction_info
         })
 
         if (i + 1) % 10 == 0:
@@ -393,6 +414,112 @@ def segment_with_guided_prompts(image, prompts, checkpoint_path=None, model_cfg=
 
     print(f"Successfully generated {len(results)} masks")
     return results
+
+
+def assign_class_hybrid_voting(mask, prompt_class, seg_map, probs, vocabulary,
+                               conf_threshold=1.2, coverage_threshold=0.25, agreement_threshold=0.6):
+    """
+    Hybrid voting policy: Conservative but corrects obvious CLIP errors.
+
+    Strategy:
+    1. Start with prompt_class (baseline guarantee)
+    2. Calculate confidence-weighted winner from all pixels in mask
+    3. Only switch if there's STRONG evidence (3 conditions must hold)
+
+    This prevents degrading quality while fixing obvious mistakes like "bear → hair drier".
+
+    Args:
+        mask: SAM mask (H, W) boolean array
+        prompt_class: Class index from the prompt
+        seg_map: CLIP argmax predictions (H, W)
+        probs: CLIP probabilities (H, W, num_classes)
+        vocabulary: List of class names
+        conf_threshold: Ratio of confidence required to switch (default 1.2 = 20% better)
+        coverage_threshold: Min pixel coverage for new class (default 0.25 = 25%)
+        agreement_threshold: Max agreement with prompt class to allow switch (default 0.6)
+
+    Returns:
+        assigned_class: Class index to assign to this mask
+        correction_info: Dict with debugging info (or None if no correction)
+    """
+    # Baseline: use prompt class
+    assigned_class = prompt_class
+    correction_info = None
+
+    # Ensure mask is boolean for indexing
+    mask_bool = mask.astype(bool)
+
+    # Extract predictions inside mask
+    masked_seg = seg_map[mask_bool]
+    unique_classes = np.unique(masked_seg)
+
+    if len(unique_classes) == 1:
+        # Homogeneous mask, no correction needed
+        return assigned_class, None
+
+    # Calculate average confidence for each class in mask
+    class_confidences = {}
+    class_pixel_counts = {}
+
+    for class_idx in unique_classes:
+        # Pixels where this class is argmax
+        class_pixels_mask = (masked_seg == class_idx)
+        pixel_count = class_pixels_mask.sum()
+
+        # Get coordinates of these pixels in original image
+        mask_coords = np.argwhere(mask_bool)
+        class_mask_indices = np.where(class_pixels_mask)[0]
+        class_coords = mask_coords[class_mask_indices]
+
+        # Calculate average confidence for this class at those pixels
+        confidences = [probs[y, x, class_idx] for y, x in class_coords]
+        avg_confidence = np.mean(confidences) if confidences else 0.0
+
+        class_confidences[class_idx] = avg_confidence
+        class_pixel_counts[class_idx] = pixel_count
+
+    # Find confidence-weighted winner
+    conf_winner = max(class_confidences.keys(), key=lambda k: class_confidences[k])
+
+    # If winner is same as prompt, no correction needed
+    if conf_winner == prompt_class:
+        return assigned_class, None
+
+    # Calculate metrics for decision
+    prompt_conf = class_confidences.get(prompt_class, 0.0)
+    winner_conf = class_confidences[conf_winner]
+
+    # Avoid division by zero
+    if prompt_conf < 1e-6:
+        conf_ratio = float('inf')
+    else:
+        conf_ratio = winner_conf / prompt_conf
+
+    pixel_coverage = class_pixel_counts[conf_winner] / mask_bool.sum()
+    agreement_with_prompt = class_pixel_counts.get(prompt_class, 0) / mask_bool.sum()
+
+    # Decision: Switch only if ALL three conditions hold
+    should_switch = (
+        conf_ratio > conf_threshold and
+        pixel_coverage > coverage_threshold and
+        agreement_with_prompt < agreement_threshold
+    )
+
+    if should_switch:
+        assigned_class = conf_winner
+        correction_info = {
+            'from_class': prompt_class,
+            'from_name': vocabulary[prompt_class],
+            'to_class': conf_winner,
+            'to_name': vocabulary[conf_winner],
+            'conf_ratio': conf_ratio,
+            'coverage': pixel_coverage,
+            'agreement': agreement_with_prompt,
+            'from_confidence': prompt_conf,
+            'to_confidence': winner_conf
+        }
+
+    return assigned_class, correction_info
 
 
 def merge_overlapping_masks(results, iou_threshold=0.8):
