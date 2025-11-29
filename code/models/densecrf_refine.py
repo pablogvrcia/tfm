@@ -167,16 +167,23 @@ class DenseCRFRefiner:
                 # Convert to uint8 for bilateral filter
                 prob_map_uint8 = (prob_map * 255).astype(np.uint8)
 
-                # Apply bilateral filter
-                # d: diameter of pixel neighborhood
-                # sigmaColor: filter sigma in color space
-                # sigmaSpace: filter sigma in coordinate space
+                # Apply bilateral filter (more aggressive parameters)
+                # d: diameter of pixel neighborhood (increased for more smoothing)
+                # sigmaColor: filter sigma in color space (higher = more smoothing)
+                # sigmaSpace: filter sigma in coordinate space (higher = larger area)
                 filtered = cv2.bilateralFilter(
                     prob_map_uint8,
                     d=9,
                     sigmaColor=75,
                     sigmaSpace=75
                 )
+                
+                # filtered = cv2.bilateralFilter(
+                #     prob_map_uint8,
+                #     d=15,  # Increased from 9
+                #     sigmaColor=150,  # Increased from 75
+                #     sigmaSpace=150  # Increased from 75
+                # )
 
                 # Convert back to float
                 refined_probs[c] = filtered.astype(np.float32) / 255.0

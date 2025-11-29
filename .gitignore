@@ -80,6 +80,10 @@ others
 
 cutouts
 
+data/video_benchmarks
+
+**/data/benchmarks
+
 VACE
 Wan2.1
 DiffSynth-Studio
@@ -95,3 +99,5 @@ video_benchmarks
 video_results
 
 explanatory_results
+
+_.git

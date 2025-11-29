@@ -6,7 +6,6 @@ Evaluates SCLIP-based semantic segmentation on standard benchmarks.
 Usage:
     # Dense mode (pure SCLIP, fastest, best performance)
     python run_benchmarks.py --dataset coco-stuff --num-samples 10
-    python run_benchmarks.py --dataset cityscapes --num-samples 10
 
     # Hybrid mode (SCLIP + SAM)
     python run_benchmarks.py --dataset coco-stuff --num-samples 10 --use-sam
@@ -30,7 +29,7 @@ import torch
 from collections import defaultdict
 
 from models.sclip_segmentor import SCLIPSegmentor
-from datasets import COCOStuffDataset, PASCALVOCDataset, CityscapesDataset
+from datasets import COCOStuffDataset, PASCALVOCDataset, CityscapesDataset, ADE20KDataset
 from benchmarks.metrics import compute_all_metrics
 
 # Import CLIP-guided segmentation functions
@@ -129,7 +128,7 @@ def parse_args():
 
     # Dataset
     parser.add_argument('--dataset', type=str, default='coco-stuff',
-                        choices=['coco-stuff', 'pascal-voc', 'cityscapes'],
+                        choices=['coco-stuff', 'pascal-voc', 'cityscapes', 'ade20k'],
                         help='Dataset to evaluate')
     parser.add_argument('--data-dir', type=str, default='data/benchmarks',
                         help='Path to dataset directory')
@@ -271,6 +270,12 @@ def load_dataset(dataset_name, data_dir, num_samples):
         dataset = CityscapesDataset(
             data_dir=data_dir,
             split='val',
+            max_samples=num_samples
+        )
+    elif dataset_name == 'ade20k':
+        dataset = ADE20KDataset(
+            data_dir=data_dir,
+            split='validation',
             max_samples=num_samples
         )
     else:

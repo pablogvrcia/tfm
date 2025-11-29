@@ -49,7 +49,7 @@ docker-build:
 # Compile thesis using Docker
 docker-compile: docker-build
 	docker run --rm -v $(PWD)/.:/thesis thesis-latex \
-		bash -c "latexmk -pdf -output-directory=build -interaction=nonstopmode -file-line-error main.tex"
+		bash -c "latexmk -pdf -output-directory=build -interaction=nonstopmode -f -file-line-error main.tex"
 	@if [ -f $(OVERLEAF_DIR)/build/$(MAIN).pdf ]; then \
 		cp $(OVERLEAF_DIR)/build/$(MAIN).pdf ./Master_Thesis.pdf; \
 		echo "✓ PDF generated successfully: ./Master_Thesis.pdf"; \

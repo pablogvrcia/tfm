@@ -8,50 +8,53 @@ This chapter presents the SCLIP-guided prompting methodology for open-vocabulary
 
 \subsection{Motivation and Design Philosophy}
 
-SCLIP-guided prompting addresses a fundamental inefficiency in alternative SAM2 prompting strategies. While blind prompting approaches rely on uniformly distributed grid locations without considering image content—requiring extensive computation to cover all possible object locations—SCLIP analyzes the image semantically to identify where objects actually exist. This enables SAM2 to focus only on meaningful regions, drastically reducing computational cost while maintaining competitive accuracy.
+SCLIP-guided prompting addresses a fundamental inefficiency in alternative SAM2 prompting strategies. Naive approaches use exhaustive grid sampling: prompting SAM at uniformly distributed points without considering image content. This blind prompting suffers from computational inefficiency (generating SAM masks at every grid location is prohibitively expensive) and semantic blindness (wasting computation on background regions).
 
-The approach requires zero spatial user input: users provide only a text vocabulary, and the system automatically determines where objects are located without requiring manual clicks or bounding boxes. SAM2 then provides precise object boundaries at each semantically-guided prompt point, combining SCLIP's semantic understanding with SAM2's superior mask quality. Importantly, the method operates training-free, using frozen SCLIP and SAM2 models without any fine-tuning to enable zero-shot transfer to new domains.
-
-The key insight is to use SCLIP's dense predictions not as the final output, but as intelligent guidance for SAM2 prompting, achieving both efficiency and quality.
-
-\subsection{System Overview}
-
-Figure~\ref{fig:clip_guided_pipeline} presents a schematic overview of the complete SCLIP-guided prompting pipeline. The diagram illustrates the four main stages of the approach: SCLIP first generates dense semantic predictions with confidence maps for each class in the vocabulary; these predictions are then processed to extract intelligent prompt points, dramatically reducing the number of required prompts from thousands to just a handful; SAM2 is then prompted at each extracted point to generate high-quality instance masks with direct class assignment; finally, overlapping masks are resolved through IoU-based filtering to produce the final segmentation.
+SCLIP-guided prompting inverts this paradigm: SCLIP identifies where objects exist, enabling SAM2 to focus only on meaningful regions. Figure~\ref{fig:blind_vs_intelligent} illustrates this difference—blind grid prompting distributes prompts uniformly, while the SCLIP-guided approach concentrates them on actual object instances.
 
 \begin{figure}[!htbp]
 \centering
-\includegraphics[width=0.85\textwidth,keepaspectratio]{Imagenes/2. SCLIP-Guided Prompting Pipeline Diagram.png}
-\caption{Schematic overview of the SCLIP-guided prompting pipeline. The system uses CLIP's dense predictions to extract intelligent prompt points, achieving a massive reduction in prompts compared to blind grid sampling while maintaining competitive accuracy. Each stage is described in detail in the following sections.}
-\label{fig:clip_guided_pipeline}
+\includegraphics[width=0.95\textwidth]{Imagenes/comparison_blind_vs_intelligent_2panel.png}
+\caption{Comparison between blind grid prompting (left) and SCLIP-guided intelligent prompting (right). Grid sampling places prompts uniformly without semantic awareness, while the SCLIP-guided approach extracts prompts only at semantically meaningful locations.}
+\label{fig:blind_vs_intelligent}
 \end{figure}
 
-The key insight motivating this design is that CLIP's dense predictions identify where objects are located, enabling intelligent SAM2 prompting with far fewer points than blind grid sampling. As illustrated in Figure~\ref{fig:clip_guided_pipeline}, by extracting points from SCLIP's high-confidence regions, SAM2 is guided to focus on semantically relevant areas, achieving both efficiency and accuracy. The following sections provide detailed technical explanations of each pipeline component, building upon this schematic overview.
+\FloatBarrier
+
+The approach requires zero spatial user input: users provide only a text vocabulary, and the system automatically determines object locations. SAM2 then provides precise boundaries at each semantically-guided prompt point.
+
+\subsection{System Overview}
+
+An schematic overview of the complete SCLIP-guided prompting pipeline is presented in Figure~\ref{fig:clip_guided_pipeline}. The diagram illustrates the four main stages of the approach: SCLIP first generates dense semantic predictions with confidence maps for each class in the vocabulary; these predictions are then processed to extract intelligent prompt points, dramatically reducing the number of required prompts from thousands to just a handful; SAM2 is then prompted at each extracted point to generate high-quality instance masks with direct class assignment; finally, overlapping masks are resolved through IoU-based filtering to produce the final segmentation.
+
+\begin{figure}[!htbp]
+\centering
+\includegraphics[width=0.7\textwidth,keepaspectratio]{Imagenes/2.PipelineDiagram.png}
+\caption{Schematic overview of the SCLIP-guided prompting pipeline. The system uses CLIP's dense predictions to extract intelligent prompt points.}
+\label{fig:clip_guided_pipeline}
+\end{figure}
 
 \FloatBarrier
 
 \subsection{SCLIP Dense Prediction}
 \label{sec:sclip_dense_extraction}
 
-The first stage of the pipeline uses SCLIP \cite{sclip2024} to generate dense semantic predictions and confidence maps for each class in the user-defined vocabulary. SCLIP is a modified version of CLIP \cite{radford2021learning} that adapts its Vision Transformer (ViT) architecture for dense pixel-wise prediction tasks like semantic segmentation. Figure~\ref{fig:sclip_pipeline} illustrates the complete SCLIP dense prediction process.
+The first stage of the pipeline uses SCLIP \cite{sclip2024} to generate dense semantic predictions and confidence maps for each class in the user-defined vocabulary. Figure~\ref{fig:sclip_pipeline} illustrates the complete SCLIP dense prediction process.
 
 \begin{figure}[!htbp]
 \centering
-\includegraphics[width=\textwidth,height=0.4\textheight,keepaspectratio]{Imagenes/pipeline_1_1.png}
+\includegraphics[width=1\textwidth,keepaspectratio]{Imagenes/pipeline_1_1.png}
 \caption{SCLIP dense prediction pipeline.}
 \label{fig:sclip_pipeline}
 \end{figure}
 
 \FloatBarrier
 
-\subsubsection{CLIP Foundation}
-
 The proposed approach builds on CLIP (Contrastive Language-Image Pre-training) \cite{radford2021learning}, a foundation model that learns a shared embedding space between images and text through contrastive learning on 400 million image-text pairs. CLIP's key capability is open-vocabulary recognition: given an image and arbitrary text descriptions, it can match visual content to semantic concepts without requiring task-specific training.
 
 CLIP is particularly suitable for open-vocabulary segmentation due to three key properties. First, it enables zero-shot transfer by recognizing objects from text descriptions alone, without requiring annotated segmentation masks. Second, it supports flexible vocabularies, handling any user-defined class set rather than being limited to predefined categories. Third, CLIP's Vision Transformer (ViT) backbone processes images as patch sequences, providing spatial feature maps that can be adapted for dense pixel-wise predictions.
 
 However, CLIP was designed for image-level classification, not dense prediction. SCLIP addresses this limitation by adapting CLIP's attention mechanism for semantic segmentation, as illustrated in the pipeline of Figure~\ref{fig:sclip_pipeline}. For detailed technical explanations of CLIP's contrastive learning objective and Vision Transformer architecture, please refer to Appendix \ref{appendix:technical_foundations}.
-
-\subsubsection{Correlative Self-Attention: The Key Modification}
 
 SCLIP's core innovation is a simple modification: only the final attention layer (layer 12) of CLIP's ViT-B/16 encoder is changed, while layers 1-11 remain unchanged. Standard attention computes:
 \begin{equation}
@@ -65,11 +68,9 @@ Layer 12 instead uses Correlative Self-Attention (CSA):
 
 Instead of computing $Q_h K_h^T$, CSA computes $Q_h Q_h^T$ and $K_h K_h^T$ separately under independent softmax operations, then sums them. This measures patch-to-patch similarity based on query and key representations independently. Patches with similar content (e.g., all sky patches) mutually reinforce each other through high $Q_h Q_h^T$ and $K_h K_h^T$ scores, producing spatially coherent features where semantically similar regions cluster together. Standard $Q_h K_h^T$ attention creates holistic image representations ideal for classification but produces fragmented features for pixel-wise tasks.
 
-\subsubsection{Dense Prediction Pipeline}
-
 SCLIP processes images using sliding window inference. Input images are resized to 336 pixels on the shorter side, then a 224×224 window slides across with stride 112, creating overlapping crops. Each crop is processed independently and predictions are averaged to produce the final segmentation.
 
-For each 224×224 window, ViT-B/16 divides the input into 16×16 pixel patches, creating a 14×14 grid (224÷16 = 14). Each patch becomes a 512-dimensional feature vector, yielding $F \in \mathbb{R}^{14 \times 14 \times 512}$. Simultaneously, text descriptors for each class are encoded with templates (Sections \ref{sec:improved_prompting}) to produce class embeddings $e_c \in \mathbb{R}^{512}$.
+For each 224×224 window, ViT-B/16 divides the input into 16×16 pixel patches, creating a 14×14 grid (224÷16 = 14). Each patch becomes a 512-dimensional feature vector, yielding $F \in \mathbb{R}^{14 \times 14 \times 512}$. Simultaneously, text descriptors for each class are encoded with templates to produce class embeddings $e_c \in \mathbb{R}^{512}$.
 
 Dense cosine similarity is computed between image patches and class embeddings:
 \begin{equation}
@@ -84,27 +85,21 @@ P_{x,y,c} = \frac{\exp(T \cdot S'_{x,y,c})}{\sum_{c'} \exp(T \cdot S'_{x,y,c'})}
 
 This produces pixel-wise predictions $\hat{c} \in \mathbb{R}^{H \times W}$ and confidence maps $P \in \mathbb{R}^{H \times W \times C}$ for the intelligent prompting strategy (Section~\ref{sec:intelligent_prompting}).
 
-\subsubsection{Improved CLIP Text Prompting}
-\label{sec:improved_prompting}
+Optionally, Dense Conditional Random Field (CRF) \cite{krahenbuhl2011efficient} post-processing can be applied to refine prediction boundaries. The CRF encourages spatial smoothness and label consistency while respecting color edges through bilateral filtering. Figure~\ref{fig:densecrf_comparison} illustrates how DenseCRF cleans the dense predictions by smoothing noisy boundaries while preserving sharp transitions at object edges. When using SCLIP-guided SAM prompting, this refinement indirectly benefits the final output by producing cleaner segmentation maps, which in turn generate more accurate prompt point locations for SAM2.
 
-The core idea is to enhance CLIP text embeddings using descriptor files and template strategies, improving SCLIP's dense prediction quality without retraining. These techniques refine \textit{what} terms are encoded (descriptor files) and \textit{how} they are framed (template strategies) for CLIP, leading to more robust class representations.
+\begin{figure}[h]
+\centering
+\includegraphics[width=0.95\textwidth]{Imagenes/motogp_densecrf_comparison.png}
+\caption{Dense Conditional Random Field boundary refinement. The top-right panel highlights pixels modified by DenseCRF in red, showing how it smooths segmentation boundaries while respecting color edges in the original image.}
+\label{fig:densecrf_comparison}
+\end{figure}
 
-The approach is evaluated primarily on PASCAL VOC 2012, a widely-used semantic segmentation benchmark containing 20 object classes (person, car, bicycle, bird, cat, dog, aeroplane, boat, bottle, bus, chair, cow, diningtable, horse, motorbike, pottedplant, sheep, sofa, train, tvmonitor) plus a background class, totaling 21 classes. The dataset presents challenges typical of real-world scenarios: significant intra-class variation (people in different clothing, cars of different colors), compound objects (dining tables, potted plants), and ambiguous class names (tvmonitor, diningtable) that may not align with CLIP's pretraining vocabulary.
+\FloatBarrier
 
-Using a single class name (e.g., "person") limits CLIP's ability to recognize this intra-class variation. Descriptor files address this by providing multiple descriptive terms for each class, enabling CLIP to match different visual manifestations of the same semantic category.
-
-Descriptor files map each class to multiple descriptive terms rather than a single name. For PASCAL VOC, the background class includes "sky", "wall", "tree", "road"; the person class includes clothing variants like "shirt", "jeans", "dress"; and compound objects use synonyms (diningtable → "table") and multi-word variants (tvmonitor → "television monitor", "tv monitor").
-
-Template strategies determine \textit{how} to frame those terms for CLIP. Standard approaches use 80 ImageNet templates \cite{zhou2022learning}, but recent research \cite{huang2024pixelclip, wysoczanska2024clipdiy} shows that carefully curated templates tailored for dense prediction can achieve better or similar accuracy with fewer templates.
-
-We implement several template strategies, selectable via the system configuration. ImageNet-80, 80 diverse templates designed for ImageNet classification (80× text encoding cost); Top-7 Dense Prediction, 7 templates selected via forward selection on segmentation tasks (11× lower prompts encoded than ImageNet-80); Spatial Context Templates, 7 templates emphasizing spatial/scene context (improved spatial understanding); Top-3 Ultra-Fast, 3 most effective templates for minimal latency (27× lower prompts encoded than ImageNet-80); Adaptive (Stuff vs. Thing), automatically selects template set based on class type (class-aware optimization).
-
-For each class $c$ with descriptor terms $D_c = \{\text{term}_1, \ldots, \text{term}_{K_c}\}$ and templates $\{t_1, \ldots, t_M\}$, all combinations are encoded and averaged:
+To improve CLIP's semantic understanding, the system uses descriptor files that map each class to multiple descriptive terms rather than a single name. This handles intra-class variation and ambiguous class names that may not align with CLIP's pretraining vocabulary. Template strategies determine how these terms are framed for CLIP, with options ranging from 80 ImageNet templates to optimized sets of 3-7 templates for faster inference. For each class $c$ with descriptor terms $D_c$ and templates $\{t_1, \ldots, t_M\}$, text embeddings are computed as:
 \begin{equation}
 e_c = \frac{1}{K_c \cdot M} \sum_{d \in D_c} \sum_{i=1}^{M} \text{CLIP}_{\text{text}}(t_i(d)), \quad e_c \leftarrow e_c / \|e_c\|_2
 \end{equation}
-
-For example, "person" with 7 descriptors and 80 templates produces 560 text embeddings averaged into a single robust representation.
 
 \subsection{Intelligent Prompt Extraction}
 \label{sec:intelligent_prompting}
@@ -114,369 +109,180 @@ This is the core algorithmic contribution: using SCLIP's dense predictions to ex
 \begin{figure}[!htbp]
 \centering
 \includegraphics[width=\textwidth,height=0.4\textheight,keepaspectratio]{Imagenes/pipeline_1_2.png}
-\caption{SCLIP-guided prompting with intelligent prompt extraction. SCLIP's dense predictions are processed through a pipeline to extract semantically meaningful prompt points, drastically reducing the number of SAM2 prompts required compared to blind grid sampling.}
+\caption{SCLIP-guided prompting with intelligent prompt extraction. SCLIP's dense predictions are processed through a pipeline to extract semantically meaningful prompt point.}
 \label{fig:sam_pipeline}
 \end{figure}
 
 \FloatBarrier
 
-\subsubsection{Motivation: From Dense Predictions to Sparse Prompts}
-
-Naive approaches to combining CLIP with SAM often use exhaustive grid sampling: prompting SAM at every point in a dense grid (e.g., 64×64 = 4096 points) and using CLIP to classify the resulting masks. This has two major drawbacks:
-
-\begin{itemize}
-    \item \textbf{Computational inefficiency:} Generating 4096 SAM masks per image is prohibitively expensive (minutes per image even on modern GPUs)
-    \item \textbf{Semantic blindness:} Grid points are placed uniformly without considering object locations, wasting computation on background regions
-\end{itemize}
-
-The intelligent extraction inverts this paradigm: SCLIP first identifies \textit{where} objects are likely to exist, then SAM2 is prompted only at those semantically meaningful locations. This achieves a significant reduction in prompts (from thousands to hundreds) while maintaining competitive accuracy.
-
-\subsubsection{Complete Prompt Extraction Pipeline}
-
-Given SCLIP's dense prediction outputs from the previous stage:
-\begin{itemize}
-    \item Segmentation map: $\hat{c} \in \mathbb{R}^{H \times W}$ (predicted class per pixel)
-    \item Probability map: $P \in \mathbb{R}^{H \times W \times C}$ (confidence scores for $C$ classes)
-\end{itemize}
-
-We extract semantically meaningful prompt points through the following five-stage pipeline:
-
-\paragraph{Stage 1: Per-Class Confidence Masking}
-
-For each class $c \in \{1, \ldots, C\}$, a binary confidence mask is created identifying high-certainty regions:
+Given SCLIP's dense predictions—segmentation map $\hat{c} \in \mathbb{R}^{H \times W}$ and probability map $P \in \mathbb{R}^{H \times W \times C}$—the approach extracts intelligent prompts and generates the final segmentation. Low-confidence predictions are first filtered by retaining only pixels where SCLIP's confidence for the predicted class exceeds threshold $\tau_{\text{conf}}$ (higher values produce fewer but higher-quality prompts, while lower values increase recall at the cost of false positives):
 
 \begin{equation}
-M_c^{\text{conf}}(x,y) = \begin{cases}
-1 & \text{if } \hat{c}(x,y) = c \text{ and } P_{x,y,c} > \tau_{\text{conf}} \\
-0 & \text{otherwise}
-\end{cases}
+M^{\text{conf}}(x,y) = \mathbb{1}[P_{x,y,\hat{c}(x,y)} > \tau_{\text{conf}}]
 \end{equation}
 
-where $\tau_{\text{conf}}$ is the confidence threshold (typically 0.7). This filters out low-confidence predictions that may be noise or ambiguous regions. The threshold is deliberately set high to ensure SAM2 prompts are placed only at locations where CLIP has strong semantic evidence.
-
-\paragraph{Stage 2: Connected Component Analysis}
-
-For each class's confidence mask $M_c^{\text{conf}}$, connected component labeling is applied to identify spatially disjoint object instances. This clustering step groups adjacent pixels belonging to the same semantic class into discrete regions:
+The filtered confidence map undergoes 8-connected component analysis to identify spatially disjoint object instances, yielding regions $\{R^1, R^2, \ldots, R^N\}$. Spurious detections are removed by discarding regions with pixel count $|R^i| < \tau_{\text{area}}$ (larger values filter more aggressively but may miss small objects). For each valid region, the centroid serves as the prompt point for SAM2:
 
 \begin{equation}
-\text{CC}(M_c^{\text{conf}}) \rightarrow \{R_c^1, R_c^2, \ldots, R_c^{N_c}\}
+\mathbf{p}^i = \left( \frac{1}{|R^i|} \sum_{(x,y) \in R^i} x, \frac{1}{|R^i|} \sum_{(x,y) \in R^i} y \right)
 \end{equation}
 
-where $R_c^i \subseteq \{(x,y) : M_c^{\text{conf}}(x,y) = 1\}$ represents the $i$-th connected region for class $c$.
+Each prompt inherits the class predicted by SCLIP at that location, enabling direct class assignment without requiring voting or multi-scale evaluation. SAM2 then generates instance masks for all prompts, combining SCLIP's semantic understanding with SAM2's precise object boundaries. Since multiple prompts may detect the same physical object, overlapping masks of identical class are merged using IoU-based filtering with threshold $\tau_{\text{IoU}}$: masks are sorted by SCLIP confidence in descending order, and for each mask, if it overlaps with a previously kept mask of the same class with IoU exceeding the threshold, the lower-confidence mask is discarded. Finally, cross-class conflicts are resolved by constructing the segmentation map pixel-by-pixel. All remaining masks are sorted by confidence, and pixels are assigned sequentially with higher-confidence masks overwriting lower ones in spatial overlaps. Figure \ref{fig:real_prompt_extraction} illustrates this process.
 
-We use 8-connectivity (considering diagonal neighbors) to ensure that objects touching at corners are grouped together. This connected component analysis efficiently identifies disjoint regions using standard graph-based labeling algorithms.
-
-\textbf{Why clustering matters:} Without clustering, all pixels of class "car" would be treated as a single object. Clustering separates individual car instances, allowing SAM2 to generate distinct masks for each vehicle. For example, a street scene with 5 cars produces 5 separate connected components, each receiving its own prompt point.
-
-\paragraph{Stage 3: Region Filtering by Size}
-
-Many connected components are spurious detections (noise, texture patterns, shadows) that happen to exceed the confidence threshold locally. These are filtered using a minimum region size criterion:
-
-\begin{equation}
-\text{Keep } R_c^i \text{ if } |R_c^i| > \tau_{\text{area}}
-\end{equation}
-
-where $|R_c^i|$ denotes the number of pixels in region $R_c^i$, and $\tau_{\text{area}}$ is the minimum area threshold (typically 100 pixels).
-
-This size filtering serves multiple purposes:
-\begin{itemize}
-    \item Removes noise and artifacts from SCLIP predictions
-    \item Focuses computation on salient objects rather than tiny regions
-    \item Prevents SAM2 from being distracted by spurious high-confidence pixels
-\end{itemize}
-
-For a 224×224 image (50,176 pixels), a threshold of 100 pixels means regions smaller than 0.2\% of the image area are ignored, which is reasonable for most semantic segmentation tasks.
-
-\paragraph{Stage 4: Centroid Computation}
-
-For each valid connected component $R_c^i$, a representative prompt point is extracted by computing the spatial centroid:
-
-\begin{equation}
-\mathbf{p}_c^i = (\bar{x}_c^i, \bar{y}_c^i) = \left( \frac{1}{|R_c^i|} \sum_{(x,y) \in R_c^i} x, \frac{1}{|R_c^i|} \sum_{(x,y) \in R_c^i} y \right)
-\end{equation}
-
-The centroid represents the geometric center of the region and typically falls near the object's interior, making it an ideal point prompt for SAM2. Unlike random sampling or boundary-based selection, centroids are:
-\begin{itemize}
-    \item \textbf{Stable:} Robust to minor segmentation boundary variations
-    \item \textbf{Interior:} Likely to fall inside the object rather than on edges
-    \item \textbf{Representative:} Capture the region's spatial extent
-\end{itemize}
-
-We round centroid coordinates to the nearest integer pixel location: $\mathbf{p}_c^i = (\text{round}(\bar{x}_c^i), \text{round}(\bar{y}_c^i))$.
-
-\paragraph{Stage 5: Prompt Metadata Aggregation}
-
-For each extracted prompt point $\mathbf{p}_c^i$, metadata is aggregated to inform downstream processing:
-
-\begin{equation}
-\text{Prompt}_c^i = \{
-\mathbf{p}_c^i, \quad c, \quad \text{conf}_c^i, \quad |R_c^i|
-\}
-\end{equation}
-
-where:
-\begin{itemize}
-    \item $\mathbf{p}_c^i \in \mathbb{R}^2$: Centroid coordinates $(x, y)$
-    \item $c \in \{1, \ldots, C\}$: Class index (e.g., 1="car", 2="person")
-    \item $\text{conf}_c^i = P_{\bar{x}_c^i, \bar{y}_c^i, c}$: CLIP confidence at centroid
-    \item $|R_c^i| \in \mathbb{N}$: Region area in pixels
-\end{itemize}
-
-This metadata serves multiple purposes:
-\begin{itemize}
-    \item Class index $c$ enables direct class assignment to SAM2 masks (explained in next section)
-    \item Confidence score allows prioritizing high-certainty prompts during processing
-    \item Region size can be used for overlap resolution (larger regions take precedence)
-\end{itemize}
-
-\paragraph{Visual Illustration of the 5-Stage Pipeline}
-
-The complete intelligent prompt extraction process is illustrated in Figure \ref{fig:prompt_extraction_process}, which shows how the pipeline progressively refines CLIP's dense predictions into sparse semantic prompts. Figure \ref{fig:real_prompt_extraction} demonstrates the same process on a real PASCAL VOC image, highlighting the dramatic reduction from 4096 grid points to just 6 semantic prompts while maintaining class accuracy.
-
-The pipeline transforms dense CLIP confidence maps (Stage 0) through binary thresholding (Stage 1), connected component analysis (Stage 2), size filtering (Stage 3), and centroid extraction (Stages 4-5) to produce the final set of intelligent prompts for SAM2. This approach achieves 96-99\% prompt reduction compared to exhaustive grid sampling while focusing computational resources on semantically meaningful regions.
-
-\begin{figure}[H]
-\centering
-\includegraphics[width=0.95\textwidth]{Imagenes/prompt_extraction_pipeline.png}
-\caption{Intelligent prompt extraction pipeline showing the 5-stage process: CLIP confidence map → thresholding → connected components → size filtering → centroid computation. This synthetic example demonstrates 96\% prompt reduction (4 prompts vs 4096 grid points).}
-\label{fig:prompt_extraction_process}
-\end{figure}
-
-\begin{figure}[H]
+\begin{figure}[!htbp]
 \centering
 \includegraphics[width=0.95\textwidth]{Imagenes/real_prompt_extraction_example.png}
-\caption{Real PASCAL VOC example showing 6 semantic prompts extracted from an airport scene with aeroplane and person, achieving 99.85\% reduction vs blind grid sampling (6 vs 4096 points, 683× speedup).}
+\caption{Real PASCAL VOC example showing semantic prompts extracted from an airport scene with aeroplane and person instances.}
 \label{fig:real_prompt_extraction}
 \end{figure}
 
-\subsubsection{Algorithm Summary and Efficiency Analysis}
+To illustrate the effectiveness of the presented method, Figure \ref{fig:comparison_baseline} demonstrates the advantages of SCLIP-guided prompting over SCLIP's dense prediction baseline. Four representative examples highlight key improvements: superior boundary quality through SAM2 integration and cleaner instance separation in cluttered scenes. The intelligent prompting strategy effectively leverages SCLIP's semantic understanding to guide SAM2, resulting in more accurate and visually appealing segmentations compared to the dense prediction baseline.
 
-The complete prompt extraction algorithm processes all classes in parallel:
-
-\begin{equation}
-\text{Prompts} = \bigcup_{c=1}^{C} \left\{ \text{Prompt}_c^i : R_c^i \text{ valid after filtering} \right\}
-\end{equation}
-
-Algorithm~\ref{alg:intelligent_prompting} provides the complete pseudocode for the intelligent prompt extraction process.
+Algorithm~\ref{alg:intelligent_prompting} summarizes the complete prompt extraction and mask generation process.
 
 \begin{algorithm}[H]
-\caption{Intelligent Prompt Extraction from SCLIP Predictions}
+\caption{SCLIP-Guided Prompt Extraction and SAM2 Segmentation}
 \label{alg:intelligent_prompting}
 \begin{algorithmic}[1]
 \State \textbf{Input:} Segmentation map $\hat{c} \in \mathbb{R}^{H \times W}$, probability map $P \in \mathbb{R}^{H \times W \times C}$
-\State \textbf{Parameters:} Confidence threshold $\tau_{\text{conf}} = 0.7$, minimum area $\tau_{\text{area}} = 100$
-\State \textbf{Output:} Prompt set $\mathcal{P} = \{(\mathbf{p}_i, c_i, \text{conf}_i, \text{area}_i)\}$
+\State \textbf{Parameters:} $\tau_{\text{conf}}$, $\tau_{\text{area}}$, $\tau_{\text{IoU}}$
+\State \textbf{Output:} Final segmentation $\hat{y} \in \mathbb{R}^{H \times W}$
 \State
-\State $\mathcal{P} \gets \emptyset$ \Comment{Initialize empty prompt set}
+\State \textbf{// 1. Confidence filtering}
+\State $M^{\text{conf}}(x,y) \gets \mathbb{1}[P_{x,y,\hat{c}(x,y)} > \tau_{\text{conf}}]$
 \State
-\For{each class $c = 1$ to $C$}
-    \State \textbf{// Stage 1: Confidence Masking}
-    \State $M_c^{\text{conf}}(x,y) \gets \mathbb{1}[\hat{c}(x,y) = c \text{ and } P_{x,y,c} > \tau_{\text{conf}}]$
-    \State
-    \State \textbf{// Stage 2: Connected Component Analysis}
-    \State $\{R_c^1, R_c^2, \ldots, R_c^{N_c}\} \gets \text{ConnectedComponents}(M_c^{\text{conf}})$
-    \State
-    \State \textbf{// Stage 3-5: Region Filtering, Centroid Extraction, Metadata}
-    \For{each region $R_c^i$ in $\{R_c^1, \ldots, R_c^{N_c}\}$}
-        \If{$|R_c^i| > \tau_{\text{area}}$} \Comment{Size filtering}
-            \State $\bar{x} \gets \frac{1}{|R_c^i|} \sum_{(x,y) \in R_c^i} x$ \Comment{Centroid x}
-            \State $\bar{y} \gets \frac{1}{|R_c^i|} \sum_{(x,y) \in R_c^i} y$ \Comment{Centroid y}
-            \State $\mathbf{p}_c^i \gets (\text{round}(\bar{x}), \text{round}(\bar{y}))$
-            \State $\text{conf}_c^i \gets P_{\bar{x}, \bar{y}, c}$ \Comment{Confidence at centroid}
-            \State $\mathcal{P} \gets \mathcal{P} \cup \{(\mathbf{p}_c^i, c, \text{conf}_c^i, |R_c^i|)\}$
-        \EndIf
-    \EndFor
+\State \textbf{// 2. Clustering and region filtering}
+\State $\{R^1, R^2, \ldots, R^N\} \gets \text{ConnectedComponents}(M^{\text{conf}})$
+\State $\mathcal{R}_{\text{valid}} \gets \{R^i : |R^i| > \tau_{\text{area}}\}$
+\State
+\State \textbf{// 3. Centroid extraction}
+\State $\mathcal{P} \gets \emptyset$
+\For{each region $R^i \in \mathcal{R}_{\text{valid}}$}
+    \State $\mathbf{p}^i \gets \left( \frac{1}{|R^i|} \sum_{(x,y) \in R^i} x, \frac{1}{|R^i|} \sum_{(x,y) \in R^i} y \right)$
+    \State $c^i \gets \hat{c}(\mathbf{p}^i)$ \Comment{Inherit class from SCLIP}
+    \State $\text{conf}^i \gets P_{\mathbf{p}^i, c^i}$
+    \State $\mathcal{P} \gets \mathcal{P} \cup \{(\mathbf{p}^i, c^i, \text{conf}^i)\}$
 \EndFor
 \State
-\State \Return $\mathcal{P}$ \Comment{Typically 50-300 prompts}
+\State \textbf{// 4. SAM2 segmentation}
+\State $\mathcal{M} \gets \{\text{SAM2}(\mathbf{p}^i) : (\mathbf{p}^i, c^i, \text{conf}^i) \in \mathcal{P}\}$
+\State
+\State \textbf{// 5. IoU-based merge (same class)}
+\State Sort $\mathcal{M}$ by confidence (descending)
+\State $\mathcal{M}_{\text{kept}} \gets \emptyset$
+\For{each mask $m \in \mathcal{M}$}
+    \If{$\nexists m' \in \mathcal{M}_{\text{kept}}$ such that $c_m = c_{m'}$ and $\text{IoU}(m, m') > \tau_{\text{IoU}}$}
+        \State $\mathcal{M}_{\text{kept}} \gets \mathcal{M}_{\text{kept}} \cup \{m\}$
+    \EndIf
+\EndFor
+\State
+\State \textbf{// 6. Cross-class conflict resolution}
+\State $\hat{y} \gets \mathbf{0}$
+\For{each mask $m \in \mathcal{M}_{\text{kept}}$ (sorted by confidence)}
+    \State $\hat{y}[m] \gets c_m$ \Comment{Higher confidence overwrites}
+\EndFor
+\State \Return $\hat{y}$
 \end{algorithmic}
 \end{algorithm}
 
-\textbf{Typical prompt counts:} For Pascal VOC 2012 images with 21 classes (20 objects + background), the extraction produces:
-\begin{itemize}
-    \item \textbf{Simple scenes:} 50-100 prompts (sparse objects, large background regions)
-    \item \textbf{Complex scenes:} 200-300 prompts (multiple object instances per class)
-    \item \textbf{Average:} $\sim$150 prompts per image
-\end{itemize}
-
-\textbf{Efficiency gains:} Compared to 64×64 grid sampling (4096 prompts):
-\begin{equation}
-\text{Reduction} = 1 - \frac{150}{4096} = 96.3\%
-\end{equation}
-
-This 27× reduction in SAM2 queries translates to 3-4× end-to-end speedup in practice (accounting for fixed costs like image encoding), enabling practical deployment on consumer hardware.
-
-\subsubsection{Hyperparameter Selection}
-
-Two key hyperparameters control the prompt extraction process:
-
-\begin{itemize}
-    \item \textbf{Confidence threshold $\tau_{\text{conf}}$:} Higher values (0.7-0.9) produce fewer but higher-quality prompts by requiring strong CLIP evidence. Lower values (0.3-0.5) increase recall at the cost of more false positives. The default of 0.7 balances precision and recall.
-
-    \item \textbf{Minimum area $\tau_{\text{area}}$:} Larger values (200-500) filter more aggressively, reducing noise but potentially missing small objects. Smaller values (50-100) retain more detections but include spurious regions. The default of 100 pixels is appropriate for objects of interest in most semantic segmentation benchmarks.
-\end{itemize}
-
-These thresholds can be adjusted based on application requirements: surveillance systems may prefer high recall (lower thresholds), while precision-critical applications (medical imaging) may demand higher thresholds.
-
-\subsubsection{Direct Class Assignment}
-
-Unlike methods that require voting or post-processing, the approach performs direct class assignment:
-
-For each prompt point $p_i$ with extracted class label $c_i$:
-
-\begin{equation}
-\text{SAM2}(p_i) \rightarrow M_i \text{ where } M_i \text{ is assigned class } c_i
-\end{equation}
-
-SAM2 generates a high-quality instance mask $M_i$ at prompt $p_i$, and the class $c_i$ determined by SCLIP's prediction at that location is directly assigned. This simple yet effective strategy combines:
-
-\begin{itemize}
-    \item \textbf{SCLIP's semantic understanding:} Correct class assignment from vision-language features
-    \item \textbf{SAM 2's segmentation quality:} Precise object boundaries from specialized segmentation model
-    \item \textbf{Efficient processing:} No need for majority voting or multi-scale evaluation
-\end{itemize}
-
-\begin{figure}[h]
+\begin{figure}[!htbp]
 \centering
-\includegraphics[width=0.95\textwidth]{Imagenes/3. Comparison between SCLIP dense prediction baseline and the proposed SCLIP-guided prompting approach.png}
+\includegraphics[width=0.95\textwidth]{Imagenes/3.Bound.png}
 \caption{Comparison between SCLIP dense prediction baseline and the proposed SCLIP-guided prompting approach. Four representative examples demonstrate key advantages: superior boundary quality through SAM2 integration, improved small object detection, and cleaner instance separation in cluttered scenes.}
 \label{fig:comparison_baseline}
 \end{figure}
 
-\subsection{Computational Optimizations}
-\label{sec:computational_optimizations}
+% \subsection{Computational Optimizations}
+% \label{sec:computational_optimizations}
 
-Beyond the algorithmic improvements (descriptor files, template strategies, intelligent prompting), several low-level computational optimizations significantly improve inference speed and memory efficiency without affecting accuracy. These optimizations are critical for practical deployment, especially on resource-constrained hardware.
+% Beyond the algorithmic improvements (descriptor files, template strategies, intelligent prompting), several low-level computational optimizations significantly improve inference speed and memory efficiency without affecting accuracy. These optimizations are critical for practical deployment, especially on resource-constrained hardware.
 
-\subsubsection{Computational Complexity Analysis}
+% \subsubsection{Computational Complexity Analysis}
 
-Before discussing implementation optimizations, we analyze the computational complexity of the SCLIP-guided prompting approach compared to baseline methods.
+% Before discussing implementation optimizations, we analyze the computational complexity of the SCLIP-guided prompting approach compared to baseline methods.
 
-For an image of resolution $H \times W$ with $C$ classes and CLIP embedding dimension $D = 512$:
+% For an image of resolution $H \times W$ with $C$ classes and CLIP embedding dimension $D = 512$:
 
-\textbf{SCLIP dense prediction:} $\mathcal{O}(H \times W \times C \times D)$ for computing similarity between all pixels and all class embeddings.
+% \textbf{SCLIP dense prediction:} $\mathcal{O}(H \times W \times C \times D)$ for computing similarity between all pixels and all class embeddings.
 
-\textbf{Intelligent prompt extraction:} $\mathcal{O}(H \times W)$ for connected component analysis and centroid computation, dominated by the linear scan through confidence masks.
+% \textbf{Intelligent prompt extraction:} $\mathcal{O}(H \times W)$ for connected component analysis and centroid computation, dominated by the linear scan through confidence masks.
 
-\textbf{SAM2 segmentation:} $\mathcal{O}(N_{\text{prompts}} \times T_{\text{SAM2}})$ where $N_{\text{prompts}} \in [50, 300]$ is the number of extracted prompts and $T_{\text{SAM2}}$ is the per-prompt processing time.
+% \textbf{SAM2 segmentation:} $\mathcal{O}(N_{\text{prompts}} \times T_{\text{SAM2}})$ where $N_{\text{prompts}} \in [50, 300]$ is the number of extracted prompts and $T_{\text{SAM2}}$ is the per-prompt processing time.
 
-\textbf{Baseline grid sampling:} $\mathcal{O}(N_{\text{grid}} \times T_{\text{SAM2}})$ where $N_{\text{grid}} = 4096$ for a $64 \times 64$ grid.
+% \textbf{Baseline grid sampling:} $\mathcal{O}(N_{\text{grid}} \times T_{\text{SAM2}})$ where $N_{\text{grid}} = 4096$ for a $64 \times 64$ grid.
 
-\textbf{Theoretical speedup:} $\frac{N_{\text{grid}}}{N_{\text{prompts}}} = \frac{4096}{50\text{-}300} \approx 13\text{-}80\times$
+% \textbf{Theoretical speedup:} $\frac{N_{\text{grid}}}{N_{\text{prompts}}} = \frac{4096}{50\text{-}300} \approx 13\text{-}80\times$
 
-In practice, the speedup is lower due to fixed costs (image encoding, feature extraction), but the intelligent prompting approach consistently achieves $3\text{-}4\times$ end-to-end speedup on PASCAL VOC 2012 images.
+% In practice, the speedup is lower due to fixed costs (image encoding, feature extraction), but the intelligent prompting approach consistently achieves $3\text{-}4\times$ end-to-end speedup on PASCAL VOC 2012 images.
 
-\subsubsection{Mixed Precision Inference (FP16)}
+% \subsubsection{Mixed Precision Inference (FP16)}
 
-Modern GPUs achieve substantially higher throughput when operating on 16-bit floating-point (FP16) data compared to standard 32-bit (FP32). The implementation leverages PyTorch's automatic mixed precision (AMP) to accelerate inference while preserving numerical stability. Code details are available in Appendix \ref{sec:appendix_optimizations}.
+% Modern GPUs achieve substantially higher throughput when operating on 16-bit floating-point (FP16) data compared to standard 32-bit (FP32). The implementation leverages PyTorch's automatic mixed precision (AMP) to accelerate inference while preserving numerical stability. Code details are available in Appendix \ref{sec:appendix_optimizations}.
 
-The \texttt{autocast} context automatically identifies operations that benefit from FP16 (e.g., matrix multiplications, convolutions) while keeping precision-sensitive operations (e.g., softmax, normalization) in FP32. This hybrid approach provides approximately $1.5\text{-}2\times$ faster inference on modern GPUs (Ampere, Ada Lovelace architectures), 50\% reduction in activation memory, and no measurable impact on segmentation quality.
+% The \texttt{autocast} context automatically identifies operations that benefit from FP16 (e.g., matrix multiplications, convolutions) while keeping precision-sensitive operations (e.g., softmax, normalization) in FP32. This hybrid approach provides approximately $1.5\text{-}2\times$ faster inference on modern GPUs (Ampere, Ada Lovelace architectures), 50\% reduction in activation memory, and no measurable impact on segmentation quality.
 
-\subsubsection{Just-In-Time Compilation}
+% \subsubsection{Just-In-Time Compilation}
 
-PyTorch 2.0+ introduces \texttt{torch.compile()}, which fuses operations, eliminates Python overhead, and generates optimized CUDA kernels. The implementation applies compilation to both the CLIP vision encoder and text encoder using \texttt{mode="reduce-overhead"}. See Appendix \ref{sec:appendix_optimizations} for details.
+% PyTorch 2.0+ introduces \texttt{torch.compile()}, which fuses operations, eliminates Python overhead, and generates optimized CUDA kernels. The implementation applies compilation to both the CLIP vision encoder and text encoder using \texttt{mode="reduce-overhead"}. See Appendix \ref{sec:appendix_optimizations} for details.
 
-While compilation incurs a one-time overhead (10-20 seconds), subsequent inferences benefit from kernel fusion, memory optimization, and graph-level optimization, providing an additional $1.2\text{-}1.5\times$ improvement on top of FP16 optimizations.
+% While compilation incurs a one-time overhead (10-20 seconds), subsequent inferences benefit from kernel fusion, memory optimization, and graph-level optimization, providing an additional $1.2\text{-}1.5\times$ improvement on top of FP16 optimizations.
 
-\subsubsection{Batched SAM2 Prompting}
+% \subsubsection{Batched SAM2 Prompting}
 
-Standard SAM2 usage prompts one point at a time, requiring separate forward passes for each prompt. With 50-300 prompts per image, this creates significant overhead. The implementation processes multiple points simultaneously in batches (default size 32), exploiting GPU parallelism to achieve $2\text{-}4\times$ speedup over sequential prompting. Implementation details in Appendix \ref{sec:appendix_optimizations}.
+% Standard SAM2 usage prompts one point at a time, requiring separate forward passes for each prompt. With 50-300 prompts per image, this creates significant overhead. The implementation processes multiple points simultaneously in batches (default size 32), exploiting GPU parallelism to achieve $2\text{-}4\times$ speedup over sequential prompting. Implementation details in Appendix \ref{sec:appendix_optimizations}.
 
-\subsubsection{Combined Impact}
+% \subsubsection{Combined Impact}
 
-\begin{table}[!htbp]
-\centering
-\begin{tabular}{lcc}
-\hline
-\textbf{Configuration} & \textbf{Time/Image (s)} & \textbf{Relative Speedup} \\
-\hline
-Baseline (FP32, no compile, sequential) & 45-60 & 1.0× \\
-+ FP16 & 25-35 & 1.5-1.8× \\
-+ FP16 + torch.compile & 18-28 & 2.1-2.5× \\
-+ FP16 + torch.compile + batching & 12-20 & 3.0-3.8× \\
-\hline
-\end{tabular}
-\caption{Cumulative impact of computational optimizations on inference time.}
-\label{tab:computational_optimizations}
-\end{table}
+% \begin{table}[!htbp]
+% \centering
+% \begin{tabular}{lcc}
+% \hline
+% \textbf{Configuration} & \textbf{Time/Image (s)} & \textbf{Relative Speedup} \\
+% \hline
+% Baseline (FP32, no compile, sequential) & 45-60 & 1.0× \\
+% + FP16 & 25-35 & 1.5-1.8× \\
+% + FP16 + torch.compile & 18-28 & 2.1-2.5× \\
+% + FP16 + torch.compile + batching & 12-20 & 3.0-3.8× \\
+% \hline
+% \end{tabular}
+% \caption{Cumulative impact of computational optimizations on inference time.}
+% \label{tab:computational_optimizations}
+% \end{table}
 
-These optimizations enable practical deployment on consumer hardware (e.g., NVIDIA GeForce GTX 1060 6GB) where the best configuration achieves 12-33 seconds per image for the complete SCLIP-guided SAM2 pipeline.
+% These optimizations enable practical deployment on consumer hardware (e.g., NVIDIA GeForce GTX 1060 6GB) where the best configuration achieves 12-33 seconds per image for the complete SCLIP-guided SAM2 pipeline.
 
-\subsection{Boundary Refinement}
-\label{sec:boundary_refinement}
+\section{Generative Editing Integration}
 
-This enhancement improves boundary quality in the final segmentation.
+\subsection{Image Inpainting}
 
-While SAM2 provides high-quality instance boundaries, the final merged segmentation can exhibit minor boundary artifacts at class transitions, particularly in regions where multiple SAM2 masks overlap or where SCLIP predictions have low confidence. To address this, the system incorporates \textbf{Dense Conditional Random Field (CRF)} post-processing \cite{krahenbuhl2011efficient} as a refinement stage.
+The segmentation masks produced by SCLIP-guided prompting enable text-driven image editing through integration with Stable Diffusion v2 Inpainting \cite{rombach2022high}. Figure~\ref{fig:inpainting_pipeline} illustrates the complete workflow: users select a class from the vocabulary (e.g., "person") and provide a text prompt describing the desired modification. The system extracts a binary mask for the selected class from the segmentation map and uses it to guide Stable Diffusion, which replaces the masked region according to the text prompt while preserving the surrounding image context.
 
-\textbf{Dense CRF formulation:} Given the merged segmentation logits $P \in \mathbb{R}^{H \times W \times C}$ and original image $I$, Dense CRF refines boundaries by minimizing an energy function that encourages:
-\begin{itemize}
-    \item \textbf{Label consistency:} Adjacent pixels with similar colors should have similar labels
-    \item \textbf{Spatial smoothness:} Encourages coherent regions while preserving object boundaries
-    \item \textbf{Appearance-based affinity:} Uses bilateral filtering to respect color edges
-\end{itemize}
-
-The energy function combines unary potentials (from CLIP predictions) with pairwise potentials (spatial and appearance terms):
-\begin{equation}
-E(y) = \sum_{i} \psi_u(y_i) + \sum_{i<j} \psi_p(y_i, y_j)
-\end{equation}
-
-where $\psi_u$ are unary potentials from SCLIP logits, and $\psi_p$ are pairwise potentials combining Gaussian spatial kernels and bilateral appearance kernels.
-
-\textbf{Implementation:} The refinement uses the pydensecrf library \cite{krahenbuhl2011efficient} with the following parameters tuned for open-vocabulary segmentation:
-\begin{itemize}
-    \item \textbf{Inference iterations:} 10 steps of mean-field approximation
-    \item \textbf{Spatial weight:} 3.0 (smoothness strength)
-    \item \textbf{Bilateral weight:} 5.0 (appearance affinity)
-    \item \textbf{Spatial std:} 3 pixels (local smoothing radius)
-    \item \textbf{Color std:} 5 (bilateral filter color tolerance)
-\end{itemize}
-
-\textbf{Performance impact:} Dense CRF adds approximately 0.5-1.0 seconds per image but provides measurable quality improvements:
-\begin{itemize}
-    \item \textbf{mIoU improvement:} +1-2 percentage points on PASCAL VOC 2012
-    \item \textbf{Boundary F1:} +3-5 percentage points (improves edge alignment)
-    \item \textbf{Qualitative benefits:} Smoother class transitions, reduced salt-and-pepper noise
-\end{itemize}
-
-The Dense CRF refinement is particularly effective for:
-\begin{itemize}
-    \item \textbf{Stuff classes:} Smooths segmentation of amorphous regions (sky, grass, road)
-    \item \textbf{Class boundaries:} Sharpens transitions between adjacent objects
-    \item \textbf{Low-confidence regions:} Resolves ambiguities through spatial context
-\end{itemize}
-
-\textbf{Note:} While computationally more expensive, this refinement is essential for achieving near state-of-the-art results and is considered an integral part of the high-accuracy pipeline configuration.
-
-\subsection{Generative Editing Integration}
-
-Once refined segmentation masks are obtained from images, Stable Diffusion v2 Inpainting \cite{rombach2022high} is optionally integrated for text-driven image modification. The inpainting model operates in the latent space of a variational autoencoder (VAE), enabling high-resolution generation with computational efficiency.
-
-Several techniques are employed to ensure coherent results:
-\begin{itemize}
-    \item \textbf{Mask dilation:} Expand mask boundaries by 5-10 pixels for smoother blending
-    \item \textbf{Classifier-free guidance:} Use guidance scale of 7.5 to balance prompt following and realism
-    \item \textbf{Prompt engineering:} Reformulate user queries into detailed prompts suitable for the diffusion model
-\end{itemize}
-
-This completes the SCLIP-guided prompting pipeline, enabling fully annotation-free open-vocabulary segmentation with high-quality boundaries and massive efficiency gains through intelligent semantic guidance.
-
-\subsection{Video Generation Extension}
-
-While the primary focus of this thesis is image segmentation evaluated on PASCAL VOC 2012, the SCLIP-guided prompting approach extends naturally to video processing. The video extension demonstrates two capabilities:
-
-\begin{enumerate}
-    \item \textbf{Video Segmentation:} CLIP analyzes only the first frame to identify objects, then SAM2's memory-based tracking propagates masks across all frames without per-frame CLIP inference
-    \item \textbf{Video Inpainting:} WAN 2.1 VACE \cite{vace2025} enables text-driven object removal and replacement in videos using the generated masks
-\end{enumerate}
+Stable Diffusion v2 Inpainting is a latent diffusion model trained specifically for image completion tasks. Unlike standard diffusion models that operate directly on pixels, it works in a compressed latent space through a variational autoencoder, reducing computational cost while maintaining quality. The model receives three inputs: the original image, the binary mask indicating regions to modify, and the text prompt describing desired content. Through an iterative denoising process, the model generates new content for masked regions while maintaining semantic and visual coherence with surrounding unmasked areas. The conditioning mechanism ensures that generated content respects both the text description and the boundary context, producing realistic transitions between original and synthesized regions.
 
 \begin{figure}[!htbp]
 \centering
-\includegraphics[width=0.95\textwidth]{Imagenes/7. Video Generation.png}
-\caption{Video generation pipeline. Top: original frames. Middle: SCLIP-guided SAM2 segmentation. Bottom: VACE inpainting results.}
-\label{fig:video_generation}
+\includegraphics[width=0.75\textwidth]{Imagenes/image_inpaint_pipeline.png}
+\caption{Generative image inpainting pipeline. A vocabulary word extracts a binary mask from the segmentation, which combines with a user text prompt to guide Stable Diffusion in generating the final inpainted result.}
+\label{fig:inpainting_pipeline}
 \end{figure}
 
-The complete video processing pipeline (Figure~\ref{fig:video_generation}) enables zero-shot video editing workflows such as removing specific objects from sports footage or surveillance videos using only natural language descriptions.
+To ensure coherent results, mask boundaries are expanded by several pixels for smoother blending at edges, and user queries are reformulated into descriptive prompts suitable for the diffusion model. This integration demonstrates how open-vocabulary segmentation enables downstream generative editing tasks by automatically extracting masks from text vocabulary.
 
-For complete technical details including SAM2's temporal tracking mechanism, VACE configuration parameters, memory management strategies, and implementation considerations, see \textbf{Appendix~\ref{appendix:video_generation}}.
+\FloatBarrier
+
+\subsection{Video Inpainting}
+
+The SCLIP-guided prompting approach extends to video processing by leveraging SAM2's temporal tracking capabilities. Figure~\ref{fig:video_inpainting_pipeline} illustrates the complete workflow. The pipeline begins by extracting and segmenting the first frame of the video using SCLIP-guided prompting. SAM2 then propagates the segmentation masks across all subsequent frames through its memory-based tracking mechanism, eliminating the need for per-frame CLIP inference. Once temporal segmentation is complete, the user selects a target class from the vocabulary to generate a binary mask spanning all frames. This mask, combined with the original video where masked regions are grayed out, is passed to WAN 2.1 VACE \cite{vace2025} along with a text prompt describing the desired content. VACE processes the entire video sequence to produce the final inpainted result with temporally consistent modifications.
+
+WAN 2.1 VACE (Video Adaptive Content Enhancement) is a video inpainting model designed to maintain temporal consistency across frames. Video inpainting presents unique challenges compared to images: generated content must remain coherent not only spatially within each frame but also temporally across the sequence to avoid flickering or discontinuities. VACE addresses this through temporal attention mechanisms that propagate information across frames, ensuring that synthesized content maintains consistent appearance, motion, and style throughout the video. The model processes the masked video sequence along with the text prompt, generating new content that seamlessly integrates with the unmasked regions while preserving temporal dynamics. This approach is particularly effective for object removal and replacement scenarios where maintaining natural motion and lighting consistency is critical.
+
+This integration enables zero-shot video editing workflows such as removing or replacing specific objects in videos using only natural language descriptions, automatically extracting masks from text vocabulary.
+
+\begin{figure}[!htbp]
+\centering
+\includegraphics[width=0.75\textwidth]{Imagenes/video_inpaint_pipeline.png}
+\caption{Video inpainting pipeline. The first frame is segmented using SCLIP-guided prompting, then SAM2 propagates masks across frames. A selected vocabulary class generates a binary mask and grayed video, which VACE uses with a text prompt to produce the final inpainted video.}
+\label{fig:video_inpainting_pipeline}
+\end{figure}
+
+\FloatBarrier

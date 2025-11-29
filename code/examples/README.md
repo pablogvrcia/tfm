@@ -230,7 +230,12 @@ Segment shoes from different brands.
 python clip_guided_segmentation.py \
     --image examples/brands.png \
     --vocabulary "Nike Shoe" "Adidas Sneaker" background \
-    --output examples_results/brands
+    --output examples_results/brands \
+    --prompt "Adidas Sneaker" \
+    --edit replace \
+    --use-inpainting \
+    --edit-prompt "a picture of a pair of air force one sneakers" \
+    --output examples_results/sneaker-replacement
 ```
 
 <table>

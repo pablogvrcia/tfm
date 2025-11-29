@@ -28,6 +28,7 @@ from models.video_segmentation import CLIPGuidedVideoSegmentor
 from scipy.ndimage import label, center_of_mass
 import cv2
 import os
+import sys
 
 
 def generate_distinct_colors(n):
@@ -685,6 +686,8 @@ def main():
                        help="Use Stable Diffusion inpainting for remove/replace modes")
     parser.add_argument("--edit-prompt", type=str, default=None,
                        help="Prompt for replace mode (e.g., 'a red sports car')")
+    parser.add_argument("--square-mask", action="store_true",
+                       help="Generate square/bounding box masks instead of fine-grained masks for inpainting")
     parser.add_argument("--checkpoint", default="checkpoints/sam2_hiera_large.pt",
                        help="Path to SAM 2 checkpoint")
     parser.add_argument("--model-cfg", default="sam2_hiera_l.yaml",
@@ -819,6 +822,8 @@ def main():
 
             # Create B/W mask video from segmentation results
             print("\nGenerating B/W mask video...")
+            if args.square_mask:
+                print("Using bounding box masks (--square-mask enabled)")
             cap = cv2.VideoCapture(args.image)
             fps = cap.get(cv2.CAP_PROP_FPS)
             width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
@@ -869,7 +874,22 @@ def main():
                                 print(f"Warning: mask shape {mask.shape} doesn't match expected ({height}, {width}), skipping")
                                 continue
 
-                            mask_binary = (mask.astype(bool).astype(np.uint8) * 255)
+                            mask_binary = mask.astype(bool)
+
+                            # Convert to square/bounding box mask if requested
+                            if args.square_mask:
+                                # Find bounding box of the mask
+                                rows = np.any(mask_binary, axis=1)
+                                cols = np.any(mask_binary, axis=0)
+                                if rows.any() and cols.any():
+                                    y_min, y_max = np.where(rows)[0][[0, -1]]
+                                    x_min, x_max = np.where(cols)[0][[0, -1]]
+
+                                    # Create square mask by filling bounding box
+                                    mask_binary = np.zeros((height, width), dtype=bool)
+                                    mask_binary[y_min:y_max+1, x_min:x_max+1] = True
+
+                            mask_binary = (mask_binary.astype(np.uint8) * 255)
                             combined_mask = np.maximum(combined_mask, mask_binary)
 
                     # Save as PNG with sequential numbering starting from 0
@@ -908,6 +928,19 @@ def main():
 
                             if mask.sum() > 0:
                                 combined_mask |= mask.astype(bool)
+
+                        # Convert to square/bounding box mask if requested
+                        if args.square_mask and combined_mask.any():
+                            rows = np.any(combined_mask, axis=1)
+                            cols = np.any(combined_mask, axis=0)
+                            if rows.any() and cols.any():
+                                y_min, y_max = np.where(rows)[0][[0, -1]]
+                                x_min, x_max = np.where(cols)[0][[0, -1]]
+
+                                # Create square mask by filling bounding box
+                                combined_mask_bbox = np.zeros_like(combined_mask, dtype=bool)
+                                combined_mask_bbox[y_min:y_max+1, x_min:x_max+1] = True
+                                combined_mask = combined_mask_bbox
 
                         # Apply gray overlay (128, 128, 128) to tracked areas
                         frame_preview = frame.copy()
@@ -1000,74 +1033,93 @@ def main():
                 print("="*50)
                 print(f"Running VACE inference with prompt: '{args.edit_prompt}'")
 
+                # Clean up memory before running VACE
+                print("\nCleaning up GPU memory before VACE inference...")
                 try:
-                    # Save current directory
-                    original_dir = os.getcwd()
+                    # Delete video segmentor to free memory
+                    if 'video_segmentor' in locals():
+                        del video_segmentor
+                        print("  Deleted video_segmentor")
 
-                    # Change to VACE directory for imports to work correctly
-                    vace_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'VACE')
-                    os.chdir(vace_path)
+                    # Delete CLIP segmentor to free memory
+                    if 'segmentor' in locals():
+                        del segmentor
+                        print("  Deleted CLIP segmentor")
 
-                    # Add VACE to path
-                    import sys
-                    if vace_path not in sys.path:
-                        sys.path.insert(0, vace_path)
+                    # Clear CUDA cache
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
+                        torch.cuda.synchronize()
+                        print("  Cleared CUDA cache")
 
-                    from vace.vace_wan_inference import main as vace_main
+                    # Run garbage collection
+                    import gc
+                    collected = gc.collect()
+                    print(f"  Garbage collected {collected} objects")
 
-                    # Convert paths to absolute paths since we're changing directories
-                    abs_preview_output = os.path.abspath(os.path.join(original_dir, preview_output))
-                    abs_mask_output = os.path.abspath(os.path.join(original_dir, mask_output))
-                    abs_save_dir = os.path.abspath(os.path.join(original_dir, os.path.dirname(mask_output)))
-                    abs_save_file = os.path.abspath(os.path.join(original_dir, f"{base_name}_inpainted_{args.prompt}.mp4"))
+                    # Print memory stats
+                    if torch.cuda.is_available():
+                        allocated = torch.cuda.memory_allocated() / 1024**3
+                        reserved = torch.cuda.memory_reserved() / 1024**3
+                        print(f"  GPU memory - Allocated: {allocated:.2f} GB, Reserved: {reserved:.2f} GB")
+                except Exception as e:
+                    print(f"Warning: Error during memory cleanup: {e}")
 
-                    # Prepare VACE arguments
-                    vace_args = {
-                        'model_name': 'vace-1.3B',
-                        'size': '480p',
-                        'frame_num': min(81, len(video_segments)),  # VACE expects 4n+1 frames
-                        'ckpt_dir': 'models/Wan2.1-VACE-1.3B/',  # Relative to VACE directory
-                        'src_video': abs_preview_output,  # Use absolute path
-                        'src_mask': abs_mask_output,  # Use absolute path
-                        'prompt': args.edit_prompt,
-                        'use_prompt_extend': 'plain',
-                        'base_seed': 2025,
-                        'sample_solver': 'unipc',
-                        'sample_steps': None,  # Will default to 50
-                        'sample_shift': None,  # Will default to 16
-                        'sample_guide_scale': 5.0,
-                        'save_dir': abs_save_dir,  # Use absolute path
-                        'save_file': abs_save_file,  # Use absolute path
-                        'offload_model': None,
-                        'ulysses_size': 1,
-                        'ring_size': 1,
-                        't5_fsdp': False,
-                        't5_cpu': False,
-                        'dit_fsdp': False,
-                        'src_ref_images': None,
-                    }
+                try:
+                    import subprocess
+
+                    # Prepare paths
+                    vace_root = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'VACE')
+                    vace_script = os.path.join(vace_root, 'vace', 'vace_wan_inference.py')
+
+                    # Prepare output paths (absolute)
+                    base_name = args.output.rsplit('.', 1)[0]
+                    abs_preview_output = os.path.abspath(preview_output)
+                    abs_mask_output = os.path.abspath(mask_output)
+                    abs_save_file = os.path.abspath(f"{base_name}_inpainted_{args.prompt}.mp4")
+
+                    # Build VACE command
+                    vace_cmd = [
+                        sys.executable,  # Use same Python interpreter
+                        vace_script,
+                        '--model_name', 'vace-1.3B',
+                        '--size', '480p',
+                        '--frame_num', str(min(81, len(video_segments))),
+                        '--ckpt_dir', 'models/Wan2.1-VACE-1.3B/',
+                        '--src_video', abs_preview_output,
+                        '--src_mask', abs_mask_output,
+                        '--prompt', args.edit_prompt,
+                        '--use_prompt_extend', 'plain',
+                        '--base_seed', '2025',
+                        '--sample_solver', 'unipc',
+                        '--sample_guide_scale', '5.0',
+                        '--save_file', abs_save_file,
+                    ]
 
                     print(f"VACE output will be saved to: {abs_save_file}")
                     print("This may take several minutes depending on your hardware...")
 
-                    # Run VACE inference
-                    result = vace_main(vace_args)
+                    # Print the exact command for debugging
+                    print(f"\nRunning VACE command:")
+                    print(f"  Working directory: {vace_root}")
+                    print(f"  Command: {' '.join(vace_cmd)}")
+                    print()
 
-                    # Change back to original directory
-                    os.chdir(original_dir)
+                    # Run VACE as subprocess from VACE root directory
+                    result = subprocess.run(
+                        vace_cmd,
+                        cwd=vace_root,
+                        capture_output=False,  # Show output in real-time
+                        text=True
+                    )
 
-                    if result and 'out_video' in result:
+                    if result.returncode == 0:
                         print(f"\nVACE inpainting complete!")
-                        print(f"Output video: {result['out_video']}")
+                        print(f"Output video: {abs_save_file}")
                     else:
-                        print("\nVACE inpainting completed (check output directory)")
+                        print(f"\nVACE inference failed with return code {result.returncode}")
 
-                except ImportError as e:
-                    os.chdir(original_dir)  # Make sure to change back
-                    print(f"\nError: Could not import VACE inference module: {e}")
-                    print("Make sure VACE is installed in the VACE/ directory")
                 except Exception as e:
-                    os.chdir(original_dir)  # Make sure to change back
                     print(f"\nError during VACE inference: {e}")
                     import traceback
                     traceback.print_exc()
@@ -1146,7 +1198,23 @@ def main():
         # Save binary mask for potential inpainting use
         if combined_mask is not None and args.edit in ["replace", "remove"]:
             mask_output = f"{base_name}_mask_{args.prompt}.png"
-            mask_image = (combined_mask.astype(np.uint8) * 255)
+
+            # Convert to square/bounding box mask if requested
+            mask_to_save = combined_mask.astype(bool)
+            if args.square_mask:
+                rows = np.any(mask_to_save, axis=1)
+                cols = np.any(mask_to_save, axis=0)
+                if rows.any() and cols.any():
+                    y_min, y_max = np.where(rows)[0][[0, -1]]
+                    x_min, x_max = np.where(cols)[0][[0, -1]]
+
+                    # Create square mask by filling bounding box
+                    H, W = mask_to_save.shape
+                    mask_to_save = np.zeros((H, W), dtype=bool)
+                    mask_to_save[y_min:y_max+1, x_min:x_max+1] = True
+                    print(f"Converted to bounding box mask: ({x_min}, {y_min}) to ({x_max}, {y_max})")
+
+            mask_image = (mask_to_save.astype(np.uint8) * 255)
             cv2.imwrite(mask_output, mask_image)
             print(f"Saved binary mask to {mask_output}")
 

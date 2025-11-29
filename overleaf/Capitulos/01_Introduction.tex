@@ -7,12 +7,12 @@ Semantic segmentation has progressed significantly in recent years, enabling mac
 
 This limitation of closed-vocabulary models has motivated the development of open-vocabulary semantic segmentation. Open-vocabulary approaches bridge the gap between visual perception and human language by leveraging vision-language models such as CLIP (Contrastive Language-Image Pre-training) \cite{radford2021learning}, which learns to represent both text and images in a shared embedding space. These systems can interpret natural language descriptions and perform zero-shot segmentation—that is, segment objects and concepts not seen during training. For instance, a system could process the description "a person walking a dog" and segment both the person and the dog in a zero-shot manner, even without having encountered this specific combination during training.
 
-Furthermore, integrating generative AI models such as Stable Diffusion \cite{rombach2022high} enables modification of images based on segmented objects. This capability supports applications in image editing, where users can describe desired changes ("make the sky blue" or "add a hat to the person"), and the system modifies the image accordingly. In content creation, artists and designers can generate scenes by combining segmented objects from different images or generating new objects based on textual descriptions. Potential applications span diverse domains, including human-computer interaction, augmented reality, and robotics. Figure \ref{fig:system_overview} illustrates the integration of these components—CLIP for vision-language understanding, SAM 2 for precise segmentation, and Stable Diffusion for realistic generation—into a unified system for language-driven image manipulation.
+Furthermore, integrating generative AI models such as Stable Diffusion \cite{rombach2022high} enables modification of images based on segmented objects. This capability supports applications in image editing, where users can describe desired changes ("make the sky blue" or "add a hat to the person"), and the system modifies the image accordingly. In content creation, artists and designers can generate scenes by combining segmented objects from different images or generating new objects based on textual descriptions. Potential applications span diverse domains, including human-computer interaction, augmented reality, and robotics. Figure \ref{fig:system_overview} illustrates the integration of these components—CLIP for vision-language understanding.
 
 \begin{figure}[h]
 \centering
 \includegraphics[width=0.95\textwidth]{Imagenes/1. System Overview Concept.png}
-\caption{Overview of the proposed open-vocabulary semantic segmentation and generative editing system. The system combines vision-language understanding (CLIP), precise segmentation (SAM 2: Segment Anything Model 2), and realistic generation (Stable Diffusion) to enable flexible, language-driven image manipulation.}
+\caption{Overview of the proposed open-vocabulary semantic segmentation and generative editing system. The system combines vision-language understanding, precise segmentation, and realistic generation.}
 \label{fig:system_overview}
 \end{figure}
 
@@ -29,31 +29,11 @@ This thesis tackles the challenge of developing an open-vocabulary semantic segm
 
 \section{Contribution}
 
-This thesis presents a novel approach to open-vocabulary semantic segmentation that achieves both computational efficiency and competitive accuracy on PASCAL VOC 2012. The contributions are organized into a primary algorithmic innovation and several supporting enhancements:
+The core contribution is an intelligent prompting strategy that extracts prompt points from SCLIP's \cite{sclip2024} high-confidence regions to guide SAM2's mask generation. This reduces computational cost by using semantically-informed prompts instead of exhaustive grid sampling, while achieving competitive results on PASCAL VOC 2012. Class labels are assigned directly from SCLIP's predictions, enabling segmentation without labeled training data.
 
-\vspace{0.3cm}
-\noindent\textbf{Primary Contribution:}
+The approach extends to generative editing by integrating Stable Diffusion v2 \cite{rombach2022high} for text-driven image manipulation and WAN 2.1 VACE \cite{vace2025} for video inpainting. For video segmentation, SAM2's temporal tracking propagates masks across frames after SCLIP analyzes only the first frame.
 
-\begin{itemize}
-\item \textbf{CLIP-guided intelligent prompting for SAM2 segmentation:} The core contribution is a novel prompting strategy that extracts intelligent prompt points from SCLIP's \cite{sclip2024} high-confidence regions to guide SAM2's mask generation. This semantic-aware approach achieves a \textbf{massive reduction in computational cost}, using only a bunch of semantically-informed prompt points instead of thousands of uniformly distributed points, while reaching \textbf{competitive mIoU on PASCAL VOC 2012} and outperforming recent training-free open-vocabulary methods such as ITACLIP. The method assigns class labels directly from SCLIP's predictions at each prompt location, avoiding the complexity of majority voting or multi-scale evaluation. This annotation-free approach enables segmentation of both discrete objects and amorphous ``stuff'' classes (sky, road, vegetation) without requiring any labeled training data.
-\item \textbf{Integration with Stable Diffusion for text-driven editing:} The segmentation system is integrated with Stable Diffusion v2 \cite{rombach2022high} to enable text-driven image editing, creating a complete pipeline from language-based semantic understanding to image manipulation. This integration supports practical applications including object removal, replacement, and style transfer.
-\item \textbf{Extension to video segmentation and edition:} The CLIP-guided prompting approach extends to video processing through two capabilities: (1) video segmentation by leveraging SAM2's temporal tracking, with SCLIP-guided analysis performed only on the first frame and SAM2 propagating masks across all frames; (2) text-driven video inpainting using WAN 2.1 VACE \cite{vace2025}, enabling object removal and replacement in videos.
-\end{itemize}
-
-\vspace{0.3cm}
-\noindent\textbf{Secondary Contributions:}
-
-\begin{itemize}
-\item \textbf{Descriptor files for multi-term class representations:} The system incorporates descriptor files that provide multiple textual variations for each class (e.g., ``person in shirt'', ``person in jeans'', ``person wearing glasses''), improving robustness to intra-class appearance variations and enhancing CLIP's ability to match diverse visual manifestations of semantic categories.
-
-\item \textbf{Template strategy optimization:} CLIP requires text prompts to match visual features. Different strategies for generating these prompts—ranging are evaluated (e.g., ``a photo of a [CLASS]'', ``a rendering of a [CLASS]'', ``a close-up of a [CLASS]'') to identify the most effective templates for maximizing segmentation accuracy or inference time.
-
-\item \textbf{Computational optimizations for practical deployment:} Implementation of FP16 mixed precision, \texttt{torch.compile} optimization, and batched prompting enables deployment on consumer hardware (6GB VRAM), making the approach practical for real-world applications.
-
-\item \textbf{Comprehensive evaluation on PASCAL VOC 2012:} The system is rigorously evaluated on PASCAL VOC 2012 across 21 object categories, with detailed per-class analysis and multiple metrics (mIoU, pixel accuracy, F1 score, precision, recall, boundary F1).
-
-\item \textbf{Comparative analysis demonstrating efficiency-accuracy trade-off:} Experimental validation compares the SCLIP-guided prompting approach against pure dense prediction methods (SCLIP, MaskCLIP, ITACLIP), demonstrating that semantic guidance provides quality improvements through SAM2's superior boundary delineation on the PASCAL VOC 2012 benchmark.
-\end{itemize}
+Additional enhancements include descriptor files for handling intra-class appearance variations and template optimization for CLIP feature matching. Evaluation on PASCAL VOC 2012 demonstrates that semantic guidance provides quality improvements through SAM2's boundary delineation compared to pure dense prediction methods.
 
 \section{Thesis Structure}
 

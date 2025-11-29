@@ -216,7 +216,7 @@ def create_comparison_figure(
         ax1 = fig.add_subplot(gs[0, 0])
         ax1.imshow(image)
         ax1.scatter(grid_points[:, 0], grid_points[:, 1],
-                   c='red', s=3, alpha=0.6, marker='.', linewidths=0)
+                   c='red', s=20, alpha=0.6, marker='.', linewidths=0)
         ax1.set_title(
             f'Blind Grid Sampling\n{len(grid_points):,} prompts | ~{estimated_blind_time}s',
             fontsize=16, fontweight='bold', color='darkred', pad=15
@@ -295,10 +295,11 @@ def create_comparison_figure(
         # Left: Blind Grid Sampling
         ax = axes[0]
         ax.imshow(image)
-        ax.scatter(grid_points[:, 0], grid_points[:, 1],
-                  c='red', s=4, alpha=0.6, marker='.', linewidths=0)
+        ax.scatter(grid_points[:, 0], grid_points[:, 1], c='red', 
+                  s=25, alpha=0.9, marker='o',
+                  edgecolors='white', linewidths=2, zorder=10)
         ax.set_title(
-            f'Blind Grid Sampling\n{len(grid_points):,} prompts | ~{estimated_blind_time}s per image',
+            f'Blind Grid Sampling\n{len(grid_points):,} prompts',
             fontsize=16, fontweight='bold', color='darkred', pad=15
         )
         ax.axis('off')
@@ -313,11 +314,11 @@ def create_comparison_figure(
             pt = prompt['point']
             class_idx = prompt['class_idx']
             ax.scatter(pt[0], pt[1], c=[class_colors[class_idx]],
-                      s=120, alpha=0.9, marker='o',
+                      s=25, alpha=0.9, marker='o',
                       edgecolors='white', linewidths=2, zorder=10)
 
         ax.set_title(
-            f'Intelligent SCLIP-Guided Prompting\n{len(intelligent_points)} prompts | ~{estimated_intelligent_time}s per image',
+            f'Intelligent SCLIP-Guided Prompting\n{len(intelligent_points)} prompts',
             fontsize=16, fontweight='bold', color='darkgreen', pad=15
         )
         ax.axis('off')
@@ -333,8 +334,7 @@ def create_comparison_figure(
     # Overall title and summary
     summary_text = (
         f'Efficiency Gain: {prompt_reduction:.1f}% prompt reduction '
-        f'({len(grid_points):,} → {len(intelligent_points)}) | '
-        f'{speedup:.1f}× speedup ({estimated_blind_time}s → {estimated_intelligent_time}s)'
+        f'({len(grid_points):,} → {len(intelligent_points)})'
     )
     fig.text(0.5, 0.02, summary_text, ha='center', fontsize=14, fontweight='bold',
             bbox=dict(boxstyle='round', facecolor='gold', alpha=0.9, edgecolor='black', linewidth=2))
