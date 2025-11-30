@@ -406,18 +406,20 @@ def segment_with_guided_prompts(image, prompts, checkpoint_path=None, model_cfg=
     predictor.set_image(image)
 
     print(f"Generating masks for {len(prompts)} prompts...")
-    results = []
+
+    # Step 1: Generate ALL SAM masks first (no voting yet)
+    all_masks = []
+    all_scores = []
+    all_prompt_classes = []
 
     for i, prompt_info in enumerate(prompts):
         point = prompt_info['point']
         negative_points = prompt_info.get('negative_points', [])
 
         # Convert to numpy array format SAM expects
-        # Combine positive and negative points
         all_coords = [point]
         all_labels = [1]  # 1 = foreground point
 
-        # Add negative points if present
         if negative_points:
             for neg_point in negative_points:
                 all_coords.append(neg_point)
@@ -438,40 +440,162 @@ def segment_with_guided_prompts(image, prompts, checkpoint_path=None, model_cfg=
         mask = masks[best_idx]
         score = scores[best_idx]
 
-        # Assign class using hybrid voting if enabled and data available
-        prompt_class = prompt_info['class_idx']
-        assigned_class = prompt_class
-        correction_info = None
+        all_masks.append(mask)
+        all_scores.append(float(score))
+        all_prompt_classes.append(prompt_info['class_idx'])
 
-        if use_hybrid_voting and seg_map is not None and probs is not None and vocabulary is not None:
-            assigned_class, correction_info = assign_class_hybrid_voting(
-                mask, prompt_class, seg_map, probs, vocabulary
-            )
-
-            # Log corrections for debugging
-            if correction_info is not None:
-                print(f"  [VOTING CORRECTION] Mask {i+1}: "
-                      f"{correction_info['from_name']} → {correction_info['to_name']} "
-                      f"(conf: {correction_info['conf_ratio']:.2f}x, "
-                      f"coverage: {correction_info['coverage']:.1%})")
-
-        results.append({
-            'mask': mask,
-            'class_idx': assigned_class,
-            'class_name': vocabulary[assigned_class] if vocabulary else prompt_info['class_name'],
-            'confidence': prompt_info['confidence'],
-            'sam_score': float(score),
-            'region_size': prompt_info['region_size'],
-            'prompt_point': point,
-            'original_class': prompt_class if correction_info else None,
-            'voting_correction': correction_info
-        })
-
-        if (i + 1) % 10 == 0:
+        if (i + 1) % 50 == 0:
             print(f"  Generated {i + 1}/{len(prompts)} masks...")
+
+    print(f"Generated {len(all_masks)} masks. Applying hybrid voting in batch...")
+
+    # Step 2: Apply hybrid voting to ALL masks at once (MUCH FASTER)
+    assigned_classes = all_prompt_classes
+    correction_infos = [None] * len(all_masks)
+
+    if use_hybrid_voting and seg_map is not None and probs is not None and vocabulary is not None:
+        assigned_classes, correction_infos = assign_class_hybrid_voting_batch(
+            all_masks, all_prompt_classes, seg_map, probs, vocabulary
+        )
+
+        # Log corrections
+        num_corrections = sum(1 for c in correction_infos if c is not None)
+        if num_corrections > 0:
+            print(f"  [VOTING] Made {num_corrections} corrections out of {len(all_masks)} masks")
+            # Show first few corrections as examples
+            shown = 0
+            for i, correction_info in enumerate(correction_infos):
+                if correction_info is not None and shown < 5:
+                    print(f"    Example {shown+1}: {correction_info['from_name']} → {correction_info['to_name']} "
+                          f"(conf: {correction_info['conf_ratio']:.2f}x, coverage: {correction_info['coverage']:.1%})")
+                    shown += 1
+
+    # Step 3: Build results with corrected classes
+    results = []
+    for i, prompt_info in enumerate(prompts):
+        results.append({
+            'mask': all_masks[i],
+            'class_idx': assigned_classes[i],
+            'class_name': vocabulary[assigned_classes[i]] if vocabulary else prompt_info['class_name'],
+            'confidence': prompt_info['confidence'],
+            'sam_score': all_scores[i],
+            'region_size': prompt_info['region_size'],
+            'prompt_point': prompt_info['point'],
+            'original_class': all_prompt_classes[i] if correction_infos[i] else None,
+            'voting_correction': correction_infos[i]
+        })
 
     print(f"Successfully generated {len(results)} masks")
     return results
+
+
+def assign_class_hybrid_voting_batch(masks, prompt_classes, seg_map, probs, vocabulary,
+                                     conf_threshold=1.2, coverage_threshold=0.25, agreement_threshold=0.6):
+    """
+    Batch/vectorized version of hybrid voting for ALL masks at once.
+
+    MUCH FASTER than processing masks one by one.
+
+    Args:
+        masks: List of SAM masks (each is H, W boolean array)
+        prompt_classes: List of class indices from prompts
+        seg_map: CLIP argmax predictions (H, W)
+        probs: CLIP probabilities (H, W, num_classes)
+        vocabulary: List of class names
+        conf_threshold, coverage_threshold, agreement_threshold: Same as single version
+
+    Returns:
+        assigned_classes: List of class indices for each mask
+        correction_infos: List of correction info dicts (or None for each mask)
+    """
+    n_masks = len(masks)
+    assigned_classes = list(prompt_classes)  # Start with prompt classes
+    correction_infos = [None] * n_masks
+
+    if n_masks == 0:
+        return assigned_classes, correction_infos
+
+    # Process all masks in batch
+    for i in range(n_masks):
+        mask = masks[i]
+        prompt_class = prompt_classes[i]
+
+        # Quick check: empty or homogeneous mask
+        mask_bool = mask.astype(bool)
+        if not mask_bool.any():
+            continue
+
+        masked_seg = seg_map[mask_bool]
+        unique_classes = np.unique(masked_seg)
+
+        if len(unique_classes) == 1:
+            continue
+
+        # Calculate average confidence for each class in mask
+        class_confidences = {}
+        class_pixel_counts = {}
+
+        for class_idx in unique_classes:
+            class_pixels_mask = (masked_seg == class_idx)
+            pixel_count = class_pixels_mask.sum()
+
+            # Get coordinates in original image
+            mask_coords = np.argwhere(mask_bool)
+            class_mask_indices = np.where(class_pixels_mask)[0]
+            class_coords = mask_coords[class_mask_indices]
+
+            # Vectorized confidence calculation
+            if len(class_coords) > 0:
+                confidences = probs[class_coords[:, 0], class_coords[:, 1], class_idx]
+                avg_confidence = np.mean(confidences)
+            else:
+                avg_confidence = 0.0
+
+            class_confidences[class_idx] = avg_confidence
+            class_pixel_counts[class_idx] = pixel_count
+
+        if not class_confidences:
+            continue
+
+        # Find winner
+        conf_winner = max(class_confidences.keys(), key=lambda k: class_confidences[k])
+
+        if conf_winner == prompt_class:
+            continue
+
+        # Calculate metrics
+        prompt_conf = class_confidences.get(prompt_class, 0.0)
+        winner_conf = class_confidences[conf_winner]
+
+        if prompt_conf < 1e-6:
+            conf_ratio = float('inf')
+        else:
+            conf_ratio = winner_conf / prompt_conf
+
+        total_pixels = mask_bool.sum()
+        pixel_coverage = class_pixel_counts[conf_winner] / total_pixels
+        agreement_with_prompt = class_pixel_counts.get(prompt_class, 0) / total_pixels
+
+        # Decision
+        should_switch = (
+            conf_ratio > conf_threshold and
+            pixel_coverage > coverage_threshold and
+            agreement_with_prompt < agreement_threshold
+        )
+
+        if should_switch:
+            assigned_classes[i] = conf_winner
+            correction_infos[i] = {
+                'from_class': prompt_class,
+                'to_class': conf_winner,
+                'from_name': vocabulary[prompt_class],
+                'to_name': vocabulary[conf_winner],
+                'conf_ratio': conf_ratio,
+                'coverage': pixel_coverage,
+                'agreement': agreement_with_prompt
+            }
+
+    return assigned_classes, correction_infos
 
 
 def assign_class_hybrid_voting(mask, prompt_class, seg_map, probs, vocabulary,
