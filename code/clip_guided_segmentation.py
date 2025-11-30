@@ -311,8 +311,66 @@ def extract_prompt_points_from_clip(seg_map, probs, vocabulary, min_confidence=0
                             'negative_points': negative_points
                         })
 
-    print(f"\nTotal prompt points extracted: {len(prompts)}")
+    print(f"\nTotal prompt points extracted (before NMS): {len(prompts)}")
     return prompts
+
+
+def apply_nms_to_prompts(prompts, nms_threshold=30, max_prompts_per_class=None):
+    """
+    Apply Non-Maximum Suppression to prompts to remove redundant nearby points.
+
+    Args:
+        prompts: List of prompt dicts with 'point', 'class_idx', 'confidence'
+        nms_threshold: Minimum distance (pixels) between prompts of same class
+        max_prompts_per_class: Maximum prompts to keep per class (keeps highest confidence)
+
+    Returns:
+        Filtered list of prompts
+    """
+    if not prompts:
+        return prompts
+
+    # Group prompts by class
+    prompts_by_class = {}
+    for p in prompts:
+        class_idx = p['class_idx']
+        if class_idx not in prompts_by_class:
+            prompts_by_class[class_idx] = []
+        prompts_by_class[class_idx].append(p)
+
+    # Apply NMS per class
+    filtered_prompts = []
+
+    for class_idx, class_prompts in prompts_by_class.items():
+        # Sort by confidence (highest first)
+        class_prompts = sorted(class_prompts, key=lambda p: p['confidence'], reverse=True)
+
+        # Apply max_prompts_per_class limit
+        if max_prompts_per_class is not None:
+            class_prompts = class_prompts[:max_prompts_per_class]
+
+        # NMS: keep prompts that are far enough from already selected ones
+        selected = []
+        for prompt in class_prompts:
+            px, py = prompt['point']
+
+            # Check distance to all already selected prompts of this class
+            too_close = False
+            for sel in selected:
+                sx, sy = sel['point']
+                dist = np.sqrt((px - sx)**2 + (py - sy)**2)
+
+                if dist < nms_threshold:
+                    too_close = True
+                    break
+
+            if not too_close:
+                selected.append(prompt)
+
+        filtered_prompts.extend(selected)
+
+    print(f"After NMS: {len(filtered_prompts)} prompts (removed {len(prompts) - len(filtered_prompts)} redundant)")
+    return filtered_prompts
 
 
 def segment_with_guided_prompts(image, prompts, checkpoint_path=None, model_cfg=None, device=None,

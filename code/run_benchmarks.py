@@ -291,6 +291,14 @@ def parse_args():
     parser.add_argument('--confidence-weighted-centroid', action='store_true', default=False,
                         help='Use confidence-weighted centroid instead of geometric centroid for prompt placement')
 
+    # Prompt NMS (Non-Maximum Suppression) for removing redundant prompts
+    parser.add_argument('--nms-threshold', type=float, default=30.0,
+                        help='NMS threshold: minimum distance (pixels) between prompts of same class (default: 30)')
+    parser.add_argument('--max-prompts-per-class', type=int, default=None,
+                        help='Maximum prompts to keep per class (keeps highest confidence). None = unlimited')
+    parser.add_argument('--disable-nms', action='store_true', default=False,
+                        help='Disable NMS (Non-Maximum Suppression) for prompts')
+
     # Phase 2C improvements (2025 - confidence sharpening for flat predictions)
     parser.add_argument('--use-confidence-sharpening', action='store_true', default=False,
                         help='Enable confidence sharpening for flat predictions (+5-8%% mIoU, Phase 2C)')
@@ -400,6 +408,15 @@ def segment_with_clip_guided_sam(image, class_names, segmentor, args, profiler=N
             points_per_cluster=args.points_per_cluster,
             negative_points_per_cluster=args.negative_points_per_cluster,
             negative_confidence_threshold=args.negative_confidence_threshold
+        )
+
+    # Apply NMS to remove redundant prompts (unless disabled)
+    if not args.disable_nms and len(prompts) > 0:
+        from clip_guided_segmentation import apply_nms_to_prompts
+        prompts = apply_nms_to_prompts(
+            prompts,
+            nms_threshold=args.nms_threshold,
+            max_prompts_per_class=args.max_prompts_per_class
         )
 
     if len(prompts) == 0:
