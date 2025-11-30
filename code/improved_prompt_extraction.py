@@ -32,17 +32,19 @@ def is_stuff_class(class_name):
 
 
 def extract_prompts_adaptive_threshold(seg_map, probs, vocabulary,
-                                       base_confidence=0.3, min_region_size=100,
-                                       confidence_boost_stuff=0.0, confidence_boost_thing=0.2):
+                                       min_confidence=0.3, min_region_size=100,
+                                       confidence_boost_stuff=0.0, confidence_boost_thing=0.2,
+                                       use_confidence_weighted_centroid=False):
     """
     STRATEGY 1: Adaptive thresholds per class type (EASY TO IMPLEMENT)
 
     Key idea: Use LOWER thresholds for "stuff" classes, HIGHER for "thing" classes.
 
     Args:
-        base_confidence: Base minimum confidence (default 0.3 - lower than before!)
+        min_confidence: Base minimum confidence (default 0.3 - lower than before!)
         confidence_boost_stuff: Added to base for stuff classes (default 0.0 → 0.3 total)
         confidence_boost_thing: Added to base for thing classes (default 0.2 → 0.5 total)
+        use_confidence_weighted_centroid: Use confidence-weighted centroid instead of geometric
 
     Returns:
         List of prompts
@@ -57,16 +59,16 @@ def extract_prompts_adaptive_threshold(seg_map, probs, vocabulary,
         is_stuff = is_stuff_class(class_name)
 
         if is_stuff:
-            min_confidence = base_confidence + confidence_boost_stuff  # 0.3 for stuff
+            threshold = min_confidence + confidence_boost_stuff  # 0.3 for stuff
             strategy = "STUFF"
         else:
-            min_confidence = base_confidence + confidence_boost_thing  # 0.5 for thing
+            threshold = min_confidence + confidence_boost_thing  # 0.5 for thing
             strategy = "THING"
 
         # Get high-confidence regions
         class_mask = (seg_map == class_idx)
         class_confidence = probs[:, :, class_idx]
-        high_conf_mask = (class_mask & (class_confidence > min_confidence))
+        high_conf_mask = (class_mask & (class_confidence > threshold))
 
         # Connected components
         labeled_regions, num_regions = label(high_conf_mask)
@@ -74,7 +76,7 @@ def extract_prompts_adaptive_threshold(seg_map, probs, vocabulary,
         if num_regions == 0:
             continue
 
-        print(f"  {class_name} ({strategy}, thresh={min_confidence:.2f}): {num_regions} regions")
+        print(f"  {class_name} ({strategy}, thresh={threshold:.2f}): {num_regions} regions")
 
         # Extract prompts
         for region_id in range(1, num_regions + 1):
@@ -84,10 +86,17 @@ def extract_prompts_adaptive_threshold(seg_map, probs, vocabulary,
             if region_size < min_region_size:
                 continue
 
-            # Centroid
+            # Centroid (geometric or confidence-weighted)
             y_coords, x_coords = np.where(region_mask)
-            centroid_x = int(x_coords.mean())
-            centroid_y = int(y_coords.mean())
+            if use_confidence_weighted_centroid:
+                # Confidence-weighted centroid: points with higher confidence have more influence
+                region_confidences = class_confidence[y_coords, x_coords]
+                centroid_x = int(np.average(x_coords, weights=region_confidences))
+                centroid_y = int(np.average(y_coords, weights=region_confidences))
+            else:
+                # Geometric centroid (default)
+                centroid_x = int(x_coords.mean())
+                centroid_y = int(y_coords.mean())
             confidence = class_confidence[centroid_y, centroid_x]
 
             prompts.append({
@@ -105,7 +114,8 @@ def extract_prompts_adaptive_threshold(seg_map, probs, vocabulary,
 
 def extract_prompts_confidence_weighted_sampling(seg_map, probs, vocabulary,
                                                  min_confidence=0.2, min_region_size=100,
-                                                 max_prompts_per_region=5):
+                                                 max_prompts_per_region=5,
+                                                 use_confidence_weighted_centroid=False):
     """
     STRATEGY 2: Confidence-weighted sampling (MODERATE COMPLEXITY)
 
@@ -163,9 +173,13 @@ def extract_prompts_confidence_weighted_sampling(seg_map, probs, vocabulary,
             region_confidences = class_confidence[y_coords, x_coords]
 
             if num_prompts == 1:
-                # Just centroid
-                centroid_x = int(x_coords.mean())
-                centroid_y = int(y_coords.mean())
+                # Just centroid (geometric or confidence-weighted)
+                if use_confidence_weighted_centroid:
+                    centroid_x = int(np.average(x_coords, weights=region_confidences))
+                    centroid_y = int(np.average(y_coords, weights=region_confidences))
+                else:
+                    centroid_x = int(x_coords.mean())
+                    centroid_y = int(y_coords.mean())
                 conf = class_confidence[centroid_y, centroid_x]
 
                 prompts.append({
@@ -217,7 +231,8 @@ def extract_prompts_confidence_weighted_sampling(seg_map, probs, vocabulary,
 
 def extract_prompts_density_based(seg_map, probs, vocabulary,
                                    min_confidence=0.2, min_region_size=50,
-                                   grid_resolution=32):
+                                   grid_resolution=32,
+                                   use_confidence_weighted_centroid=False):
     """
     STRATEGY 3: Density-based grid sampling (ADVANCED)
 
@@ -322,7 +337,8 @@ def extract_prompts_density_based(seg_map, probs, vocabulary,
 
 def extract_prompts_prob_map_exploitation(seg_map, probs, vocabulary,
                                            min_confidence=0.2, min_region_size=100,
-                                           top_k_classes=3, prob_threshold_ratio=0.7):
+                                           top_k_classes=3, prob_threshold_ratio=0.7,
+                                           use_confidence_weighted_centroid=False):
     """
     STRATEGY 4: Full probability map exploitation (BEST - RECOMMENDED)
 

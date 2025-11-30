@@ -288,6 +288,8 @@ def parse_args():
                              '  adaptive: Adaptive per-class (stuff vs thing, +3-5%% mIoU)')
     parser.add_argument('--disable-hybrid-voting', action='store_false', dest='use_hybrid_voting', default=True,
                         help='Disable hybrid voting policy (use argmax-only baseline)')
+    parser.add_argument('--confidence-weighted-centroid', action='store_true', default=False,
+                        help='Use confidence-weighted centroid instead of geometric centroid for prompt placement')
 
     # Phase 2C improvements (2025 - confidence sharpening for flat predictions)
     parser.add_argument('--use-confidence-sharpening', action='store_true', default=False,
@@ -377,7 +379,8 @@ def segment_with_clip_guided_sam(image, class_names, segmentor, args, profiler=N
                 seg_map, probs, class_names,
                 strategy=args.improved_strategy,
                 min_confidence=args.min_confidence,
-                min_region_size=args.min_region_size
+                min_region_size=args.min_region_size,
+                use_confidence_weighted_centroid=args.confidence_weighted_centroid
             )
         except ImportError:
             print("[WARNING] improved_prompt_extraction not found, falling back to default")

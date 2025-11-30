@@ -478,6 +478,10 @@ def assign_class_hybrid_voting(mask, prompt_class, seg_map, probs, vocabulary,
         class_confidences[class_idx] = avg_confidence
         class_pixel_counts[class_idx] = pixel_count
 
+    # Handle empty mask case (no valid pixels)
+    if not class_confidences:
+        return assigned_class, None
+
     # Find confidence-weighted winner
     conf_winner = max(class_confidences.keys(), key=lambda k: class_confidences[k])
 
